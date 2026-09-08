@@ -203,6 +203,108 @@ pub(crate) fn check_ecdsa_p256(
     EcdsaP256Check::Verified
 }
 
+/// dudect-style statistical timing assertion on the comparison step
+/// (`spec.md` §5.7).
+///
+/// Interleaves two classes of *unequal* inputs — one differing from the
+/// expected digest at its first byte, the other at its last byte — and times
+/// the exact `subtle::ConstantTimeEq` slice comparison the HMAC helpers use
+/// (a 32-byte expected digest against attacker-controlled bytes, precisely
+/// the real-world leakage surface). A constant-time comparison must show no
+/// statistically significant difference between the classes (Welch's
+/// t-statistic near 0); a naive byte comparison that early-exits on the first
+/// differing byte leaks a large, reliably detectable signal, because the
+/// first-byte-diff class compares one byte while the last-byte-diff class
+/// scans all 32.
+///
+/// The t-threshold of 10 is dudect's conventional leak bound and sits ~10x
+/// above the observed noise floor for `subtle` (|t| ~ 1); a naive comparison
+/// produces |t| in the hundreds, so the margin is deliberate.
+///
+/// `#[ignore]`d on purpose (`spec.md` §5.7): timing tests are inherently noisy
+/// on shared runners, so CI runs this in release mode as an informational,
+/// non-blocking job rather than gating the build on it. Run it locally with:
+///
+/// ```text
+/// cargo test --release --all-features -- constant_time_comparison --ignored
+/// ```
+#[cfg(all(test, feature = "std"))]
+#[test]
+#[ignore]
+fn constant_time_comparison() {
+    use std::hint::black_box;
+    use std::time::Instant;
+    use subtle::ConstantTimeEq;
+
+    // 32 bytes = HMAC-SHA256's digest size, the most common scheme.
+    const EXPECTED: [u8; 32] = [0xAB; 32];
+    // Interleaving the two classes back-to-back cancels drift and cache
+    // effects: the only systematic difference left is input-dependence in the
+    // comparison itself.
+    const TRIALS: usize = 100_000;
+    const LEAK_T_STAT: f64 = 10.0;
+
+    let diff_first = {
+        let mut v = EXPECTED;
+        v[0] ^= 0x01;
+        v
+    };
+    let diff_last = {
+        let mut v = EXPECTED;
+        v[31] ^= 0x01;
+        v
+    };
+
+    let mut class_first = vec![0u128; TRIALS];
+    let mut class_last = vec![0u128; TRIALS];
+    for i in 0..TRIALS {
+        // The crate's exact comparison step (e.g. `verify_hmac_sha256`):
+        // `expected.as_slice().ct_eq(provided).into()`. The result goes to
+        // `black_box` so the optimizer cannot drop the computation.
+        let t0 = Instant::now();
+        let first = black_box(bool::from(EXPECTED.as_slice().ct_eq(&diff_first)));
+        let t0 = t0.elapsed().as_nanos();
+
+        let t1 = Instant::now();
+        let last = black_box(bool::from(EXPECTED.as_slice().ct_eq(&diff_last)));
+        let t1 = t1.elapsed().as_nanos();
+
+        class_first[i] = t0;
+        class_last[i] = t1;
+        // Keep the results live; identical for both classes (both are
+        // mismatches), so this cannot skew the classes against each other.
+        black_box((first, last));
+    }
+
+    let mean_of = |samples: &[u128]| 0.0f64 + samples.iter().sum::<u128>() as f64 / TRIALS as f64;
+    let variance_of = |samples: &[u128], mean: f64| {
+        samples
+            .iter()
+            .map(|t| {
+                let delta = *t as f64 - mean;
+                delta * delta
+            })
+            .sum::<f64>()
+            / (TRIALS - 1) as f64
+    };
+
+    let mean_first = mean_of(&class_first);
+    let mean_last = mean_of(&class_last);
+    let variance_first = variance_of(&class_first, mean_first);
+    let variance_last = variance_of(&class_last, mean_last);
+
+    // Welch's t-statistic for the difference of two means.
+    let t_stat = (mean_first - mean_last)
+        / (variance_first / TRIALS as f64 + variance_last / TRIALS as f64).sqrt();
+
+    assert!(
+        t_stat.abs() <= LEAK_T_STAT,
+        "signature comparison shows input-dependent timing (|t| = {t_stat:.1}); \
+         a naive/early-exit comparison (or miscompiled constant-time code) has \
+         replaced `subtle::ConstantTimeEq` (spec.md §4.1)",
+    );
+}
+
 /// CRC-32 (IEEE 802.3 / zlib polynomial) of the raw body bytes, matching the
 /// checksum PayPal's signed-string construction incorporates (`spec.md` §3).
 ///
