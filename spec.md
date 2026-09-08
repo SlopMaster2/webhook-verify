@@ -604,9 +604,10 @@ A provider implementation is not mergeable until it has:
    comparison between two classes of unequal inputs (first-byte vs last-byte
    difference), reporting Welch's t-statistic against a threshold of 10 —
    ~10x the observed noise floor for constant-time code, while a leaked
-   early-exit comparison produces |t| in the hundreds. `#[ignore]`d and run
-   from CI in release mode as an informational job
-   (`.github/workflows/ci.yml`).*
+   early-exit comparison produces |t| in the hundreds. `#[ignore]`d because
+   timing tests are noisy on shared runners; run it locally in release mode
+   with `cargo test --release --all-features -- constant_time_comparison
+   --ignored`. Running it as an informational CI job is tracked separately.*
 
 ---
 
