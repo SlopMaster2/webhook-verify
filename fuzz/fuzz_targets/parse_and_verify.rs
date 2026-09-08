@@ -24,6 +24,9 @@ const IMPLEMENTED: &[Provider] = &[
     Provider::Slack,
     Provider::Linear,
     Provider::Dropbox,
+    // Xero is a single-header raw-body HMAC (base64); arbitrary header bytes
+    // exercise its base64 parsing path and empty-header rejection.
+    Provider::Xero,
     // Square needs VerifyOptions::request_url to get past its context check
     // and into the signature path.
     Provider::Square,

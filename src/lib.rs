@@ -50,6 +50,7 @@
 //! | Linear | HMAC-SHA256, `linear-signature` |
 //! | Zoom | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` |
+//! | Xero | HMAC-SHA256, base64, `x-xero-signature` |
 //! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, ...) |
 //! | Custom | User-supplied HMAC scheme via [`Provider::Custom`] |
 //!
