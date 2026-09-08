@@ -318,6 +318,10 @@ before the body is read, but verification requires those bytes.
 ## Security notes
 
 - All signature comparisons use constant-time equality (`subtle::ConstantTimeEq`).
+- A dudect-style statistical timing assertion on the comparison step is
+  provided (spec §5.7) but `#[ignore]`d due to runner noise; run it locally
+  with `cargo test --release --all-features -- constant_time_comparison
+  --ignored`.
 - Timestamp-based replay protection is enabled by default wherever the
   provider supports it (`VerifyOptions::max_age`, default 5 minutes).
 - This crate does not log secrets, request bodies, or computed signatures
