@@ -20,6 +20,7 @@ mod square;
 mod standard_webhooks;
 mod stripe;
 mod twilio;
+mod xero;
 mod zoom;
 
 pub use custom::{CustomScheme, Encoding, HashAlg};
@@ -82,6 +83,8 @@ pub enum Provider {
     Linear,
     /// Zoom (`X-Zm-Signature`, HMAC-SHA256 with timestamp).
     Zoom,
+    /// Xero (`x-xero-signature`, base64-encoded HMAC-SHA256 over the raw body).
+    Xero,
     /// Dropbox (`X-Dropbox-Signature`, HMAC-SHA256 over the raw body).
     Dropbox,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
@@ -107,6 +110,7 @@ impl fmt::Display for Provider {
             Provider::SendGrid => f.write_str("SendGrid"),
             Provider::Linear => f.write_str("Linear"),
             Provider::Zoom => f.write_str("Zoom"),
+            Provider::Xero => f.write_str("Xero"),
             Provider::Dropbox => f.write_str("Dropbox"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
@@ -141,6 +145,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         }
         Provider::Linear => vec![linear::SIGNATURE_HEADER],
         Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
+        Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -223,6 +228,7 @@ pub fn verify(
         }
         Provider::Twilio => twilio::verify(headers, raw_body, secret, &options),
         Provider::Dropbox => dropbox::verify(headers, raw_body, secret, &options),
+        Provider::Xero => xero::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
         #[cfg(not(feature = "paypal"))]
@@ -663,6 +669,7 @@ mod tests {
         assert_eq!(Provider::SendGrid.to_string(), "SendGrid");
         assert_eq!(Provider::Linear.to_string(), "Linear");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
+        assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 

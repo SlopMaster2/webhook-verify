@@ -97,6 +97,7 @@ hand-copied signing-string logic to get wrong.
 | SendGrid | ECDSA P-256 over `timestamp.body`, public key via `VerifyOptions::verifying_material` (needs `sendgrid` feature) | ✅ |
 | Zoom | HMAC-SHA256, `v0=` scheme, `x-zm-signature` + timestamp | ✅ |
 | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` | ✅ |
+| Xero | HMAC-SHA256, base64, `x-xero-signature` | ✅ |
 | Standard Webhooks spec (Svix, Clerk, Resend, ...) | HMAC-SHA256, `webhook-signature` (`v1,` base64, rotation list) + replay window | ✅ |
 | Custom | User-supplied HMAC scheme via `Provider::Custom(..)` (SHA-256/SHA-1/SHA-512, hex/base64, optional prefix + timestamp replay window) | ✅ |
 

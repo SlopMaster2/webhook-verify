@@ -48,6 +48,7 @@ pub enum Provider {
     SendGrid,
     Linear,
     Zoom,
+    Xero,
     Dropbox,
     StandardWebhooks,
     Custom(CustomScheme),
@@ -513,6 +514,31 @@ events") and Zoom's official sample app
   against locally constructed, deterministic vectors over exactly the
   documented construction (the vector's timestamp mirrors the docs' example
   headers). Replace them if Zoom ever publishes fixed vectors.
+
+### Xero
+
+Source: <https://developer.xero.com/documentation/best-practices/data-integrity/overview>
+("Webhooks — Xero Developer": "If the payload is hashed using HMACSHA256 with
+your webhook signing key and base64 encoded, it should match the signature in
+the header"), <https://developer.xero.com/documentation/guides/webhooks/overview/>
+(the `x-xero-signature` header), and the reference implementation in Xero's
+official sample app
+(<https://github.com/XeroAPI/xero-node-oauth2-app/blob/master/src/app.ts>).
+
+- Header: `x-xero-signature: <base64_hmac>`
+- Signed string: raw body bytes, unmodified
+- Algorithm: HMAC-SHA256, base64-encoded (standard alphabet with padding)
+- Key: the webhook signing key as a plain UTF-8 string (not decoded), matching
+  Xero's official sample app (`crypto.createHmac('sha256', WEBHOOK_KEY)`).
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Shopify/Dropbox/Linear.
+- Test-vector provenance: Xero's docs describe the construction and publish a
+  verbatim "Intent to Receive" example payload but no byte-exact example
+  signature, so the implementation is validated against locally constructed,
+  deterministic vectors over the documented ITR payload and exactly the
+  documented construction (plus the same empty/unicode boundary cases as the
+  other local-vector providers). Replace them if Xero ever publishes fixed
+  vectors.
 
 ### Standard Webhooks spec
 
