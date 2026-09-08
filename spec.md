@@ -709,9 +709,10 @@ A provider implementation is not mergeable until it has:
   [`VerifyError`] does not implement `std::error::Error`. Callers on
   bare-metal/wasm targets supply their own [`Clock`] for timestamped
   (replay-protected) providers; a missing clock reads 0 and fail-closes replay
-  checks. Remaining work: a CI job (needs `.github/workflows/` write access) to
-  keep `--target wasm32-unknown-unknown --no-default-features` from
-  regressing.*
+  checks. The wasm regression job ships in CI
+  (`.github/workflows/ci.yml`: `cargo build --no-default-features --features
+  sendgrid,paypal --target wasm32-unknown-unknown`), so this configuration
+  cannot silently regress.*
 - **Provider promotion criteria.** A `CustomScheme` recipe gets promoted to
   a first-class `Provider` variant once it has (a) official test vectors,
   (b) at least one external user request or contribution, and (c) no open

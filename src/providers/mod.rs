@@ -606,6 +606,47 @@ mod tests {
         );
     }
 
+    /// Length in hex characters of a 64-byte Ed25519 signature (as signed over
+    /// `{timestamp}{body}` by Discord's scheme).
+    const DISCORD_SIGNATURE_LEN_HEX: usize = 128;
+
+    #[test]
+    fn verify_any_returns_first_invalid_secret_when_every_secret_is_garbled() {
+        // spec.md §2.1 / verify_any docs: `InvalidSecret` is *secret-specific*,
+        // so a rotation slice whose keys are all unusable must report the first
+        // such rejection as an operator-configuration error, not a forgery.
+        // Discord validates the public key's format before any signature work,
+        // which cleanly exercises this branch with well-formed headers.
+        let headers: Vec<(String, String)> = vec![
+            (
+                "X-Signature-Ed25519".to_string(),
+                "a".repeat(DISCORD_SIGNATURE_LEN_HEX), // valid-shaped hex signature
+            ),
+            (
+                "X-Signature-Timestamp".to_string(),
+                "1234567890".to_string(),
+            ),
+        ];
+
+        // First key: not hex at all. Second key: hex that decodes to the wrong
+        // length. Both reject as InvalidSecret, with distinct reasons — so the
+        // returned reason proves the *first* garbled key wins.
+        let secrets = [Secret::new("not-hex-!"), Secret::new("deadbeef")];
+
+        assert_eq!(
+            verify_any(
+                Provider::Discord,
+                &headers,
+                b"{}",
+                &secrets,
+                Default::default()
+            ),
+            Err(VerifyError::InvalidSecret {
+                reason: "public key is not valid hexadecimal"
+            })
+        );
+    }
+
     #[test]
     fn provider_display_names() {
         use super::CustomScheme;
