@@ -850,8 +850,8 @@ mod tests {
     fn default_no_limit_still_works() {
         // Ensure the default (no max_body_size) path is unchanged.
         block_on(async {
-            let svc =
-                VerifyLayer::<Bytes>::new(Provider::GitHub, Secret::new(GITHUB_SECRET)).layer(EchoLen);
+            let svc = VerifyLayer::<Bytes>::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .layer(EchoLen);
             let response = svc
                 .oneshot(github_request(GITHUB_BODY))
                 .await
