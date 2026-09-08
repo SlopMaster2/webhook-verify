@@ -1,6 +1,8 @@
 # webhook-verify
 
-[![CI](https://github.com/AIUser91/useful-rust-crate-1/actions/workflows/ci.yml/badge.svg)](https://github.com/AIUser91/useful-rust-crate-1/actions/workflows/ci.yml)
+[![CI](https://github.com/SlopMaster2/webhook-verify/actions/workflows/ci.yml/badge.svg)](https://github.com/SlopMaster2/webhook-verify/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/webhook-verify)](https://crates.io/crates/webhook-verify)
+[![docs.rs](https://img.shields.io/docsrs/webhook-verify)](https://docs.rs/webhook-verify)
 
 **One function to verify inbound webhooks from any provider.**
 
@@ -338,6 +340,26 @@ except where required to fix a genuine security defect, which will be
 called out explicitly in the changelog and a security advisory.
 
 MSRV: **1.85** (first Rust release with edition 2024 support), checked in CI.
+
+## Releasing
+
+To publish a new version to crates.io:
+
+1. Bump `version` in `Cargo.toml` (semver rules above) and commit.
+2. Build and inspect the exact tarball that crates.io would host:
+
+   ```sh
+   cargo package --allow-dirty && cargo publish
+   ```
+
+   (`CARGO_REGISTRY_TOKEN` must be set in your crates.io session.)
+3. Tag the release commit and push it, which documents the release point
+   and gives consumers a stable reference:
+
+   ```sh
+   git tag v0.2.0
+   git push origin master --tags
+   ```
 
 ## Contributing
 
