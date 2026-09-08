@@ -12,12 +12,10 @@ documentation = "https://docs.rs/webhook-verify"
 readme = "README.md"
 keywords = [
     "webhook",
-    "webhooks",
     "verification",
     "signature",
     "hmac",
     "ed25519",
-    "security",
 ]
 categories = ["web-programming", "cryptography", "authentication"]
 # Keep the crates.io tarball to what a downstream consumer needs: source,
