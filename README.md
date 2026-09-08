@@ -209,9 +209,27 @@ then deserialize freely. Verification failures never reach your handler:
 
 | Failure class | Status |
 |---|---|
+| Body exceeds `max_body_size` limit | `413 Payload Too Large` |
 | Missing / malformed signature headers | `400 Bad Request` |
 | Signature mismatch / stale timestamp | `401 Unauthorized` |
 | Operator misconfiguration | `500 Internal Server Error` |
+
+By default the body is buffered with no size limit. To prevent a malicious
+client from streaming an arbitrarily large payload (a memory/CPU amplification
+vector), configure an optional maximum body size with
+`VerifyLayer::with_max_body_size(bytes)`:
+
+```rust
+use webhook_verify::{Provider, Secret};
+use webhook_verify::tower::VerifyLayer;
+
+// 2 MiB limit, matching actix-web's default extractor bound.
+let layer = VerifyLayer::new(Provider::Stripe, secret)
+    .with_max_body_size(2 * 1024 * 1024);
+```
+
+Requests whose body exceeds the limit are rejected with `413 Payload Too
+Large` before any signature verification work.
 
 Plain tower stacks receive `Request<Bytes>`; axum users get their own body
 type back automatically via type inference:

@@ -22,11 +22,17 @@
 //!   are not ambiguous and verify normally against the first value.
 //! - **Fail closed**: every verification failure produces an empty-bodied
 //!   error response; the request never reaches the inner service.
+//! - **Optional body size limit** (DoS hardening): use
+//!   [`VerifyLayer::with_max_body_size`] to reject oversized request bodies
+//!   with `413 Payload Too Large` before any signature work, preventing a
+//!   malicious client from forcing the server to buffer and HMAC an
+//!   arbitrarily large payload.
 //!
 //! # Status codes
 //!
-//! | `VerifyError` class | Status |
+//! | Class | Status |
 //! |---|---|
+//! | Body exceeds [`VerifyLayer::with_max_body_size`] limit (not a `VerifyError`) | `413 Payload Too Large` |
 //! | `MissingHeader`, `MalformedHeader`, `BadEncoding` (malformed request) | `400 Bad Request` |
 //! | `SignatureMismatch`, `TimestampOutOfTolerance` (auth signals) | `401 Unauthorized` |
 //! | `UnsupportedProvider`, `InvalidSecret`, `MissingContext` (operator misconfiguration) | `500 Internal Server Error` |
@@ -154,10 +160,16 @@ impl fmt::Debug for Config {
 /// and framework notes. The type parameter selects the body type the inner
 /// service receives after buffering (default [`Bytes`]); anything convertible
 /// from `Bytes` works, e.g. `axum::body::Body`.
+///
+/// Use [`VerifyLayer::with_max_body_size`] to reject oversized request bodies
+/// (`413 Payload Too Large`) before any signature verification work. This
+/// prevents a malicious client from forcing the server to buffer an arbitrarily
+/// large payload and compute HMACs over it.
 #[must_use]
 #[derive(Clone, Debug)]
 pub struct VerifyLayer<B = Bytes> {
     config: Config,
+    max_body_size: Option<usize>,
     _body: PhantomData<B>,
 }
 
@@ -176,8 +188,34 @@ impl<B> VerifyLayer<B> {
                 secret: Arc::new(secret),
                 options: Arc::new(options),
             },
+            max_body_size: None,
             _body: PhantomData,
         }
+    }
+
+    /// Sets an optional maximum body size in bytes.
+    ///
+    /// When set, requests whose body exceeds this limit are rejected with
+    /// `413 Payload Too Large` *before* any signature verification work,
+    /// preventing a malicious client from forcing the server to buffer an
+    /// arbitrarily large payload and compute HMACs over it.
+    ///
+    /// When `None` (the default), the body is buffered without a size limit.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use bytes::Bytes;
+    /// use webhook_verify::tower::VerifyLayer;
+    /// use webhook_verify::{Provider, Secret};
+    ///
+    /// // 2 MiB limit, matching actix-web's default extractor bound.
+    /// let layer: VerifyLayer<Bytes> = VerifyLayer::new(Provider::GitHub, Secret::new("secret"))
+    ///     .with_max_body_size(2 * 1024 * 1024);
+    /// ```
+    pub fn with_max_body_size(mut self, max: usize) -> Self {
+        self.max_body_size = Some(max);
+        self
     }
 }
 
@@ -190,6 +228,7 @@ impl<S, B> Layer<S> for VerifyLayer<B> {
         VerifyMiddleware {
             inner,
             config: self.config.clone(),
+            max_body_size: self.max_body_size,
             _body: PhantomData,
         }
     }
@@ -200,6 +239,7 @@ impl<S, B> Layer<S> for VerifyLayer<B> {
 pub struct VerifyMiddleware<S, B = Bytes> {
     inner: S,
     config: Config,
+    max_body_size: Option<usize>,
     _body: PhantomData<B>,
 }
 
@@ -208,6 +248,7 @@ impl<S: Clone, B> Clone for VerifyMiddleware<S, B> {
         Self {
             inner: self.inner.clone(),
             config: self.config.clone(),
+            max_body_size: self.max_body_size,
             _body: PhantomData,
         }
     }
@@ -218,6 +259,7 @@ impl<S: fmt::Debug, B> fmt::Debug for VerifyMiddleware<S, B> {
         f.debug_struct("VerifyMiddleware")
             .field("inner", &self.inner)
             .field("config", &self.config)
+            .field("max_body_size", &self.max_body_size)
             .finish()
     }
 }
@@ -286,6 +328,7 @@ where
 
         let mut inner = self.inner.clone();
         let config = self.config.clone();
+        let max_body_size = self.max_body_size;
 
         Box::pin(async move {
             let (parts, body) = req.into_parts();
@@ -299,6 +342,20 @@ where
                 // outcome — surfaced per tower conventions.
                 Err(error) => return Err(error.into()),
             };
+
+            // DoS hardening: reject oversized bodies before any signature
+            // work. CPU amplification (HMAC over an arbitrarily large body)
+            // is the primary vector this defends against; a streaming body-
+            // size guard (e.g. `http_body_util::Limited`) would additionally
+            // bound memory, but this crate's verification semantics require
+            // the full raw bytes, so the body must be collected regardless.
+            if let Some(limit) = max_body_size {
+                if raw_body.len() > limit {
+                    let mut response = Response::new(ResB::default());
+                    *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
+                    return Ok(response);
+                }
+            }
 
             if let Err(error) = crate::verify(
                 config.provider,
@@ -691,5 +748,138 @@ mod tests {
         let debug = format!("{layer:?}");
         assert!(!debug.contains("super-secret-hmac-key"));
         assert!(!debug.contains("internal.example"));
+    }
+
+    // --- max_body_size (DoS hardening) ------------------------------------
+
+    #[test]
+    fn body_within_limit_is_accepted() {
+        block_on(async {
+            // GITHUB_BODY is 13 bytes; limit is 1024.
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(1024)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(github_request(GITHUB_BODY))
+                .await
+                .unwrap_or_else(|error| panic!("verification should pass: {error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+        });
+    }
+
+    #[test]
+    fn body_exceeding_limit_is_rejected_with_413() {
+        block_on(async {
+            // GITHUB_BODY is 13 bytes; limit is 10 — body exceeds limit.
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(10)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(github_request(GITHUB_BODY))
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        });
+    }
+
+    #[test]
+    fn body_exactly_at_limit_is_accepted() {
+        // Construct a body whose length matches the limit exactly.
+        let body = vec![0u8; 13];
+        let sig = {
+            use hmac::{Hmac, KeyInit, Mac};
+            use sha2::Sha256;
+            type H = Hmac<Sha256>;
+            let mut mac = H::new_from_slice(GITHUB_SECRET.as_bytes())
+                .unwrap_or_else(|_| unreachable!("valid key"));
+            mac.update(&body);
+            let result = mac.finalize().into_bytes();
+            format!("sha256={}", hex::encode(result))
+        };
+
+        let request = Request::builder()
+            .header("X-Hub-Signature-256", sig)
+            .body(TestBody::new(Bytes::from(body)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+
+        block_on(async {
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(13)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("verification should pass: {error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+        });
+    }
+
+    #[test]
+    fn body_one_byte_over_limit_is_rejected() {
+        // Construct a body that is one byte over the limit.
+        let body = vec![0u8; 14];
+        let sig = {
+            use hmac::{Hmac, KeyInit, Mac};
+            use sha2::Sha256;
+            type H = Hmac<Sha256>;
+            let mut mac = H::new_from_slice(GITHUB_SECRET.as_bytes())
+                .unwrap_or_else(|_| unreachable!("valid key"));
+            mac.update(&body);
+            let result = mac.finalize().into_bytes();
+            format!("sha256={}", hex::encode(result))
+        };
+
+        let request = Request::builder()
+            .header("X-Hub-Signature-256", sig)
+            .body(TestBody::new(Bytes::from(body)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+
+        block_on(async {
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(13)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        });
+    }
+
+    #[test]
+    fn default_no_limit_still_works() {
+        // Ensure the default (no max_body_size) path is unchanged.
+        block_on(async {
+            let svc =
+                VerifyLayer::<Bytes>::new(Provider::GitHub, Secret::new(GITHUB_SECRET)).layer(EchoLen);
+            let response = svc
+                .oneshot(github_request(GITHUB_BODY))
+                .await
+                .unwrap_or_else(|error| panic!("verification should pass: {error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+        });
+    }
+
+    #[test]
+    fn zero_limit_rejects_nonempty_body() {
+        // A zero limit means no non-empty body is accepted.
+        block_on(async {
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(0)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(github_request(GITHUB_BODY)) // 13 bytes
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        });
+    }
+
+    #[test]
+    fn debug_output_never_contains_secrets_with_max_body_size() {
+        let layer = VerifyLayer::<Bytes>::new(Provider::GitHub, Secret::new("super-secret-key"))
+            .with_max_body_size(1024);
+        let debug = format!("{layer:?}");
+        assert!(!debug.contains("super-secret-key"));
     }
 }
