@@ -1,0 +1,7 @@
+[build]
+# cargo-fuzz defaults to `x86_64-unknown-linux-musl`, whose statically-linked
+# libc conflicts with the address sanitizer:
+#   error: sanitizer is incompatible with statically linked libc
+# Pin every fuzz build/run to the host (gnu) target regardless of what the
+# runner's cargo picks as the default.
+target = "x86_64-unknown-linux-gnu"

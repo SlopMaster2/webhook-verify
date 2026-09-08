@@ -1,0 +1,43 @@
+name: Scheduled OpenCode
+on:
+  schedule:
+    - cron: "43 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: scheduled-opencode
+  cancel-in-progress: false
+
+jobs:
+  opencode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load prompt from file
+        id: load_prompt
+        run: |
+          delim="EOF_$(openssl rand -hex 8)"
+          echo "PROMPT_TEXT<<$delim" >> "$GITHUB_ENV"
+          cat .opencode/prompt.md >> "$GITHUB_ENV"
+          echo "$delim" >> "$GITHUB_ENV"
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - uses: anomalyco/opencode/github@latest
+        with:
+          use_github_token: true
+          model: ${{ vars.MODEL }}
+          prompt: ${{ env.PROMPT_TEXT }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}

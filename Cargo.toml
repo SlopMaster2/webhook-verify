@@ -1,0 +1,102 @@
+[package]
+name = "webhook-verify"
+version = "0.1.0"
+edition = "2024"
+# First release with edition 2024 support; verified by the CI matrix.
+rust-version = "1.85"
+description = "One function to verify inbound webhook signatures from major providers"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/AIUser91/useful-rust-crate-1"
+repository = "https://github.com/AIUser91/useful-rust-crate-1"
+documentation = "https://docs.rs/webhook-verify"
+readme = "README.md"
+keywords = [
+    "webhook",
+    "webhooks",
+    "verification",
+    "signature",
+    "hmac",
+    "ed25519",
+    "security",
+]
+categories = ["web-programming", "cryptography", "authentication"]
+# Keep the crates.io tarball to what a downstream consumer needs: source,
+# tests, licenses, and user-facing docs. CI definitions, the opencode agent
+# tooling, and contributor/agent instructions are repo-internal and excluded
+# on purpose. (The root `Cargo.lock` stays regardless — cargo always ships it
+# for the root package; it is harmless to dependents of a library.)
+exclude = [
+    "/fuzz",
+    "/.github",
+    "/.opencode",
+    "/opencode.jsonc",
+    "/AGENTS.md",
+]
+
+# build all-features docs on docs.rs so the feature-gated provider (sendgrid,
+# paypal) and adapter (tower, actix) module docs are browsable there — the
+# default-features-only build would otherwise hide them (issue #65).
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+actix-web = { version = "4", optional = true, default-features = false }
+base64 = "0.23.1"
+bytes = { version = "1.12.1", optional = true }
+crc32fast = { version = "1.5.1", default-features = false, optional = true }
+ed25519-dalek = "3.0.0"
+hex = "0.4.3"
+hmac = "0.13.0"
+http = { version = "1.5.0", optional = true }
+http-body = { version = "1.1.0", optional = true }
+http-body-util = { version = "0.1.5", optional = true }
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "pkcs8"], optional = true }
+rsa = { version = "0.9.10", default-features = false, features = ["sha2"], optional = true }
+sha1 = "0.11.0"
+sha2 = "0.11.0"
+subtle = "2.6.1"
+tower-layer = { version = "0.3.3", optional = true }
+tower-service = { version = "0.3.3", optional = true }
+x509-parser = { version = "0.18.1", default-features = false, optional = true }
+
+[features]
+default = ["std"]
+# The core verification path is `no_std + alloc` compatible (spec.md §1).
+# Building without this feature drops the wall-clock dependency: the
+# injectable `Clock::now()` returns unix seconds directly and `VerifyError`
+# does not implement `std::error::Error`. `SystemClock` is only available
+# under `std` (there is no wall clock in the no_std ecosystem); callers on
+# bare-metal/wasm targets supply their own `Clock` for timestamped
+# (replay-protected) providers.
+std = []
+# Enables the SendGrid provider: ECDSA P-256 verification (`spec.md` §3).
+# Pulls in `p256` (optional dependency, `no_std`-compatible build). Only the
+# verification path is used; no key generation and no network access.
+sendgrid = ["dep:p256"]
+http = ["dep:http"]
+# actix-web 4 adapter: extractor + header bridge (actix's internal `http`
+# 0.2 types need their own impl of the crate's `HeaderMap` trait). Contains
+# no verification logic of its own.
+actix = ["dep:actix-web"]
+# Generic `tower::Layer`/`Service` middleware (works with axum routers too).
+# Enables the `http` *feature* (not just the dependency) so the
+# `HeaderMap` impl for `http::HeaderMap` is compiled in.
+tower = [
+    "http",
+    "dep:bytes",
+    "dep:http-body",
+    "dep:http-body-util",
+    "dep:tower-layer",
+    "dep:tower-service",
+]
+# Enables the PayPal provider: certificate-based RSA verification (`spec.md` §3, §7).
+# Pulls in `rsa`, `x509-parser`, and `crc32fast` (optional dependencies).
+# Only the verification path is used; no key generation and no network access.
+paypal = ["dep:rsa", "dep:x509-parser", "dep:crc32fast"]
+
+[dev-dependencies]
+futures-executor = "0.3.34"
+tower = { version = "0.5.3", features = ["util"] }
+# Test-only: the `macros` feature provides `#[actix_web::test]`; the library
+# dependency itself is default-feature-free, so this only widens test builds.
+actix-web = { version = "4", features = ["macros"] }
