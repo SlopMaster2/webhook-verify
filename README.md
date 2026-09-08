@@ -25,7 +25,7 @@ let result = verify(
     Provider::Stripe,
     &headers,        // anything implementing HeaderMap
     raw_body,         // &[u8] — MUST be the untouched request body
-    &Secret::new(std::env::var("STRIPE_WEBHOOK_SECRET").expect("STRIPE_WEBHOOK_SECRET must be set")),
+    &Secret::new("whsec_..."),  // your real webhook signing secret
     Default::default(),
 );
 
@@ -226,7 +226,7 @@ use webhook_verify::{Provider, Secret};
 use webhook_verify::tower::VerifyLayer;
 
 // 2 MiB limit, matching actix-web's default extractor bound.
-let layer = VerifyLayer::new(Provider::Stripe, secret)
+let layer = VerifyLayer::new(Provider::Stripe, Secret::new("whsec_..."))
     .with_max_body_size(2 * 1024 * 1024);
 ```
 
@@ -240,10 +240,10 @@ type back automatically via type inference:
 use webhook_verify::{Provider, Secret};
 use webhook_verify::tower::VerifyLayer;
 
-let layer = VerifyLayer::new(Provider::Stripe, secret);
+let layer = VerifyLayer::new(Provider::Stripe, Secret::new("whsec_..."));
 
 // Plain tower: inner service takes http::Request<Bytes>.
-let svc = layer.clone().layer(my_handler_service);
+// let svc = layer.clone().layer(my_handler_service);
 
 // Axum: same layer, inferred as axum::body::Body.
 // Router::new()
