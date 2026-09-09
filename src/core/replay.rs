@@ -116,6 +116,12 @@ pub(crate) fn parse_rfc3339_timestamp(
     if hour > 23 || minute > 59 || second > 60 {
         return Err(malformed());
     }
+    // RFC 3339 §5.7 allows second 60 only as a leap second, expressed at the
+    // end of the local day (`23:59:60`); a `60` at any other clock position
+    // is not a valid calendar time and must fail closed.
+    if second == 60 && (hour != 23 || minute != 59) {
+        return Err(malformed());
+    }
 
     // Optional fractional seconds: `.digits` — truncated, never rounded.
     let mut i = 19;
@@ -279,6 +285,26 @@ mod tests {
             assert_eq!(
                 parse_header("2024-04-31T00:00:00Z"),
                 malformed("2024-04-31")
+            );
+        }
+
+        #[test]
+        fn leap_second_only_at_end_of_day() {
+            // RFC 3339 §5.7 allows second 60 only as a leap second expressed
+            // at the end of the local day (23:59:60); 05:19:60 is not a valid
+            // calendar time.
+            assert_eq!(parse_header("2024-05-16T23:59:60Z"), Ok(1_715_904_000));
+            assert_eq!(
+                parse_header("2024-05-16T05:19:60Z"),
+                malformed("2024-05-16T05:19:60Z")
+            );
+            assert_eq!(
+                parse_header("2024-05-16T23:58:60Z"),
+                malformed("2024-05-16T23:58:60Z")
+            );
+            assert_eq!(
+                parse_header("2024-05-16T00:00:60+01:00"),
+                malformed("2024-05-16T00:00:60+01:00")
             );
         }
 
