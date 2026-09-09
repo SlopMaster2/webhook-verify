@@ -201,6 +201,12 @@ Without `std`, [`Clock::now`] returns unix seconds directly, `SystemClock` is
 unavailable, and `VerifyError` does not implement `std::error::Error` — see
 `spec.md` §7.
 
+The `no_std + alloc` guarantee is scoped to the core verification path: the
+`tower` and `actix` adapters are async framework glue and **imply** the `std`
+feature, so enabling either on a `default-features = false` build still
+compiles (it just pulls `std` back in). For a truly `std`-free build, leave
+those two features off; the `http` feature alone stays `no_std`-compatible.
+
 ## Framework adapters
 
 ### Tower (also Axum)

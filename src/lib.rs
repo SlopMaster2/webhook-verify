@@ -68,8 +68,11 @@
 //! - `paypal` — enables the PayPal provider (RSA, X.509, CRC-32).
 //! - `http` — `HeaderMap` impl for `http::HeaderMap` (axum, tower, hyper).
 //! - `tower` — generic `tower::Layer`/`Service` middleware (works with axum
-//!   routers too; `http` is implied).
-//! - `actix` — actix-web 4 extractor + header bridge.
+//!   routers too; `http` is implied). The `no_std + alloc` guarantee covers
+//!   the core verification path only, so `tower` also implies `std` — the
+//!   adapters are async framework glue and cannot build without it.
+//! - `actix` — actix-web 4 extractor + header bridge. Also implies `std`, for
+//!   the same reason.
 //!
 //! See [`verify_any`] for cross-secret key rotation during a rotation window.
 //!

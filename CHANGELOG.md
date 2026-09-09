@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `verify_any` semantics for asymmetric providers clarified in docs.
 - README example code fixed (undefined variables).
 - `no_std` CI spec drift corrected.
+- `tower` and `actix` features now imply `std`: combining either with
+  `default-features = false` previously broke with raw `cannot find crate
+  std` errors, even though the `no_std + alloc` guarantee is scoped to the
+  core path (`spec.md` §7). The combos now compile (they reintroduce `std`).
 
 ### Changed
 
