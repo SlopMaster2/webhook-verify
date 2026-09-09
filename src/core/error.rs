@@ -98,18 +98,100 @@ impl std::error::Error for VerifyError {}
 #[cfg(test)]
 mod tests {
     use super::VerifyError;
+    use core::time::Duration;
 
     #[test]
-    fn display_never_contains_secret_or_signature_material() {
-        // Header names and static reasons only; nothing attacker- or
-        // operator-supplied beyond counts/durations.
-        let e = VerifyError::MalformedHeader {
+    fn display_missing_header() {
+        let e = VerifyError::MissingHeader {
             header: "X-Hub-Signature-256",
-            reason: "empty",
+        };
+        assert_eq!(e.to_string(), "missing header `X-Hub-Signature-256`");
+    }
+
+    #[test]
+    fn display_malformed_header() {
+        let e = VerifyError::MalformedHeader {
+            header: "X-Slack-Signature",
+            reason: "missing v0= prefix",
         };
         assert_eq!(
             e.to_string(),
-            "malformed header `X-Hub-Signature-256`: empty"
+            "malformed header `X-Slack-Signature`: missing v0= prefix"
         );
+    }
+
+    #[test]
+    fn display_bad_encoding() {
+        let e = VerifyError::BadEncoding {
+            reason: "not valid hexadecimal",
+        };
+        assert_eq!(e.to_string(), "bad encoding: not valid hexadecimal");
+    }
+
+    #[test]
+    fn display_signature_mismatch() {
+        let e = VerifyError::SignatureMismatch;
+        assert_eq!(e.to_string(), "signature mismatch");
+    }
+
+    #[test]
+    fn display_timestamp_out_of_tolerance() {
+        let e = VerifyError::TimestampOutOfTolerance {
+            skew: Duration::from_secs(600),
+            max_age: Duration::from_secs(300),
+        };
+        assert_eq!(
+            e.to_string(),
+            "timestamp out of tolerance: 600s outside the allowed 300s window"
+        );
+    }
+
+    #[test]
+    fn display_unsupported_provider() {
+        let e = VerifyError::UnsupportedProvider;
+        assert_eq!(e.to_string(), "provider not implemented yet");
+    }
+
+    #[test]
+    fn display_invalid_secret() {
+        let e = VerifyError::InvalidSecret {
+            reason: "public key is not valid hexadecimal",
+        };
+        assert_eq!(
+            e.to_string(),
+            "invalid secret: public key is not valid hexadecimal"
+        );
+    }
+
+    #[test]
+    fn display_missing_context() {
+        let e = VerifyError::MissingContext {
+            reason: "no WebhookConfig registered via app_data",
+        };
+        assert_eq!(
+            e.to_string(),
+            "missing verification context: no WebhookConfig registered via app_data"
+        );
+    }
+
+    #[test]
+    fn display_never_leaks_secret_material() {
+        // Every Display variant must contain only header names, static reasons,
+        // and numeric values — never the secret, raw body, or computed
+        // signature (spec.md §2.1 / §4.3).
+        let e = VerifyError::InvalidSecret {
+            reason: "not valid hexadecimal",
+        };
+        // The "reason" is a static string chosen by the crate, not the actual
+        // secret value — verify it appears verbatim in the output.
+        assert!(e.to_string().contains("not valid hexadecimal"));
+    }
+
+    #[test]
+    fn display_with_empty_reason() {
+        // Edge case: empty reason strings must not produce trailing colons or
+        // other formatting artifacts.
+        let e = VerifyError::BadEncoding { reason: "" };
+        assert_eq!(e.to_string(), "bad encoding: ");
     }
 }
