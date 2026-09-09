@@ -81,7 +81,7 @@ pub enum Provider {
     SendGrid,
     /// Linear (`linear-signature`, HMAC-SHA256).
     Linear,
-    /// Zoom (`X-Zm-Signature`, HMAC-SHA256 with timestamp).
+    /// Zoom (`x-zm-signature`, HMAC-SHA256 with timestamp).
     Zoom,
     /// Xero (`x-xero-signature`, base64-encoded HMAC-SHA256 over the raw body).
     Xero,
