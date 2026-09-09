@@ -177,10 +177,10 @@ impl WebhookConfig {
     /// use webhook_verify::actix::{VerifiedBody, WebhookConfig};
     /// use webhook_verify::{Provider, Secret};
     ///
-    /// // 2 MiB limit, matching actix-web's default extractor bound.
+    /// // 256 KiB limit, matching actix-web's default body-extractor bound.
     /// let app = App::new()
     ///     .app_data(WebhookConfig::new(Provider::GitHub, Secret::new("secret"))
-    ///         .with_max_body_size(2 * 1024 * 1024))
+    ///         .with_max_body_size(256 * 1024))
     ///     .route("/", web::post().to(|_body: VerifiedBody| async move {
     ///         HttpResponse::Ok().finish()
     ///     }));

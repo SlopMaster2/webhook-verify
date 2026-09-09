@@ -226,9 +226,9 @@ vector), configure an optional maximum body size with
 use webhook_verify::{Provider, Secret};
 use webhook_verify::tower::VerifyLayer;
 
-// 2 MiB limit, matching actix-web's default extractor bound.
+// 256 KiB limit, matching actix-web's default body-extractor bound.
 let layer = VerifyLayer::new(Provider::Stripe, Secret::new("whsec_..."))
-    .with_max_body_size(2 * 1024 * 1024);
+    .with_max_body_size(256 * 1024);
 ```
 
 Requests whose body exceeds the limit are rejected with `413 Payload Too
