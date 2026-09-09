@@ -272,6 +272,20 @@ pub fn verify(
 /// for the *separate* case where the provider's config allows *multiple
 /// distinct keys* to be valid simultaneously (e.g. during key rotation).
 ///
+/// # Asymmetric providers
+///
+/// Rotation via a slice of [`Secret`]s is only meaningful for providers
+/// whose scheme is keyed by a shared secret. The asymmetric providers —
+/// PayPal and SendGrid — ignore the `Secret` entirely: they verify against
+/// [`VerifyOptions::verifying_material`] (and for PayPal, `webhook_id`),
+/// so every element of the slice behaves identically and `verify_any` gives
+/// them no rotation semantics. It still degrades safely: structural errors
+/// (`MissingContext` for absent key material, `MissingHeader`, etc.) are
+/// returned immediately, so passing an asymmetric provider here cannot
+/// silently panic or loop. For genuine rotation of asymmetric key material,
+/// supply the current key via [`VerifyOptions::verifying_material`] and
+/// re-verify when it rotates, rather than using `verify_any`.
+///
 /// # Empty slice
 ///
 /// Passing an empty `secrets` slice returns `SignatureMismatch` immediately
@@ -664,6 +678,47 @@ mod tests {
                 reason: "public key is not valid hexadecimal"
             })
         );
+    }
+
+    #[test]
+    fn verify_any_asymmetric_provider_ignores_secrets_and_returns_structural_error() {
+        // PayPal (and SendGrid) ignore the `Secret` slice entirely — they
+        // verify against `VerifyOptions::verifying_material` / `webhook_id`.
+        // With that context absent, `verify_any` must return the structural
+        // `MissingContext` immediately (it is secret-independent) rather
+        // than treating any secret as a match or looping meaninglessly.
+        #[cfg(feature = "paypal")]
+        {
+            // PayPal checks its five required headers before the context
+            // check, so give them non-empty values to reach `webhook_id`
+            // resolution — the point is that verification is secret-
+            // independent and fails on the operator-context error, not that
+            // any slice element "matches".
+            let headers: Vec<(String, String)> = vec![
+                ("PayPal-Transmission-Id".to_string(), "AB".to_string()),
+                (
+                    "PayPal-Transmission-Time".to_string(),
+                    "2026-01-01T00:00:00Z".to_string(),
+                ),
+                ("PayPal-Transmission-Sig".to_string(), "AA==".to_string()),
+                (
+                    "PayPal-Cert-Url".to_string(),
+                    "https://example.test/cert.pem".to_string(),
+                ),
+                ("PayPal-Auth-Algo".to_string(), "SHA256withRSA".to_string()),
+            ];
+            let secrets = [Secret::new("irrelevant-1"), Secret::new("irrelevant-2")];
+            assert!(matches!(
+                verify_any(
+                    Provider::PayPal,
+                    &headers,
+                    b"{}",
+                    &secrets,
+                    Default::default(),
+                ),
+                Err(VerifyError::MissingContext { .. })
+            ));
+        }
     }
 
     #[test]

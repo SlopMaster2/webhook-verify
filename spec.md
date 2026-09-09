@@ -204,6 +204,16 @@ returns `Ok(())` if any one of them verifies. Its error aggregation rules:
   already yields `SignatureMismatch` whenever a usable key exists — and it
   gives operators an honest signal that their key configuration is broken.
 
+`verify_any` is meaningful only for **shared-secret** providers. The
+asymmetric providers (PayPal, SendGrid) ignore the `Secret` argument and
+verify against `VerifyOptions::verifying_material` (plus `webhook_id` for
+PayPal), so every element of the slice behaves identically and `verify_any`
+gives them no rotation semantics; it still degrades safely because their
+errors are structural (`MissingContext` for absent key material,
+`MissingHeader`, ...) and returned immediately. Rotating asymmetric key
+material is the caller's job: supply the current key via
+`VerifyOptions::verifying_material` and re-verify when it rotates.
+
 ### 2.2 `CustomScheme`
 
 For providers not yet built in, or self-hosted/internal webhook senders:
