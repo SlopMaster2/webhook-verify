@@ -32,7 +32,8 @@ const IMPLEMENTED: &[Provider] = &[
     Provider::Square,
     Provider::StandardWebhooks,
     // Discord's secret is a hex public key; the arbitrary-secret loop below
-    // exercises its InvalidSecret decoding paths too.
+    // exercises its InvalidSecret decoding paths, and a dedicated valid-key
+    // attempt below reaches its signature-decode/comparison paths too.
     Provider::Discord,
     // Twilio is exercised separately below: it needs form-param context to
     // reach its signature path, and ignores the raw body by design.
@@ -57,6 +58,19 @@ const IMPLEMENTED: &[Provider] = &[
 /// prefix yields an identical decoded key.
 const WELL_FORMED_SECRET: &str =
     "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+
+/// A valid Discord public key (hex-encoded Ed25519), so Discord's
+/// *signature-decoding* path is exercised by the fuzzer too.
+///
+/// Discord's `Secret` must decode to a 32-byte hex key, which neither
+/// [`WELL_FORMED_SECRET`] (base64-shaped) nor an arbitrary body-derived
+/// string reliably satisfies — so without the dedicated attempt below,
+/// `verify()` always fails Discord's key-format gate before parsing the
+/// signature header and the base64/hex-decode paths stay uncovered (spec
+/// §5.6). This is the verifying key for the same deterministic seed the
+/// provider's own test vectors use (`src/providers/discord.rs` `VECTOR_SEED`).
+const DISCORD_PUBLIC_KEY_HEX: &str =
+    "b85b5508c0fc30a8d6702e2177ffe835ff3466b9a3abf9adb3dbf43b754ecdd8";
 
 fn attempt(
     provider: Provider,
@@ -112,6 +126,19 @@ fuzz_target!(|data: &[u8]| {
     attempt(Provider::Square, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
     attempt(Provider::Twilio, &headers, body, WELL_FORMED_SECRET, &twilio_options);
     attempt(Provider::Twilio, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
+
+    // Discord's secret must be a *valid hex public key* to get past the key
+    // gate and reach its signature header parsing; neither WELL_FORMED_SECRET
+    // nor the body-derived arbitrary secret is reliably hex, so the loop above
+    // sticks at InvalidSecret. A constant valid key lets arbitrary header/body
+    // bytes exercise the signature hex-decode, length-gate, and replay paths.
+    attempt(
+        Provider::Discord,
+        &headers,
+        body,
+        DISCORD_PUBLIC_KEY_HEX,
+        &url_scoped_options,
+    );
 
     // PayPal requires `webhook_id` + an X.509 certificate (never fetched; the
     // caller supplies it). With a constant valid test certificate, arbitrary
