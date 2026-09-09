@@ -114,6 +114,13 @@ impl Default for VerifyOptions {
     }
 }
 
+impl core::str::FromStr for Provider {
+    type Err = ProviderParseError;
+    // Case-insensitive match on the canonical Display name of each variant
+    // ("github", "GitHub", "GITHUB", ...). `custom` is rejected: a
+    // CustomScheme requires configuration and must be built directly.
+}
+
 pub trait HeaderMap {
     /// Case-insensitive header lookup. Returns the first matching value.
     fn get(&self, name: &str) -> Option<&str>;

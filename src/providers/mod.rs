@@ -44,6 +44,10 @@ use crate::core::secret::Secret;
 /// All variants have an implementation. PayPal and SendGrid are feature-gated
 /// (`paypal` / `sendgrid`); calling [`verify()`] with a feature-disabled
 /// variant returns [`VerifyError::UnsupportedProvider`] (fail-closed).
+///
+/// Providers can also be selected by name for config-driven setups (e.g.
+/// `"stripe".parse::<Provider>()`) — see the
+/// [`core::str::FromStr`] implementation.
 #[must_use]
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -129,6 +133,58 @@ impl fmt::Display for Provider {
         }
     }
 }
+
+/// Error returned when a string does not name a known [`Provider`] (from
+/// the [`core::str::FromStr`] implementation).
+///
+/// Parsing is case-insensitive and accepts exactly the canonical
+/// [`fmt::Display`] spelling of each provider (e.g. `"github"`, `"GitHub"`,
+/// `"GITHUB"`).
+/// [`Provider::Custom`] cannot be parsed from a bare name — constructing one
+/// requires a [`CustomScheme`] — so `"custom"` is rejected like any unknown
+/// name.
+impl core::str::FromStr for Provider {
+    type Err = ProviderParseError;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            n if n.eq_ignore_ascii_case("stripe") => Ok(Provider::Stripe),
+            n if n.eq_ignore_ascii_case("github") => Ok(Provider::GitHub),
+            n if n.eq_ignore_ascii_case("shopify") => Ok(Provider::Shopify),
+            n if n.eq_ignore_ascii_case("slack") => Ok(Provider::Slack),
+            n if n.eq_ignore_ascii_case("square") => Ok(Provider::Square),
+            n if n.eq_ignore_ascii_case("twilio") => Ok(Provider::Twilio),
+            n if n.eq_ignore_ascii_case("discord") => Ok(Provider::Discord),
+            n if n.eq_ignore_ascii_case("paypal") => Ok(Provider::PayPal),
+            n if n.eq_ignore_ascii_case("sendgrid") => Ok(Provider::SendGrid),
+            n if n.eq_ignore_ascii_case("linear") => Ok(Provider::Linear),
+            n if n.eq_ignore_ascii_case("zoom") => Ok(Provider::Zoom),
+            n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
+            n if n.eq_ignore_ascii_case("dropbox") => Ok(Provider::Dropbox),
+            n if n.eq_ignore_ascii_case("xero") => Ok(Provider::Xero),
+            n if n.eq_ignore_ascii_case("standardwebhooks") => Ok(Provider::StandardWebhooks),
+            _ => Err(ProviderParseError),
+        }
+    }
+}
+
+/// The error type for [`Provider`]'s [`core::str::FromStr`] implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderParseError;
+
+impl fmt::Display for ProviderParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            "unknown provider name: expected one of `stripe`, `github`, `shopify`, `slack`, \
+             `square`, `twilio`, `discord`, `paypal`, `sendgrid`, `linear`, `zoom`, \
+             `cloudflare`, `dropbox`, `xero`, or `standardwebhooks` (case-insensitive); \
+             `custom` requires a `CustomScheme` and must be built directly",
+        )
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for ProviderParseError {}
 
 /// Header names that carry signing material for `provider`, per its row in
 /// `spec.md` §3.
@@ -750,5 +806,103 @@ mod tests {
             signed_string: |_h, b| b.to_vec(),
         });
         assert_eq!(custom.to_string(), "Custom(X-My-Sig)");
+    }
+
+    #[test]
+    fn provider_from_str_accepts_canonical_names_case_insensitively() {
+        use core::str::FromStr;
+
+        let cases = [
+            ("stripe", Provider::Stripe),
+            ("github", Provider::GitHub),
+            ("shopify", Provider::Shopify),
+            ("slack", Provider::Slack),
+            ("square", Provider::Square),
+            ("twilio", Provider::Twilio),
+            ("discord", Provider::Discord),
+            ("paypal", Provider::PayPal),
+            ("sendgrid", Provider::SendGrid),
+            ("linear", Provider::Linear),
+            ("zoom", Provider::Zoom),
+            ("cloudflare", Provider::Cloudflare),
+            ("dropbox", Provider::Dropbox),
+            ("xero", Provider::Xero),
+            ("standardwebhooks", Provider::StandardWebhooks),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(Provider::from_str(name), Ok(expected), "lowercase `{name}`");
+            let upper = name.to_ascii_uppercase();
+            assert_eq!(
+                Provider::from_str(&upper),
+                Ok(expected),
+                "uppercase `{upper}`"
+            );
+            let mixed = format!("{}{}", name[..1].to_ascii_uppercase(), &name[1..]);
+            assert_eq!(Provider::from_str(&mixed), Ok(expected), "mixed `{mixed}`");
+        }
+    }
+
+    #[test]
+    fn provider_display_round_trips_through_from_str() {
+        use core::str::FromStr;
+
+        let providers = [
+            Provider::Stripe,
+            Provider::GitHub,
+            Provider::Shopify,
+            Provider::Slack,
+            Provider::Square,
+            Provider::Twilio,
+            Provider::Discord,
+            Provider::PayPal,
+            Provider::SendGrid,
+            Provider::Linear,
+            Provider::Zoom,
+            Provider::Cloudflare,
+            Provider::Dropbox,
+            Provider::Xero,
+            Provider::StandardWebhooks,
+        ];
+        for provider in providers {
+            assert_eq!(
+                provider.to_string().parse::<Provider>(),
+                Ok(provider),
+                "display string must re-parse to the same provider"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_from_str_rejects_unknown_names_and_custom() {
+        use core::str::FromStr;
+
+        for bad in [
+            "",
+            "githubs",
+            "stripey",
+            "stripe ",
+            " stripe",
+            "custom",
+            "Custom",
+            "unknown-provider",
+        ] {
+            assert_eq!(
+                Provider::from_str(bad),
+                Err(ProviderParseError),
+                "must reject `{bad}`"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_parse_error_display_lists_known_names() {
+        assert!(
+            ProviderParseError.to_string().contains("stripe"),
+            "error message should guide the operator toward valid names"
+        );
+        assert!(
+            ProviderParseError.to_string().contains("standardwebhooks"),
+            "error message should guide the operator toward valid names"
+        );
     }
 }

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Provider` now implements `FromStr` (case-insensitive, canonical display
+  names) for config-driven provider selection, with `ProviderParseError`.
 - Cloudflare (Stream) webhook provider — HMAC-SHA256 over `time.body`,
   hex-encoded, combined `Webhook-Signature` header with timestamp tolerance.
 - Xero webhook provider — HMAC-SHA256, base64, `x-xero-signature`.
