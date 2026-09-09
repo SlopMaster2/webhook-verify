@@ -39,7 +39,7 @@
 //!   let key_der = base64::engine::general_purpose::STANDARD
 //!       .decode(dashboard_verification_key)
 //!       .map_err(|_| VerifyError::InvalidSecret {
-//!           reason: "verification key is not valid base64",
+//!           reason: "verifying key is not valid base64",
 //!       })?;
 //!   let opts = VerifyOptions::default()
 //!       .with_verifying_material(VerifyingKeyMaterial::EcdsaP256PublicKey(key_der));
