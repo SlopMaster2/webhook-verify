@@ -77,8 +77,7 @@ pub(crate) fn verify(
 
     // Signed string is `{time_as_sent}.{raw_body}`; the time substring is
     // reused verbatim so whatever was actually signed is what gets verified.
-    let mut signed_string =
-        Vec::with_capacity(time_raw.len() + 1 + raw_body.len());
+    let mut signed_string = Vec::with_capacity(time_raw.len() + 1 + raw_body.len());
     signed_string.extend_from_slice(time_raw.as_bytes());
     signed_string.push(b'.');
     signed_string.extend_from_slice(raw_body);
@@ -160,7 +159,7 @@ fn parse_signature(value: &str) -> Result<Vec<u8>, VerifyError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SIGNATURE_HEADER, SIG_FIELD, TIME_FIELD};
+    use super::{SIG_FIELD, SIGNATURE_HEADER, TIME_FIELD};
     use crate::core::error::VerifyError;
     use crate::core::options::VerifyOptions;
     use crate::core::secret::Secret;
@@ -192,14 +191,17 @@ mod tests {
     /// implementations in Go/Node/Ruby.
     const SIGNATURE: &str = "e517b28af95a5c15bf630db474c902b8abf9308995aa6dbe8034a044de63ecd6";
     /// Locally constructed over an empty body (boundary case).
-    const EMPTY_BODY_SIGNATURE: &str = "b7add7718ec459a0d6efb26624b389810ac1cd3aed3017c3694081b9876fd4b6";
+    const EMPTY_BODY_SIGNATURE: &str =
+        "b7add7718ec459a0d6efb26624b389810ac1cd3aed3017c3694081b9876fd4b6";
     /// Locally constructed over `"héllo, 🦀 world!"` (unicode boundary case).
-    const UNICODE_BODY_SIGNATURE: &str = "aca2bf96114b4facc2a0002e82e401047e87b2304e21c654df64f5c9dcee6bdc";
+    const UNICODE_BODY_SIGNATURE: &str =
+        "aca2bf96114b4facc2a0002e82e401047e87b2304e21c654df64f5c9dcee6bdc";
     /// The docs' full example header value
     /// (`Webhook-Signature: time=1230811200,sig1=60493ec9…`), used verbatim to
     /// prove a *well-formed but different* signature parses and then fails as
     /// a mismatch rather than as a malformed header.
-    const DOCS_EXAMPLE_HEADER: &str = "time=1230811200,sig1=60493ec9388b44585a29543bcf0de62e377d4da393246a8b1c901d0e3e672404";
+    const DOCS_EXAMPLE_HEADER: &str =
+        "time=1230811200,sig1=60493ec9388b44585a29543bcf0de62e377d4da393246a8b1c901d0e3e672404";
 
     fn verify_with(
         body: &[u8],
@@ -262,7 +264,10 @@ mod tests {
     fn header_name_is_case_insensitive() {
         let result = verify(
             crate::Provider::Cloudflare,
-            &[("webhook-signature", format!("time={TIME},sig1={SIGNATURE}").as_str())],
+            &[(
+                "webhook-signature",
+                format!("time={TIME},sig1={SIGNATURE}").as_str(),
+            )],
             BODY,
             &Secret::new(SECRET),
             clocked_at(TIME, Some(Duration::from_secs(300))),
