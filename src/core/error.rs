@@ -48,8 +48,9 @@ pub enum VerifyError {
         /// The configured maximum age.
         max_age: Duration,
     },
-    /// The selected [`crate::Provider`] exists but has no verification
-    /// implementation yet (fail-closed stub for providers not shipped).
+    /// The selected [`crate::Provider`] requires a cargo feature that is not
+    /// enabled at compile time (fail-closed). Currently PayPal and SendGrid
+    /// are feature-gated; see [`crate::Provider`] for the gating.
     UnsupportedProvider,
     /// The provided secret is not usable for this provider's scheme
     /// (e.g. wrong format for a hex- or base64-encoded key).
