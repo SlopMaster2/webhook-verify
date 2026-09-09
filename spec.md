@@ -48,9 +48,9 @@ pub enum Provider {
     SendGrid,
     Linear,
     Zoom,
-    Xero,
-    Dropbox,
     Cloudflare,
+    Dropbox,
+    Xero,
     StandardWebhooks,
     Custom(CustomScheme),
 }

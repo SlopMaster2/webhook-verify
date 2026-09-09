@@ -124,9 +124,9 @@ fuzz_target!(|data: &[u8]| {
             ("From", "+14158675310"),
         ]);
 
-    // Fail-closed dispatch for not-yet-implemented variants must also never
-    // panic (Square now has an implementation; it is exercised via
-    // IMPLEMENTED below, with and without its required URL context).
+    // Fail-closed dispatch for feature-gated providers must also never
+    // panic. Square is exercised via IMPLEMENTED below, with and without
+    // its required URL context.
     attempt(Provider::Square, &headers, body, WELL_FORMED_SECRET, &url_scoped_options);
     attempt(Provider::Square, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
     attempt(Provider::Twilio, &headers, body, WELL_FORMED_SECRET, &twilio_options);

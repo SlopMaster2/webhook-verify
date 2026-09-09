@@ -2,7 +2,7 @@
 //!
 //! Each provider lives in its own module implementing exactly the scheme
 //! documented in `spec.md` §3, backed by that provider's official test
-//! vectors. Providers without an implementation yet fail closed with
+//! vectors. Feature-disabled providers fail closed with
 //! [`VerifyError::UnsupportedProvider`].
 
 mod cloudflare;
@@ -41,10 +41,9 @@ use crate::core::secret::Secret;
 
 /// A webhook provider whose signature scheme this crate knows how to verify.
 ///
-/// Variants for providers that do not have an implementation yet are still
-/// listed so the API surface matches `spec.md` §2 and stays additive as
-/// providers ship; calling [`verify()`] with one returns
-/// [`VerifyError::UnsupportedProvider`] (fail-closed).
+/// All variants have an implementation. PayPal and SendGrid are feature-gated
+/// (`paypal` / `sendgrid`); calling [`verify()`] with a feature-disabled
+/// variant returns [`VerifyError::UnsupportedProvider`] (fail-closed).
 #[must_use]
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

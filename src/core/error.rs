@@ -83,7 +83,9 @@ impl fmt::Display for VerifyError {
                 skew.as_secs(),
                 max_age.as_secs()
             ),
-            VerifyError::UnsupportedProvider => write!(f, "provider not implemented yet"),
+            VerifyError::UnsupportedProvider => {
+                write!(f, "provider not available (feature disabled)")
+            }
             VerifyError::InvalidSecret { reason } => write!(f, "invalid secret: {reason}"),
             VerifyError::MissingContext { reason } => {
                 write!(f, "missing verification context: {reason}")
@@ -149,7 +151,7 @@ mod tests {
     #[test]
     fn display_unsupported_provider() {
         let e = VerifyError::UnsupportedProvider;
-        assert_eq!(e.to_string(), "provider not implemented yet");
+        assert_eq!(e.to_string(), "provider not available (feature disabled)");
     }
 
     #[test]
