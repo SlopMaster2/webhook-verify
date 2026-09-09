@@ -84,10 +84,6 @@ pub enum Provider {
     Linear,
     /// Zoom (`x-zm-signature`, HMAC-SHA256 with timestamp).
     Zoom,
-    /// Xero (`x-xero-signature`, base64-encoded HMAC-SHA256 over the raw body).
-    Xero,
-    /// Dropbox (`X-Dropbox-Signature`, HMAC-SHA256 over the raw body).
-    Dropbox,
     /// Cloudflare (`Webhook-Signature`, HMAC-SHA256 over `time.body`).
     ///
     /// Covers Cloudflare **Stream** webhook notifications specifically: the
@@ -97,6 +93,10 @@ pub enum Provider {
     /// `X-Signature-HMAC-SHA256-HEX` raw-body scheme); those are not this
     /// variant — see the provider module for the exact scheme.
     Cloudflare,
+    /// Dropbox (`X-Dropbox-Signature`, HMAC-SHA256 over the raw body).
+    Dropbox,
+    /// Xero (`x-xero-signature`, base64-encoded HMAC-SHA256 over the raw body).
+    Xero,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -120,9 +120,9 @@ impl fmt::Display for Provider {
             Provider::SendGrid => f.write_str("SendGrid"),
             Provider::Linear => f.write_str("Linear"),
             Provider::Zoom => f.write_str("Zoom"),
-            Provider::Xero => f.write_str("Xero"),
-            Provider::Dropbox => f.write_str("Dropbox"),
             Provider::Cloudflare => f.write_str("Cloudflare"),
+            Provider::Dropbox => f.write_str("Dropbox"),
+            Provider::Xero => f.write_str("Xero"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({})", scheme.signature_header)
@@ -155,8 +155,8 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
             vec![discord::SIGNATURE_HEADER, discord::TIMESTAMP_HEADER]
         }
         Provider::Linear => vec![linear::SIGNATURE_HEADER],
-        Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
         Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
+        Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
@@ -239,8 +239,8 @@ pub fn verify(
             standard_webhooks::verify(headers, raw_body, secret, &options)
         }
         Provider::Twilio => twilio::verify(headers, raw_body, secret, &options),
-        Provider::Dropbox => dropbox::verify(headers, raw_body, secret, &options),
         Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, &options),
+        Provider::Dropbox => dropbox::verify(headers, raw_body, secret, &options),
         Provider::Xero => xero::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
@@ -737,9 +737,9 @@ mod tests {
         assert_eq!(Provider::SendGrid.to_string(), "SendGrid");
         assert_eq!(Provider::Linear.to_string(), "Linear");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
-        assert_eq!(Provider::Xero.to_string(), "Xero");
-        assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
+        assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
+        assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
