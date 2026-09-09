@@ -96,6 +96,19 @@ jobs:
           tool: cargo-semver-checks
       - run: cargo semver-checks
 
+  constant-time:
+    name: constant-time assertion (informational)
+    runs-on: ubuntu-latest
+    # spec.md §5.7: timing tests are noisy on shared runners; run as a
+    # non-blocking informational job so the constant-time guarantee gets
+    # periodic empirical coverage without gating the build.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release --all-features -- constant_time_comparison --ignored
+
   no-std-wasm:
     name: no_std + wasm32 build (spec §7)
     runs-on: ubuntu-latest
