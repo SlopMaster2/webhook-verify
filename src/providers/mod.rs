@@ -5,6 +5,7 @@
 //! vectors. Providers without an implementation yet fail closed with
 //! [`VerifyError::UnsupportedProvider`].
 
+mod cloudflare;
 mod custom;
 mod discord;
 mod dropbox;
@@ -87,6 +88,15 @@ pub enum Provider {
     Xero,
     /// Dropbox (`X-Dropbox-Signature`, HMAC-SHA256 over the raw body).
     Dropbox,
+    /// Cloudflare (`Webhook-Signature`, HMAC-SHA256 over `time.body`).
+    ///
+    /// Covers Cloudflare **Stream** webhook notifications specifically: the
+    /// `time` and `sig1` fields ride inside the single `Webhook-Signature`
+    /// header, signed-string is `{time}.{raw_body}`, hex-encoded. Cloudflare
+    /// has other webhook schemes (e.g. the legacy Apps
+    /// `X-Signature-HMAC-SHA256-HEX` raw-body scheme); those are not this
+    /// variant — see the provider module for the exact scheme.
+    Cloudflare,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -112,6 +122,7 @@ impl fmt::Display for Provider {
             Provider::Zoom => f.write_str("Zoom"),
             Provider::Xero => f.write_str("Xero"),
             Provider::Dropbox => f.write_str("Dropbox"),
+            Provider::Cloudflare => f.write_str("Cloudflare"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({})", scheme.signature_header)
@@ -145,6 +156,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         }
         Provider::Linear => vec![linear::SIGNATURE_HEADER],
         Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
+        Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
@@ -228,6 +240,7 @@ pub fn verify(
         }
         Provider::Twilio => twilio::verify(headers, raw_body, secret, &options),
         Provider::Dropbox => dropbox::verify(headers, raw_body, secret, &options),
+        Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, &options),
         Provider::Xero => xero::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
@@ -671,6 +684,7 @@ mod tests {
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
         assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
+        assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {

@@ -24,6 +24,11 @@ const IMPLEMENTED: &[Provider] = &[
     Provider::Slack,
     Provider::Linear,
     Provider::Dropbox,
+    // Cloudflare needs a combined `time=...,sig1=...` header to reach its
+    // signature path; arbitrary bytes exercise the comma/key-value splitting
+    // and empty-header rejection, and a well-formed-shaped attempt below
+    // reaches its hex-decode/comparison paths too.
+    Provider::Cloudflare,
     // Xero is a single-header raw-body HMAC (base64); arbitrary header bytes
     // exercise its base64 parsing path and empty-header rejection.
     Provider::Xero,
@@ -235,6 +240,23 @@ fuzz_target!(|data: &[u8]| {
             &url_scoped_options.clone(),
         );
     }
+
+    // Cloudflare: a well-formed-shaped `Webhook-Signature` (valid hex sig1,
+    // digit time) lets arbitrary body bytes reach the 32-byte length gate and
+    // HMAC comparison; without it the loop above mostly fails earlier on
+    // malformed/missing header fields.
+    attempt(
+        Provider::Cloudflare,
+        &[
+            (
+                "Webhook-Signature".to_string(),
+                "time=1700000000,sig1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            ),
+        ],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
 
     for &provider in IMPLEMENTED {
         attempt(provider, &headers, body, WELL_FORMED_SECRET, &url_scoped_options);

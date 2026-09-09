@@ -50,6 +50,7 @@ pub enum Provider {
     Zoom,
     Xero,
     Dropbox,
+    Cloudflare,
     StandardWebhooks,
     Custom(CustomScheme),
 }
@@ -539,6 +540,43 @@ official sample app
   documented construction (plus the same empty/unicode boundary cases as the
   other local-vector providers). Replace them if Xero ever publishes fixed
   vectors.
+
+### Cloudflare
+
+Source: <https://developers.cloudflare.com/stream/manage-video-library/using-webhooks/>
+("Verify webhook authenticity") and the reference verification code in
+Cloudflare's docs
+(<https://github.com/cloudflare/cloudflare-docs/blob/production/src/content/docs/stream/examples/test-webhooks-locally.mdx>).
+This entry covers **Cloudflare Stream** webhook notifications specifically;
+Cloudflare has other webhook schemes (e.g. the legacy Apps
+`X-Signature-HMAC-SHA256-HEX` raw-body scheme) that are not this provider.
+
+- Header: `Webhook-Signature: time=<unix_ts>,sig1=<hex_hmac>` — a
+  comma-separated `key=value` list. `time` is the integer unix-seconds value
+  set by the server; `sig1` is the hex-encoded signature over the body.
+  Unknown fields are ignored; the header must carry both `time` and `sig1`
+  fields or it fails closed as `MalformedHeader`.
+- Signed string: `"{time}.{raw_body}"` — the `time` value exactly as it
+  appears in the header, a literal dot, then the raw request body bytes,
+  unmodified. ("Every byte in the request body must remain unaltered for
+  successful signature verification.")
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded
+- Key: the webhook signing secret as a plain UTF-8 string (not decoded),
+  matching the docs' reference implementations (`crypto.createHmac("sha256",
+  key)`).
+- Replay protection: Cloudflare's docs require discarding deliveries whose
+  timestamp is too old ("you should discard requests with timestamps that are
+  too old for your application") but define no numeric window, so the shared
+  symmetric `|now - time| > max_age` (default 300s) semantics apply, as with
+  Slack and Zoom. The future-dated half of the symmetry is stricter than the
+  docs mandate but cannot reject legitimate deliveries.
+- Test-vector provenance: Cloudflare's docs publish the `Webhook-Signature`
+  header format (including a full example header) but no byte-exact signed
+  body, so the implementation is validated against locally constructed,
+  deterministic vectors over exactly the documented construction (the
+  vector's `time` and `secret` mirror the docs' own examples; the docs'
+  example header itself is replayed as a well-formed-but-mismatching input).
+  Replace them if Cloudflare ever publishes fixed vectors.
 
 ### Standard Webhooks spec
 
