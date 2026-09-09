@@ -49,6 +49,7 @@
 //! | SendGrid | ECDSA P-256 over `timestamp.body` |
 //! | Linear | HMAC-SHA256, `linear-signature` |
 //! | Zoom | HMAC-SHA256 `v0=` scheme + timestamp |
+//! | Cloudflare (Stream) | HMAC-SHA256 over `time.body`, hex, `Webhook-Signature` |
 //! | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` |
 //! | Xero | HMAC-SHA256, base64, `x-xero-signature` |
 //! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, ...) |
