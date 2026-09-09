@@ -33,6 +33,11 @@
 //! - **Fail closed**: every failure — including a missing
 //!   [`WebhookConfig`] — produces an error response; handler logic never
 //!   sees unverified bytes.
+//! - **Optional body size limit** (DoS hardening): use
+//!   [`WebhookConfig::with_max_body_size`] to reject oversized request bodies
+//!   with `413 Payload Too Large` before any signature work, preventing a
+//!   malicious client from forcing the server to buffer and HMAC an
+//!   arbitrarily large payload.
 //!
 //! # Status codes
 //!
@@ -40,6 +45,7 @@
 //!
 //! | `VerifyError` class | Status |
 //! |---|---|
+//! | Body exceeds [`WebhookConfig::with_max_body_size`] limit (not a `VerifyError`) | `413 Payload Too Large` |
 //! | `MissingHeader`, `MalformedHeader`, `BadEncoding` (malformed request) | `400 Bad Request` |
 //! | `SignatureMismatch`, `TimestampOutOfTolerance` (auth signals) | `401 Unauthorized` |
 //! | `UnsupportedProvider`, `InvalidSecret`, `MissingContext` (operator misconfiguration) | `500 Internal Server Error` |
@@ -118,6 +124,7 @@ pub struct WebhookConfig {
     provider: Provider,
     secret: Arc<Secret>,
     options: Arc<VerifyOptions>,
+    max_body_size: Option<usize>,
 }
 
 impl fmt::Debug for WebhookConfig {
@@ -128,6 +135,7 @@ impl fmt::Debug for WebhookConfig {
             .field("provider", &self.provider)
             .field("secret", &self.secret)
             .field("options", &self.options)
+            .field("max_body_size", &self.max_body_size)
             .finish()
     }
 }
@@ -146,7 +154,40 @@ impl WebhookConfig {
             provider,
             secret: Arc::new(secret),
             options: Arc::new(options),
+            max_body_size: None,
         }
+    }
+
+    /// Sets an optional maximum body size in bytes (DoS hardening).
+    ///
+    /// When set, requests whose body exceeds this limit are rejected with
+    /// `413 Payload Too Large` *before* any signature verification work,
+    /// preventing a malicious client from forcing the server to buffer an
+    /// arbitrarily large payload and compute HMACs over it.
+    ///
+    /// When `None` (the default), the body is buffered without a
+    /// crate-level size limit (actix-web's own extractor bound still
+    /// applies unless a custom [`actix_web::web::PayloadConfig`] is
+    /// registered).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use actix_web::{App, HttpResponse, web};
+    /// use webhook_verify::actix::{VerifiedBody, WebhookConfig};
+    /// use webhook_verify::{Provider, Secret};
+    ///
+    /// // 2 MiB limit, matching actix-web's default extractor bound.
+    /// let app = App::new()
+    ///     .app_data(WebhookConfig::new(Provider::GitHub, Secret::new("secret"))
+    ///         .with_max_body_size(2 * 1024 * 1024))
+    ///     .route("/", web::post().to(|_body: VerifiedBody| async move {
+    ///         HttpResponse::Ok().finish()
+    ///     }));
+    /// ```
+    pub fn with_max_body_size(mut self, max: usize) -> Self {
+        self.max_body_size = Some(max);
+        self
     }
 }
 
@@ -197,6 +238,9 @@ enum Rejection {
     /// The body could not be read to completion (transport-level failure,
     /// e.g. client disconnect mid-stream). Carries no detail by design.
     BodyRead,
+    /// The body exceeds the configured [`WebhookConfig::with_max_body_size`]
+    /// limit (DoS hardening); rejected before any signature work.
+    BodyTooLarge,
 }
 
 /// Rejection produced when webhook verification fails; renders as an
@@ -212,6 +256,9 @@ impl fmt::Display for WebhookVerificationError {
             // reasons, and durations (spec.md §2.1) — safe to surface.
             Rejection::Verify(error) => write!(f, "webhook verification failed: {error}"),
             Rejection::BodyRead => f.write_str("webhook body could not be read"),
+            Rejection::BodyTooLarge => {
+                f.write_str("webhook body exceeds the configured size limit")
+            }
         }
     }
 }
@@ -222,6 +269,7 @@ impl ResponseError for WebhookVerificationError {
     fn status_code(&self) -> StatusCode {
         match &self.0 {
             Rejection::BodyRead => StatusCode::BAD_REQUEST,
+            Rejection::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             // The status class is a hard-coded constant (400/401/500), so
             // conversion cannot fail; the fallback still fails closed with
             // 500 if it ever did.
@@ -297,6 +345,16 @@ impl FromRequest for VerifiedBody {
                 Ok(bytes) => bytes,
                 Err(_) => return Err(WebhookVerificationError(Rejection::BodyRead)),
             };
+
+            // DoS hardening: reject oversized bodies before any signature
+            // work (parity with `VerifyLayer::with_max_body_size` in the
+            // tower adapter). CPU amplification (HMAC over an arbitrarily
+            // large body) is the primary vector this defends against.
+            if let Some(limit) = config.max_body_size {
+                if raw_body.len() > limit {
+                    return Err(WebhookVerificationError(Rejection::BodyTooLarge));
+                }
+            }
 
             match crate::verify(
                 config.provider,
@@ -654,6 +712,134 @@ mod tests {
         assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
+    // --- max_body_size (DoS hardening) ---------------------------------------
+
+    /// GitHub HMAC-SHA256 over arbitrary bytes, computed inline for
+    /// size-boundary tests (mirrors the tower adapter's approach).
+    fn github_sig_for(body: &[u8]) -> String {
+        use hmac::{Hmac, KeyInit, Mac};
+        use sha2::Sha256;
+        type H = Hmac<Sha256>;
+        let mut mac = H::new_from_slice(GITHUB_SECRET.as_bytes())
+            .unwrap_or_else(|_| unreachable!("valid key"));
+        mac.update(body);
+        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+    }
+
+    #[actix_web::test]
+    async fn body_within_limit_is_accepted() {
+        // GITHUB_BODY is 13 bytes; limit is 1024.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_max_body_size(1024),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = github_request(GITHUB_BODY).to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[actix_web::test]
+    async fn body_exceeding_limit_is_rejected_with_413() {
+        // GITHUB_BODY is 13 bytes; limit is 10 — body exceeds limit.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_max_body_size(10),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = github_request(GITHUB_BODY).to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[actix_web::test]
+    async fn body_exactly_at_limit_is_accepted() {
+        // A body whose length matches the limit exactly — a valid signature
+        // still verifies at the boundary.
+        let body = vec![b'x'; 13];
+        let sig = { github_sig_for(&body) };
+
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_max_body_size(13),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Hub-Signature-256", sig))
+            .set_payload(Bytes::from(body))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[actix_web::test]
+    async fn body_one_byte_over_limit_is_rejected() {
+        let body = vec![b'x'; 14];
+        let sig = { github_sig_for(&body) };
+
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_max_body_size(13),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Hub-Signature-256", sig))
+            .set_payload(Bytes::from(body))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[actix_web::test]
+    async fn default_no_limit_still_works() {
+        // Ensure the default (no max_body_size) path is unchanged.
+        let app = github_app!();
+        let req = github_request(GITHUB_BODY).to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[actix_web::test]
+    async fn zero_limit_rejects_nonempty_body() {
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_max_body_size(0),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = github_request(GITHUB_BODY).to_request(); // 13 bytes
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[actix_web::test]
+    async fn config_debug_never_contains_secrets_with_max_body_size() {
+        let config = WebhookConfig::new(Provider::GitHub, Secret::new("super-secret-key"))
+            .with_max_body_size(1024);
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("super-secret-key"));
+        assert!(debug.contains("max_body_size: Some(1024)"));
+    }
+
     // --- unit-level checks ----------------------------------------------------
 
     #[test]
@@ -763,5 +949,12 @@ mod tests {
         let e = WebhookVerificationError(Rejection::BodyRead);
         assert_eq!(e.to_string(), "webhook body could not be read");
         assert_eq!(e.status_code(), StatusCode::BAD_REQUEST);
+
+        let e = WebhookVerificationError(Rejection::BodyTooLarge);
+        assert_eq!(
+            e.to_string(),
+            "webhook body exceeds the configured size limit"
+        );
+        assert_eq!(e.status_code(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

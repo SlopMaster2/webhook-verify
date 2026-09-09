@@ -306,7 +306,9 @@ captures it *before* anything else can touch it — do **not** also take
 would consume the body first); deserialize from `body`'s exact bytes instead.
 Requests whose scheme headers arrive duplicated with conflicting values are
 rejected with `400` before verification (spec §4.4). Failure statuses match
-the tower table above. A guard is intentionally not provided: guards run
+the tower table above, including `413 Payload Too Large` for bodies that
+exceed `WebhookConfig::with_max_body_size(bytes)` (DoS hardening; unlimited
+by default). A guard is intentionally not provided: guards run
 before the body is read, but verification requires those bytes.
 
 > ⚠️ **Raw body required.** All frameworks buffer and re-parse JSON by
