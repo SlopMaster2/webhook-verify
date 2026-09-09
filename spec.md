@@ -648,7 +648,9 @@ A provider implementation is not mergeable until it has:
   a way that could print its inner value (supplemented by the `Secret`
   type's own redacted `Debug`/`Display` impls as the primary defense).
 - `cargo semver-checks` against the last published version to catch
-  accidental breaking changes to the public API.
+  accidental breaking changes to the public API. Until the first version
+  publishes there is no baseline to compare against, so this check is
+  informational/non-blocking.
 
 ---
 

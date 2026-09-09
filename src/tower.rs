@@ -209,9 +209,9 @@ impl<B> VerifyLayer<B> {
     /// use webhook_verify::tower::VerifyLayer;
     /// use webhook_verify::{Provider, Secret};
     ///
-    /// // 2 MiB limit, matching actix-web's default extractor bound.
+    /// // 256 KiB limit, matching actix-web's default body-extractor bound.
     /// let layer: VerifyLayer<Bytes> = VerifyLayer::new(Provider::GitHub, Secret::new("secret"))
-    ///     .with_max_body_size(2 * 1024 * 1024);
+    ///     .with_max_body_size(256 * 1024);
     /// ```
     pub fn with_max_body_size(mut self, max: usize) -> Self {
         self.max_body_size = Some(max);

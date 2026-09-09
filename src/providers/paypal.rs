@@ -165,10 +165,18 @@ pub(crate) fn verify(
     // empty"), matching every other limited-value header in this module and
     // the shared malformed-header bar (spec.md §5.5): an empty
     // transmission_id would otherwise surface a guaranteed mismatch as
-    // SignatureMismatch, and an empty cert_url would sneak past unvalidated.
+    // SignatureMismatch, an empty transmission_time would fall through to the
+    // timestamp parser as a generic RFC 3339 error, and an empty cert_url
+    // would sneak past unvalidated.
     if transmission_id.is_empty() {
         return Err(VerifyError::MalformedHeader {
             header: TRANSMISSION_ID_HEADER,
+            reason: "header is empty",
+        });
+    }
+    if transmission_time.is_empty() {
+        return Err(VerifyError::MalformedHeader {
+            header: TRANSMISSION_TIME_HEADER,
             reason: "header is empty",
         });
     }
@@ -656,12 +664,19 @@ mod tests {
 
     #[test]
     fn malformed_transmission_time_header_errors_distinctly() {
+        // An empty value is rejected with the shared "header is empty" reason
+        // (spec.md §3: any present-but-empty PayPal header fails closed with
+        // that message), not the RFC 3339 parse error.
+        let empty = Err(VerifyError::MalformedHeader {
+            header: TRANSMISSION_TIME_HEADER,
+            reason: "header is empty",
+        });
         let malformed_time = Err(VerifyError::MalformedHeader {
             header: TRANSMISSION_TIME_HEADER,
             reason: "timestamp is not a valid RFC 3339 timestamp",
         });
         let cases: Vec<(&str, Result<(), VerifyError>)> = vec![
-            ("", malformed_time),
+            ("", empty),
             ("not-a-timestamp", malformed_time),
             ("1715836763", malformed_time),
             ("2024-05-16T25:19:23Z", malformed_time),
