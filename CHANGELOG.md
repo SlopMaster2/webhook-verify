@@ -24,9 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `WebhookConfig` for DoS hardening.
 - Fuzz target covering Discord's Ed25519 signature-decode path
   (spec §5.6).
+- `CustomScheme::new()` convenience constructor plus the
+  `with_timestamp_header` / `with_prefix` builders, so declarative schemes
+  can be configured without a struct literal (spec §2.2).
 
 ### Fixed
 
+- GitHub: the `sha256=` prefix in `X-Hub-Signature-256` is now matched
+  case-sensitively, matching GitHub's reference implementations
+  (octokit/Ruby). Uppercase/mixed-case prefixes (`SHA256=…`, `Sha256=…`)
+  fail closed with `MalformedHeader` instead of being leniently accepted,
+  bringing the code into conformance with the literal `sha256=` prefix
+  already documented in the spec.
 - Standard Webhooks: empty `webhook-id` header now fails closed with
   `MalformedHeader` instead of silently building a wrong signed string
   that masquerades as `SignatureMismatch` (spec §5.5 consistency).
