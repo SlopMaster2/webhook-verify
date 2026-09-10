@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TimestampOutOfTolerance` `Display` likewise no longer truncates the
   window to whole seconds in operator-facing messages.
 - `no_std` CI spec drift corrected.
+- `verify_any` docs corrected: `TimestampOutOfTolerance` is reachable only
+  *after* a signature verifies (every timestamped provider checks the
+  replay window after the signature comparison), so a stale request with no
+  matching key reports `SignatureMismatch`, not `TimestampOutOfTolerance`.
+  A regression test pins the behavior (issue #12).
 - `tower` and `actix` features now imply `std`: combining either with
   `default-features = false` previously broke with raw `cannot find crate
   std` errors, even though the `no_std + alloc` guarantee is scoped to the
