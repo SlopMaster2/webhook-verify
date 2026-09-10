@@ -11,6 +11,7 @@ mod discord;
 mod dropbox;
 mod github;
 mod linear;
+mod notion;
 mod paddle;
 #[cfg(feature = "paypal")]
 mod paypal;
@@ -93,6 +94,10 @@ pub enum Provider {
     Paddle,
     /// Linear (`linear-signature`, HMAC-SHA256).
     Linear,
+    /// Notion (`X-Notion-Signature`, HMAC-SHA256 over the raw body, hex,
+    /// `sha256=` prefix). The signing key is the subscription's
+    /// `verification_token` from the one-time handshake.
+    Notion,
     /// Zoom (`x-zm-signature`, HMAC-SHA256 with timestamp).
     Zoom,
     /// Cloudflare (`Webhook-Signature`, HMAC-SHA256 over `time.body`).
@@ -131,6 +136,7 @@ impl fmt::Display for Provider {
             Provider::SendGrid => f.write_str("SendGrid"),
             Provider::Paddle => f.write_str("Paddle"),
             Provider::Linear => f.write_str("Linear"),
+            Provider::Notion => f.write_str("Notion"),
             Provider::Zoom => f.write_str("Zoom"),
             Provider::Cloudflare => f.write_str("Cloudflare"),
             Provider::Dropbox => f.write_str("Dropbox"),
@@ -168,6 +174,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("sendgrid") => Ok(Provider::SendGrid),
             n if n.eq_ignore_ascii_case("paddle") => Ok(Provider::Paddle),
             n if n.eq_ignore_ascii_case("linear") => Ok(Provider::Linear),
+            n if n.eq_ignore_ascii_case("notion") => Ok(Provider::Notion),
             n if n.eq_ignore_ascii_case("zoom") => Ok(Provider::Zoom),
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
             n if n.eq_ignore_ascii_case("dropbox") => Ok(Provider::Dropbox),
@@ -187,8 +194,8 @@ impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `shopify`, `slack`, \
-             `square`, `twilio`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, `zoom`, \
-             `cloudflare`, `dropbox`, `xero`, or `standardwebhooks` (case-insensitive); \
+             `square`, `twilio`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, `notion`, \
+             `zoom`, `cloudflare`, `dropbox`, `xero`, or `standardwebhooks` (case-insensitive); \
              `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -221,6 +228,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
             vec![discord::SIGNATURE_HEADER, discord::TIMESTAMP_HEADER]
         }
         Provider::Linear => vec![linear::SIGNATURE_HEADER],
+        Provider::Notion => vec![notion::SIGNATURE_HEADER],
         Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
         Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
@@ -297,6 +305,7 @@ pub fn verify(
         Provider::Discord => discord::verify(headers, raw_body, secret, &options),
         Provider::GitHub => github::verify(headers, raw_body, secret, &options),
         Provider::Linear => linear::verify(headers, raw_body, secret, &options),
+        Provider::Notion => notion::verify(headers, raw_body, secret, &options),
         Provider::Zoom => zoom::verify(headers, raw_body, secret, &options),
         Provider::Shopify => shopify::verify(headers, raw_body, secret, &options),
         Provider::Slack => slack::verify(headers, raw_body, secret, &options),
@@ -870,6 +879,7 @@ mod tests {
         assert_eq!(Provider::SendGrid.to_string(), "SendGrid");
         assert_eq!(Provider::Paddle.to_string(), "Paddle");
         assert_eq!(Provider::Linear.to_string(), "Linear");
+        assert_eq!(Provider::Notion.to_string(), "Notion");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
@@ -903,6 +913,7 @@ mod tests {
             ("sendgrid", Provider::SendGrid),
             ("paddle", Provider::Paddle),
             ("linear", Provider::Linear),
+            ("notion", Provider::Notion),
             ("zoom", Provider::Zoom),
             ("cloudflare", Provider::Cloudflare),
             ("dropbox", Provider::Dropbox),
@@ -936,6 +947,7 @@ mod tests {
             Provider::SendGrid,
             Provider::Paddle,
             Provider::Linear,
+            Provider::Notion,
             Provider::Zoom,
             Provider::Cloudflare,
             Provider::Dropbox,

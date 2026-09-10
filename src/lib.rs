@@ -49,6 +49,7 @@
 //! | SendGrid | ECDSA P-256 over `timestamp.body` |
 //! | Paddle | HMAC-SHA256 over `ts.body`, hex, `Paddle-Signature` + tolerance window |
 //! | Linear | HMAC-SHA256, `linear-signature` |
+//! | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` |
 //! | Zoom | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Cloudflare (Stream) | HMAC-SHA256 over `time.body`, hex, `Webhook-Signature` |
 //! | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` |

@@ -48,6 +48,7 @@ pub enum Provider {
     SendGrid,
     Paddle,
     Linear,
+    Notion,
     Zoom,
     Cloudflare,
     Dropbox,
@@ -339,6 +340,36 @@ Source: <https://developers.linear.app/docs/graphql/working-with-the-graphql-api
   no byte-exact example signature, so the implementation is validated against
   locally constructed, deterministic vectors over exactly the documented
   construction. Replace them if Linear ever publishes fixed vectors.
+
+### Notion
+
+Source: <https://developers.notion.com/reference/webhooks>
+(Notion's webhook signature documentation) and the official JS SDK
+`@notionhq/client` `verifyWebhookSignature()` helper
+(<https://github.com/makenotion/notion-sdk-js/blob/main/src/webhooks.ts>,
+introduced v5.23.0; matches the server-side delivery code
+`sendWebhookRequest.ts`).
+
+- Header: `X-Notion-Signature: sha256=<hex_hmac>`
+- Signed string: raw body bytes, unmodified — Notion's docs warn that
+  re-serializing the JSON payload changes the bytes and fails verification
+- Algorithm: HMAC-SHA256, hex-encoded, with the subscription's
+  `verification_token` as the key (the token from the one-time handshake, not
+  the integration's API token)
+- The `sha256=` prefix is matched case-sensitively, exactly like GitHub
+  (`spec.md` §3); Notion's docs and SDK emit only the literal lowercase form.
+- No timestamp in the signature scheme (`max_age` has no effect); Notion
+  recommends deduping/replay detection from the payload's own `timestamp`/`id`
+  fields, which is outside this crate's scope (payload parsing is a non-goal,
+  §1).
+- The one-time subscription *handshake* request carries no
+  `X-Notion-Signature` header; callers special-case it before calling
+  `verify()` (which reports `MissingHeader` for it).
+- Test-vector provenance: the docs publish the exact `X-Notion-Signature`
+  sample value for the worked-example `verification_token` + handshake body;
+  the signature reproduced from that construction (independently with
+  `openssl dgst`) matches the documented sample byte-for-byte. Boundary-vector
+  bodies are locally constructed over the same documented recipe.
 
 ### Slack
 

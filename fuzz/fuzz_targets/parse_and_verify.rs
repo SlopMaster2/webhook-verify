@@ -24,6 +24,11 @@ const IMPLEMENTED: &[Provider] = &[
     Provider::Slack,
     Provider::Linear,
     Provider::Dropbox,
+    // Notion is a single-header raw-body HMAC (`sha256=` prefixed hex); the
+    // loop below exercises its prefix-strip and hex-decode paths, and a
+    // well-formed-shaped attempt below reaches its 32-byte gate and HMAC
+    // comparison.
+    Provider::Notion,
     // Cloudflare needs a combined `time=...,sig1=...` header to reach its
     // signature path; arbitrary bytes exercise the comma/key-value splitting
     // and empty-header rejection, and a well-formed-shaped attempt below
@@ -257,6 +262,21 @@ fuzz_target!(|data: &[u8]| {
                 "time=1700000000,sig1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
             ),
         ],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Notion: a well-formed-shaped `X-Notion-Signature` (valid `sha256=`
+    // hex) lets arbitrary body bytes reach the 32-byte length gate and HMAC
+    // comparison; without it the loop above mostly fails earlier on
+    // malformed/missing prefix or hex.
+    attempt(
+        Provider::Notion,
+        &[(
+            "X-Notion-Signature".to_string(),
+            "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Notion webhook provider — HMAC-SHA256 over the raw body, hex-encoded,
+  `sha256=` prefix in the `X-Notion-Signature` header, keyed by the
+  subscription's `verification_token`. Backed by an official test vector from
+  Notion's docs (the worked-example token/body reproduce the documented
+  sample signature byte-for-byte).
 - Paddle webhook provider — HMAC-SHA256 over `{ts}:{raw_body}`, hex-encoded,
   combined `Paddle-Signature` header (`ts=`/`h1=` list, rotation-safe) with
   timestamp tolerance. Backed by Paddle's official Go SDK test vector and
