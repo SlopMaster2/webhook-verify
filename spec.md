@@ -46,6 +46,7 @@ pub enum Provider {
     Discord,
     PayPal,
     SendGrid,
+    Paddle,
     Linear,
     Zoom,
     Cloudflare,
