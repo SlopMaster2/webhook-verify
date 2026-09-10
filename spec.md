@@ -236,6 +236,14 @@ pub struct CustomScheme {
 }
 ```
 
+Construction: `CustomScheme::new(hash, signature_header, encoding,
+signed_string)` sets the required fields with `timestamp_header`/`prefix`
+left `None`, and the `with_timestamp_header(_)` / `with_prefix(_)` builders
+set those optional fields (struct-literal construction also remains
+available since the fields are public). The declarative fields participate in
+`PartialEq`/`Hash`; `signed_string` is excluded (function pointers have no
+meaningful equality).
+
 This lets callers cover a long-tail provider today without waiting on a
 crate release, and it's how new built-in providers get prototyped before
 being promoted into the `Provider` enum.

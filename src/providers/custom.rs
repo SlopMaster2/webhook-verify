@@ -176,6 +176,60 @@ impl core::hash::Hash for CustomScheme {
     }
 }
 
+impl CustomScheme {
+    /// Creates a scheme from the required fields, leaving the optional
+    /// `timestamp_header` and `prefix` unset (`None`).
+    ///
+    /// Configure those with [`CustomScheme::with_timestamp_header`] and
+    /// [`CustomScheme::with_prefix`] when the sender's scheme uses them.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use webhook_verify::{CustomScheme, Encoding, HashAlg};
+    ///
+    /// let scheme = CustomScheme::new(
+    ///     HashAlg::Sha256,
+    ///     "X-Webhook-Sig",
+    ///     Encoding::Hex,
+    ///     |_headers, raw_body| raw_body.to_vec(),
+    /// );
+    /// ```
+    ///
+    /// [`CustomScheme`] is itself `#[must_use]`, so the returned scheme is
+    /// always flagged if discarded.
+    pub fn new(
+        hash: HashAlg,
+        signature_header: &'static str,
+        encoding: Encoding,
+        signed_string: fn(&dyn HeaderMap, &[u8]) -> Vec<u8>,
+    ) -> Self {
+        Self {
+            hash,
+            signature_header,
+            timestamp_header: None,
+            encoding,
+            prefix: None,
+            signed_string,
+        }
+    }
+
+    /// Sets the timestamp header, enabling replay protection with the shared
+    /// symmetric tolerance (`|now - t| <= max_age`, default 300s).
+    pub fn with_timestamp_header(mut self, timestamp_header: &'static str) -> Self {
+        self.timestamp_header = Some(timestamp_header);
+        self
+    }
+
+    /// Sets the literal prefix required before the encoded signature (e.g.
+    /// `"v0="` or `"sha256="`). When set, a header not starting with it is
+    /// rejected as malformed rather than leniently accepted.
+    pub fn with_prefix(mut self, prefix: &'static str) -> Self {
+        self.prefix = Some(prefix);
+        self
+    }
+}
+
 pub(crate) fn verify(
     scheme: &CustomScheme,
     headers: &dyn HeaderMap,
@@ -905,6 +959,86 @@ mod tests {
             ts_scheme::PING_BODY,
             ts_scheme::SECRET,
             clocked_at(ts_scheme::TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    // --- CustomScheme::new() convenience constructor ------------------------
+
+    #[test]
+    fn new_constructor_sets_required_fields_and_defaults_optional_ones() {
+        let scheme = CustomScheme::new(
+            HashAlg::Sha256,
+            "X-Webhook-Sig",
+            Encoding::Hex,
+            ts_signed_string,
+        );
+
+        assert_eq!(scheme.hash, HashAlg::Sha256);
+        assert_eq!(scheme.signature_header, "X-Webhook-Sig");
+        assert_eq!(scheme.encoding, Encoding::Hex);
+        assert_eq!(scheme.timestamp_header, None);
+        assert_eq!(scheme.prefix, None);
+        assert_eq!(
+            scheme.signed_string as usize, ts_signed_string as usize,
+            "the constructor must preserve the caller's signed_string fn"
+        );
+    }
+
+    #[test]
+    fn with_timestamp_header_sets_replay_enabled_scheme() {
+        let scheme = CustomScheme::new(
+            HashAlg::Sha256,
+            ts_scheme::HEADER,
+            Encoding::Hex,
+            ts_signed_string,
+        )
+        .with_timestamp_header(ts_scheme::TS_HEADER)
+        .with_prefix("sha256=");
+
+        assert_eq!(scheme.timestamp_header, Some(ts_scheme::TS_HEADER));
+        assert_eq!(scheme.prefix, Some("sha256="));
+
+        // The builder-built scheme verifies identically to the struct-literal
+        // configuration (same fields, same signed_string fn).
+        assert_eq!(scheme, ts_scheme_config());
+
+        let result = verify_custom(
+            &scheme,
+            &[
+                (
+                    ts_scheme::HEADER.to_string(),
+                    format!("sha256={}", ts_scheme::PING_SIG),
+                ),
+                (ts_scheme::TS_HEADER.to_string(), "1700000000".to_string()),
+            ],
+            ts_scheme::PING_BODY,
+            ts_scheme::SECRET,
+            clocked_at(ts_scheme::TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn new_constructor_without_timestamp_skips_replay_checks() {
+        // A scheme built via `new()` (no timestamp header) matches
+        // GitHub/Linear-style raw-body verification with no clock consulted.
+        let scheme = CustomScheme::new(
+            HashAlg::Sha256,
+            "X-Webhook-Sig",
+            Encoding::Hex,
+            |_headers, raw_body| raw_body.to_vec(),
+        );
+        let result = verify_custom(
+            &scheme,
+            &[(
+                "X-Webhook-Sig".to_string(),
+                // HMAC-SHA256 over b"payload" with key "shared-secret".
+                "0e7320e558b4421b7aa464a9027132b7176c02adf16ed36778ce302d6f2a6ac3".to_string(),
+            )],
+            b"payload",
+            "shared-secret",
+            Default::default(),
         );
         assert_eq!(result, Ok(()));
     }
