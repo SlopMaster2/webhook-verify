@@ -844,8 +844,6 @@ mod tests {
 
     #[test]
     fn provider_display_round_trips_through_from_str() {
-        use core::str::FromStr;
-
         let providers = [
             Provider::Stripe,
             Provider::GitHub,
