@@ -72,9 +72,7 @@ fn parse_signature(value: &str) -> Result<Vec<u8>, VerifyError> {
     // `get(..len)` instead of slicing: a multibyte character straddling the
     // prefix boundary must yield an error, never a panic (attacker-controlled).
     let hex_part = match value.get(..SIGNATURE_PREFIX.len()) {
-        Some(prefix) if prefix.eq_ignore_ascii_case(SIGNATURE_PREFIX) => {
-            &value[SIGNATURE_PREFIX.len()..]
-        }
+        Some(prefix) if prefix == SIGNATURE_PREFIX => &value[SIGNATURE_PREFIX.len()..],
         _ => {
             return Err(VerifyError::MalformedHeader {
                 header: SIGNATURE_HEADER,
@@ -276,6 +274,20 @@ mod tests {
             ),
             (
                 "sha1=deadbeef",
+                VerifyError::MalformedHeader {
+                    header: SIGNATURE_HEADER,
+                    reason: "missing `sha256=` prefix",
+                },
+            ),
+            (
+                "SHA256=deadbeef",
+                VerifyError::MalformedHeader {
+                    header: SIGNATURE_HEADER,
+                    reason: "missing `sha256=` prefix",
+                },
+            ),
+            (
+                "Sha256=deadbeef",
                 VerifyError::MalformedHeader {
                     header: SIGNATURE_HEADER,
                     reason: "missing `sha256=` prefix",
