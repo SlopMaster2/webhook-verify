@@ -803,7 +803,12 @@ A provider implementation is not mergeable until it has:
   checks. The wasm regression job ships in CI
   (`.github/workflows/ci.yml`: `cargo build --no-default-features --features
   sendgrid,paypal --target wasm32-unknown-unknown`), so this configuration
-  cannot silently regress.*
+  cannot silently regress. The `no_std + alloc` scope covers the core
+  verification path only: the `tower` and `actix` adapters are std-only
+  framework glue and therefore imply the `std` feature when enabled —
+  a `default-features = false` build with either of them simply gets `std`
+  back, which keeps the combination compiling instead of surfacing raw
+  `cannot find crate std` errors.*
 - **Provider promotion criteria.** A `CustomScheme` recipe gets promoted to
   a first-class `Provider` variant once it has (a) official test vectors,
   (b) at least one external user request or contribution, and (c) no open

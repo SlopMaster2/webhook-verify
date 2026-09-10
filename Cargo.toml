@@ -74,12 +74,18 @@ sendgrid = ["dep:p256"]
 http = ["dep:http"]
 # actix-web 4 adapter: extractor + header bridge (actix's internal `http`
 # 0.2 types need their own impl of the crate's `HeaderMap` trait). Contains
-# no verification logic of its own.
-actix = ["dep:actix-web"]
+# no verification logic of its own. Implies `std`: the adapter is async
+# framework glue and cannot build in a `no_std` configuration, so requesting
+# it must not produce a confusing `cannot find crate std` compile error when
+# `default-features = false` is set (the `no_std + alloc` guarantee is scoped
+# to the core verification path, `spec.md` §1, not to framework adapters).
+actix = ["std", "dep:actix-web"]
 # Generic `tower::Layer`/`Service` middleware (works with axum routers too).
 # Enables the `http` *feature* (not just the dependency) so the
-# `HeaderMap` impl for `http::HeaderMap` is compiled in.
+# `HeaderMap` impl for `http::HeaderMap` is compiled in. Implies `std` for
+# the same reason as `actix`: tower services are std-only runtime glue.
 tower = [
+    "std",
     "http",
     "dep:bytes",
     "dep:http-body",
