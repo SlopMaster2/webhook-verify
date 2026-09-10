@@ -158,8 +158,12 @@ let result = verify_any(
 
 - A match on **any** key returns `Ok(())`; the request is safe to process.
 - Structural errors (`MissingHeader`, `MalformedHeader`, `BadEncoding`,
-  `UnsupportedProvider`, `MissingContext`, `TimestampOutOfTolerance`) are
-  deterministic across all secrets and return immediately.
+  `UnsupportedProvider`, `MissingContext`) are deterministic across all
+  secrets and return immediately. A stale-timestamp rejection
+  (`TimestampOutOfTolerance`) also returns immediately once some key's
+  signature matches — but a stale request with *no* matching key is merely
+  a `SignatureMismatch`, since replay is checked only after a signature
+  verifies (both reject the request).
 - A garbled/undecodable key (`InvalidSecret`) does **not** abort the search —
   a still-healthy key later in the slice can verify. If every key is
   well-formed but wrong, you get `SignatureMismatch`; only when *every* key

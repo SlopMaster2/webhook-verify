@@ -388,7 +388,11 @@ pub fn verify(
 /// are returned immediately regardless of how many secrets remain, because
 /// they are deterministic across all secrets.
 /// [`VerifyError::TimestampOutOfTolerance`] is also returned immediately
-/// when encountered, since the timestamp is secret-independent.
+/// when encountered — but it can only be encountered *after* some secret's
+/// signature verifies, since every timestamped provider checks the replay
+/// window after the signature comparison. A stale request with no matching
+/// key therefore reports [`VerifyError::SignatureMismatch`] instead; both
+/// outcomes reject the request.
 /// [`VerifyError::InvalidSecret`] is *not* returned immediately: a secret
 /// rejected for its own formatting is unusable for this request, but a
 /// later key in the slice may still be correct — which is the point of
@@ -430,12 +434,15 @@ pub fn verify_any(
                 first_invalid_secret.get_or_insert(invalid);
             }
             Err(other) => {
-                // Structural errors (MissingHeader, MalformedHeader,
-                // BadEncoding, UnsupportedProvider, MissingContext,
-                // TimestampOutOfTolerance) are deterministic across all
-                // secrets — they occur before any secret-dependent work.
-                // Return it immediately so callers can distinguish a
-                // malformed request from a forged signature.
+                // Errors that are deterministic across all secrets
+                // (MissingHeader, MalformedHeader, BadEncoding,
+                // UnsupportedProvider, MissingContext) occur before any
+                // secret-dependent work; return them immediately so callers
+                // can distinguish a malformed request from a forged
+                // signature. TimestampOutOfTolerance is reached only once a
+                // signature verifies, but returning it immediately is safe:
+                // the timestamp is the provider's own field, so every other
+                // matching key would reject it identically.
                 return Err(other);
             }
         }
@@ -605,9 +612,9 @@ mod tests {
     #[test]
     fn verify_any_returns_timestamp_tolerance_immediately_across_secrets() {
         // spec.md §2.1 / verify_any docs: TimestampOutOfTolerance is
-        // deterministic and secret-independent, so it must be returned
-        // immediately rather than continuing the rotation search. Here the
-        // *last* secret is correct, but the timestamp is stale.
+        // returned immediately once a secret's signature matches and the
+        // timestamp is stale, rather than continuing the rotation search.
+        // Here the *last* secret is correct, but the timestamp is stale.
         let slack_secret = "8f742231b10e8888abcd99yyyzzz85a5";
         let slack_body = b"token=xyzz0WbapA4vBCDEFasx0q6G&team_id=T1DC2JH3J";
         let stale_ts = 1_531_420_618u64;
@@ -702,6 +709,53 @@ mod tests {
         let secrets = [Secret::new("wrong-1"), Secret::new("wrong-2")];
         assert_eq!(
             verify_any(Provider::Slack, &headers, slack_body, &secrets, options),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn verify_any_all_wrong_keys_report_mismatch_even_when_timestamp_stale() {
+        // spec.md §2.1: every timestamped provider checks the replay window
+        // *after* the signature comparison, so TimestampOutOfTolerance can
+        // only be reached once some secret's signature matches. A stale
+        // request with NO matching key therefore reports SignatureMismatch,
+        // not TimestampOutOfTolerance — pins the actual behavior so the
+        // docs stay honest if the ordering is ever reconsidered.
+        let slack_secret = "8f742231b10e8888abcd99yyyzzz85a5";
+        let slack_body = b"token=xyzz0WbapA4vBCDEFasx0q6G&team_id=T1DC2JH3J";
+        let stale_ts = 1_531_420_618u64;
+        let sig = slack_signature(slack_secret, stale_ts, slack_body);
+        let sig_value = format!("v0={sig}");
+        let ts_value = stale_ts.to_string();
+        let headers = [
+            ("X-Slack-Signature", sig_value.as_str()),
+            ("X-Slack-Request-Timestamp", ts_value.as_str()),
+        ];
+        let options = clocked_at(stale_ts + 3600, Some(Duration::from_secs(300)));
+
+        // Control: with the correct key, the same stale request rejects on
+        // tolerance, proving the window/clock are the deciding factor.
+        assert!(matches!(
+            verify_any(
+                Provider::Slack,
+                &headers,
+                slack_body,
+                &[Secret::new(slack_secret)],
+                options.clone(),
+            ),
+            Err(VerifyError::TimestampOutOfTolerance { .. })
+        ));
+
+        // All keys wrong: the signature never verifies, the replay check is
+        // never reached, and the stale request reports as a plain forgery.
+        assert_eq!(
+            verify_any(
+                Provider::Slack,
+                &headers,
+                slack_body,
+                &[Secret::new("wrong-1"), Secret::new("wrong-2")],
+                options,
+            ),
             Err(VerifyError::SignatureMismatch)
         );
     }

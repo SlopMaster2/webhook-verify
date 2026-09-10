@@ -195,9 +195,18 @@ Design rules for errors:
 returns `Ok(())` if any one of them verifies. Its error aggregation rules:
 
 - **Structural errors** (`MissingHeader`, `MalformedHeader`, `BadEncoding`,
-  `UnsupportedProvider`, `MissingContext`, `TimestampOutOfTolerance`) are
-  deterministic across all secrets — they occur before any secret-dependent
-  work — so `verify_any` returns them immediately.
+  `UnsupportedProvider`, `MissingContext`) are deterministic across all
+  secrets — they occur before any secret-dependent work — so `verify_any`
+  returns them immediately.
+- **`TimestampOutOfTolerance` is only reachable after a signature
+  verifies.** Every timestamped provider checks the replay window *after*
+  the signature comparison (§3), so this error is surfaced only once some
+  secret's signature matches. `verify_any` returns it immediately when
+  encountered — a stale timestamp is the provider's own field, so any other
+  matching key would reject it identically — but a stale request with **no**
+  matching key reports `SignatureMismatch` instead, because replay is never
+  reached. Both outcomes reject the request; only the reported variant
+  differs.
 - **`InvalidSecret` is secret-specific, not deterministic.** A key rejected
   for its own formatting is unusable for the current request, but a later key
   in the slice may still be correct. `verify_any` therefore *continues*
