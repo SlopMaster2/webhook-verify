@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Paddle webhook provider — HMAC-SHA256 over `{ts}:{raw_body}`, hex-encoded,
+  combined `Paddle-Signature` header (`ts=`/`h1=` list, rotation-safe) with
+  timestamp tolerance. Backed by Paddle's official Go SDK test vector and
+  docs.
 - `From<&str>`, `From<String>`, and `From<&String>` for [`Secret`](crate::Secret),
   so signing material can be built with the idiomatic `.into()`/`From`
   conversion as well as the explicit `Secret::new` constructor.

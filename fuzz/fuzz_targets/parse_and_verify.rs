@@ -50,6 +50,10 @@ const IMPLEMENTED: &[Provider] = &[
     // into the ECDSA/SPKI parsing path; it is additionally exercised with a
     // constant valid SPKI below.
     Provider::SendGrid,
+    // Paddle: a `ts=...;h1=...` header that reaches the constant-time
+    // comparison is built below; arbitrary bytes still exercise the
+    // semicolon/key=value splitting, timestamp parsing, and hex-decode paths.
+    Provider::Paddle,
 ];
 
 /// A well-formed secret for each provider's scheme, so the fuzzer reaches the
@@ -253,6 +257,21 @@ fuzz_target!(|data: &[u8]| {
                 "time=1700000000,sig1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
             ),
         ],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Paddle: a well-formed-shaped `Paddle-Signature` (digit ts, valid-hex
+    // 32-byte h1) lets arbitrary body bytes reach the 32-byte length gate and
+    // HMAC comparison; without it the loop above mostly fails earlier on
+    // malformed/missing header fields.
+    attempt(
+        Provider::Paddle,
+        &[(
+            "Paddle-Signature".to_string(),
+            "ts=1700000000;h1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,

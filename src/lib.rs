@@ -47,6 +47,7 @@
 //! | Discord | Ed25519 public-key signatures (no shared secret) |
 //! | PayPal | RSASSA-PKCS1-v1_5 SHA-256, X.509 cert + webhook ID |
 //! | SendGrid | ECDSA P-256 over `timestamp.body` |
+//! | Paddle | HMAC-SHA256 over `ts.body`, hex, `Paddle-Signature` + tolerance window |
 //! | Linear | HMAC-SHA256, `linear-signature` |
 //! | Zoom | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Cloudflare (Stream) | HMAC-SHA256 over `time.body`, hex, `Webhook-Signature` |

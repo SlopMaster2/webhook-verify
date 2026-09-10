@@ -95,6 +95,7 @@ hand-copied signing-string logic to get wrong.
 | Discord | Ed25519 (public-key), no shared secret | ✅ |
 | PayPal | RSASSA-PKCS1-v1_5 SHA-256 over `transmission_id|time|webhook_id|crc32(body)`, X.509 cert + webhook ID via `VerifyOptions::verifying_material` + `webhook_id` (needs `paypal` feature) | ✅ |
 | SendGrid | ECDSA P-256 over `timestamp.body`, public key via `VerifyOptions::verifying_material` (needs `sendgrid` feature) | ✅ |
+| Paddle | HMAC-SHA256, hex, `Paddle-Signature` (`ts=;h1=` list, rotation-safe) + replay window | ✅ |
 | Zoom | HMAC-SHA256, `v0=` scheme, `x-zm-signature` + timestamp | ✅ |
 | Cloudflare (Stream webhooks) | HMAC-SHA256 over `time.body`, hex, in a combined `Webhook-Signature` header + timestamp tolerance | ✅ |
 | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` | ✅ |

@@ -528,6 +528,37 @@ and the canonical server-side implementation in `sendgrid-go`
   output plus trailing `\r\n`. Additional vectors are locally constructed
   with deterministic seeds over exactly the documented construction.
 
+### Paddle
+
+Source: <https://developer.paddle.com/webhooks/about/signature-verification>
+("Verify webhook signatures") and Paddle's official Go SDK `WebhookVerifier`
+(<https://github.com/PaddleHQ/paddle-go-sdk/blob/main/webhook_verifier.go>).
+
+- Header: `Paddle-Signature: ts=<unix_ts>;h1=<hex_hmac>[;h1=<hex_hmac>...]` —
+  a semicolon-separated `key=value` list. During zero-downtime secret
+  rotation Paddle sends one `h1` per active secret; a match on *any* `h1` is
+  accepted. Unknown keys are ignored; the header must carry a single `ts` and
+  at least one well-formed `h1` or it fails closed as `MalformedHeader`.
+- Signed string: `"{timestamp}:{raw_body}"` — the timestamp exactly as it
+  appears in the header, a literal colon, then the raw request body bytes,
+  unmodified. ("Every byte in the request body must remain unaltered for
+  successful signature verification.")
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded
+- Key: the notification destination's secret key as a plain UTF-8 string (not
+  decoded), matching the SDK (`hmac.New(sha256.New, []byte(secret))`).
+- Replay protection: compare `|now - t|` against [`VerifyOptions::max_age`]
+  (default 300s), using the shared symmetric tolerance semantics. Paddle's
+  docs recommend discarding events over a few seconds old but define no
+  numeric window, so the shared default applies as with Slack and Zoom.
+- Duplicate `ts` elements are rejected as ambiguous — never last-wins,
+  following the crate-wide rule that malformed/ambiguous signing material
+  fails closed rather than defaulting to valid.
+- Test vectors: the primary vector is Paddle's own published worked example
+  (Go SDK `example_webhook_verifier_test.go`): secret key, request body, and
+  signature reproduced verbatim. Additional vectors cover the empty and
+  UTF-8 body boundary cases, constructed locally with `openssl` over exactly
+  the documented construction.
+
 ### Zoom
 
 Source: <https://developers.zoom.us/docs/api/webhooks/> ("Verify webhook

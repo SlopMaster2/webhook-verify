@@ -11,6 +11,7 @@ mod discord;
 mod dropbox;
 mod github;
 mod linear;
+mod paddle;
 #[cfg(feature = "paypal")]
 mod paypal;
 #[cfg(feature = "sendgrid")]
@@ -83,6 +84,13 @@ pub enum Provider {
     /// Requires the `sendgrid` crate feature; without it this variant fails
     /// closed with [`VerifyError::UnsupportedProvider`].
     SendGrid,
+    /// Paddle (`Paddle-Signature`, HMAC-SHA256 over `{ts}:{raw_body}`, with
+    /// timestamp replay protection; multiple `h1=` values accepted).
+    ///
+    /// Paddle signs a local timestamp into the header, so requests are
+    /// rejected when the included timestamp differs from the verifying
+    /// clock's "now" by more than [`VerifyOptions::max_age`] (default 300s).
+    Paddle,
     /// Linear (`linear-signature`, HMAC-SHA256).
     Linear,
     /// Zoom (`x-zm-signature`, HMAC-SHA256 with timestamp).
@@ -121,6 +129,7 @@ impl fmt::Display for Provider {
             Provider::Discord => f.write_str("Discord"),
             Provider::PayPal => f.write_str("PayPal"),
             Provider::SendGrid => f.write_str("SendGrid"),
+            Provider::Paddle => f.write_str("Paddle"),
             Provider::Linear => f.write_str("Linear"),
             Provider::Zoom => f.write_str("Zoom"),
             Provider::Cloudflare => f.write_str("Cloudflare"),
@@ -157,6 +166,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("discord") => Ok(Provider::Discord),
             n if n.eq_ignore_ascii_case("paypal") => Ok(Provider::PayPal),
             n if n.eq_ignore_ascii_case("sendgrid") => Ok(Provider::SendGrid),
+            n if n.eq_ignore_ascii_case("paddle") => Ok(Provider::Paddle),
             n if n.eq_ignore_ascii_case("linear") => Ok(Provider::Linear),
             n if n.eq_ignore_ascii_case("zoom") => Ok(Provider::Zoom),
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
@@ -177,7 +187,7 @@ impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `shopify`, `slack`, \
-             `square`, `twilio`, `discord`, `paypal`, `sendgrid`, `linear`, `zoom`, \
+             `square`, `twilio`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, `zoom`, \
              `cloudflare`, `dropbox`, `xero`, or `standardwebhooks` (case-insensitive); \
              `custom` requires a `CustomScheme` and must be built directly",
         )
@@ -243,6 +253,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::PayPal => Vec::new(),
         #[cfg(not(feature = "sendgrid"))]
         Provider::SendGrid => Vec::new(),
+        Provider::Paddle => vec![paddle::SIGNATURE_HEADER],
     }
 }
 
@@ -306,6 +317,7 @@ pub fn verify(
         Provider::SendGrid => sendgrid::verify(headers, raw_body, secret, &options),
         #[cfg(not(feature = "sendgrid"))]
         Provider::SendGrid => Err(VerifyError::UnsupportedProvider),
+        Provider::Paddle => paddle::verify(headers, raw_body, secret, &options),
         Provider::Custom(scheme) => custom::verify(&scheme, headers, raw_body, secret, &options),
     }
 }
@@ -856,6 +868,7 @@ mod tests {
         assert_eq!(Provider::Discord.to_string(), "Discord");
         assert_eq!(Provider::PayPal.to_string(), "PayPal");
         assert_eq!(Provider::SendGrid.to_string(), "SendGrid");
+        assert_eq!(Provider::Paddle.to_string(), "Paddle");
         assert_eq!(Provider::Linear.to_string(), "Linear");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
@@ -888,6 +901,7 @@ mod tests {
             ("discord", Provider::Discord),
             ("paypal", Provider::PayPal),
             ("sendgrid", Provider::SendGrid),
+            ("paddle", Provider::Paddle),
             ("linear", Provider::Linear),
             ("zoom", Provider::Zoom),
             ("cloudflare", Provider::Cloudflare),
@@ -920,6 +934,7 @@ mod tests {
             Provider::Discord,
             Provider::PayPal,
             Provider::SendGrid,
+            Provider::Paddle,
             Provider::Linear,
             Provider::Zoom,
             Provider::Cloudflare,
