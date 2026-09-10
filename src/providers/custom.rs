@@ -980,7 +980,8 @@ mod tests {
         assert_eq!(scheme.timestamp_header, None);
         assert_eq!(scheme.prefix, None);
         assert_eq!(
-            scheme.signed_string as usize, ts_signed_string as usize,
+            scheme.signed_string as *const () as usize,
+            ts_signed_string as *const () as usize,
             "the constructor must preserve the caller's signed_string fn"
         );
     }
