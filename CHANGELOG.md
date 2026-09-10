@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `verify_any` doc example now actually runs and verifies (it previously
+  showed empty headers/body under `no_run`, which would have failed with
+  `MissingHeader` if executed).
 - PayPal timestamp parsing: strict RFC 3339 leap-second position
   (spec §3.8).
 - Doc consistency nits for Zoom and SendGrid provider entries.

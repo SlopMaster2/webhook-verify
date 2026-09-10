@@ -348,15 +348,22 @@ pub fn verify(
 ///
 /// # Example
 ///
-/// ```no_run
-/// use webhook_verify::{verify_any, HeaderMap, Provider, Secret};
+/// A Stripe delivery signed with the *new* key while the *old* key is still
+/// being rotated out — only the new key matches, and `verify_any` returns
+/// `Ok(())`:
 ///
-/// # let headers: Vec<(String, String)> = vec![];
-/// # let raw_body: &[u8] = b"";
-/// // During rotation, both the old and new keys are valid.
+/// ```
+/// use webhook_verify::{verify_any, VerifyOptions, Provider, Secret};
+///
+/// let headers: Vec<(String, String)> = vec![(
+///     "Stripe-Signature".to_string(),
+///     "t=1700000000,v1=d95c6b7477fbd7e9f90b1b0ef5f9c7ac25abca5382460e0d988c2b2a5b71b990".to_string(),
+/// )];
+/// let raw_body = b"{\"id\":\"evt_test_webhook\",\"object\":\"event\"}";
+///
 /// let secrets = [
 ///     Secret::new("whsec_old_key_being_rotated_out"),
-///     Secret::new("whsec_new_key_being_rotated_in"),
+///     Secret::new("whsec_test_secret"), // the key that actually signed this delivery
 /// ];
 ///
 /// let result = verify_any(
@@ -364,8 +371,12 @@ pub fn verify(
 ///     &headers,
 ///     raw_body,
 ///     &secrets,
-///     Default::default(),
+///     // The example uses a fixed historical timestamp; disable the replay
+///     // window so the real wall clock during a `cargo test` run doesn't matter.
+///     VerifyOptions::default().with_max_age(None),
 /// );
+///
+/// assert_eq!(result, Ok(()));
 /// ```
 ///
 /// # Errors
