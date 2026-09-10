@@ -207,6 +207,7 @@ impl VerifiedBody {
     }
 
     /// Consumes the extractor, yielding the verified [`Bytes`].
+    #[must_use]
     pub fn into_inner(self) -> Bytes {
         self.0
     }

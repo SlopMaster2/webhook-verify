@@ -204,13 +204,13 @@ pub(crate) fn check_replay(timestamp: u64, options: &VerifyOptions) -> Result<()
     let now_unix = options.now();
 
     // `abs_diff` avoids overflow/panic for absurd attacker-chosen values in
-    // either direction.
-    let skew_secs = now_unix.abs_diff(timestamp);
-    if skew_secs > max_age.as_secs() {
-        return Err(VerifyError::TimestampOutOfTolerance {
-            skew: core::time::Duration::from_secs(skew_secs),
-            max_age,
-        });
+    // either direction. The comparison re-wraps into a `Duration` and compares
+    // against `max_age` directly, so a sub-second tolerance (e.g.
+    // `Duration::from_millis(500)`) is honored exactly instead of being
+    // silently floored by `.as_secs()`.
+    let skew = core::time::Duration::from_secs(now_unix.abs_diff(timestamp));
+    if skew > max_age {
+        return Err(VerifyError::TimestampOutOfTolerance { skew, max_age });
     }
 
     Ok(())
@@ -473,6 +473,60 @@ mod tests {
         let opts = VerifyOptions {
             max_age: Some(Duration::from_secs(300)),
             clock: Some(Arc::new(FixedClock(now))),
+            ..VerifyOptions::default()
+        };
+        assert!(check_replay(ts, &opts).is_ok());
+    }
+
+    #[test]
+    fn sub_second_max_age_is_honored_exactly() {
+        // A sub-second tolerance must not be silently floored to 0s by
+        // `.as_secs()`: a one-second skew has to fall outside a 500ms window.
+        let ts = 1_700_000_000u64;
+        let now = epoch(ts + 1);
+        let opts = VerifyOptions {
+            max_age: Some(Duration::from_millis(500)),
+            clock: Some(Arc::new(FixedClock(now))),
+            ..VerifyOptions::default()
+        };
+        assert!(
+            matches!(
+                check_replay(ts, &opts),
+                Err(VerifyError::TimestampOutOfTolerance { .. })
+            ),
+            "1s skew must reject a 500ms window"
+        );
+
+        // And an in-window skew (zero whole seconds) still accepts.
+        let opts = VerifyOptions {
+            max_age: Some(Duration::from_millis(500)),
+            clock: Some(Arc::new(FixedClock(now))),
+            ..VerifyOptions::default()
+        };
+        assert!(check_replay(now, &opts).is_ok());
+    }
+
+    #[test]
+    fn multi_second_max_age_rejects_skew_beyond_window() {
+        // A 3.5s window must reject a 4s skew (previously floored to a 3s
+        // window, which is the exact bug this guards against) and accept a 3s
+        // skew.
+        let ts = 1_700_000_000u64;
+        let beyond = epoch(ts + 4);
+        let opts = VerifyOptions {
+            max_age: Some(Duration::from_millis(3_500)),
+            clock: Some(Arc::new(FixedClock(beyond))),
+            ..VerifyOptions::default()
+        };
+        assert!(matches!(
+            check_replay(ts, &opts),
+            Err(VerifyError::TimestampOutOfTolerance { .. })
+        ));
+
+        let within = epoch(ts + 3);
+        let opts = VerifyOptions {
+            max_age: Some(Duration::from_millis(3_500)),
+            clock: Some(Arc::new(FixedClock(within))),
             ..VerifyOptions::default()
         };
         assert!(check_replay(ts, &opts).is_ok());

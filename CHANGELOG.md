@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolved only with the `std` feature enabled).
 - `verify_any` semantics for asymmetric providers clarified in docs.
 - README example code fixed (undefined variables).
+- Replay protection now honors sub-second `max_age` tolerances exactly:
+  `check_replay` previously compared whole-second skew against
+  `max_age.as_secs()`, silently flooring a `Duration::from_millis(500)`
+  window to 0s (accepting any timestamp) and a `3500ms` window to 3s.
+  `TimestampOutOfTolerance` `Display` likewise no longer truncates the
+  window to whole seconds in operator-facing messages.
 - `no_std` CI spec drift corrected.
 - `tower` and `actix` features now imply `std`: combining either with
   `default-features = false` previously broke with raw `cannot find crate

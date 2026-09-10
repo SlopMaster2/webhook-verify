@@ -234,7 +234,6 @@ pub(crate) fn check_ecdsa_p256(
 fn constant_time_comparison() {
     use std::hint::black_box;
     use std::time::Instant;
-    use subtle::ConstantTimeEq;
 
     // 32 bytes = HMAC-SHA256's digest size, the most common scheme.
     const EXPECTED: [u8; 32] = [0xAB; 32];

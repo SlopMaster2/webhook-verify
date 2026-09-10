@@ -40,8 +40,9 @@ pub enum VerifyError {
     /// The signature did not match. Returned identically regardless of how
     /// close the provided signature was to the expected one.
     SignatureMismatch,
-    /// The signed timestamp is further from "now" than [`VerifyOptions::
-    /// max_age`] allows; skew is how far outside the window it fell.
+    /// The signed timestamp is further from "now" than
+    /// [`crate::VerifyOptions::max_age`] allows; skew is how far outside the
+    /// window it fell.
     TimestampOutOfTolerance {
         /// How far outside the tolerance window the timestamp was.
         skew: Duration,
@@ -80,9 +81,9 @@ impl fmt::Display for VerifyError {
             VerifyError::SignatureMismatch => write!(f, "signature mismatch"),
             VerifyError::TimestampOutOfTolerance { skew, max_age } => write!(
                 f,
-                "timestamp out of tolerance: {}s outside the allowed {}s window",
+                "timestamp out of tolerance: {}s outside the allowed {:?} window",
                 skew.as_secs(),
-                max_age.as_secs()
+                max_age
             ),
             VerifyError::UnsupportedProvider => {
                 write!(f, "provider not available (feature disabled)")
@@ -146,6 +147,29 @@ mod tests {
         assert_eq!(
             e.to_string(),
             "timestamp out of tolerance: 600s outside the allowed 300s window"
+        );
+    }
+
+    #[test]
+    fn display_timestamp_out_of_tolerance_preserves_sub_second_max_age() {
+        // A sub-second window must not be truncated to "0s" in operator-facing
+        // logs (Duration's Debug renders 500ms / 3.5s faithfully).
+        let e = VerifyError::TimestampOutOfTolerance {
+            skew: Duration::from_secs(1),
+            max_age: Duration::from_millis(500),
+        };
+        assert_eq!(
+            e.to_string(),
+            "timestamp out of tolerance: 1s outside the allowed 500ms window"
+        );
+
+        let e = VerifyError::TimestampOutOfTolerance {
+            skew: Duration::from_secs(4),
+            max_age: Duration::from_millis(3_500),
+        };
+        assert_eq!(
+            e.to_string(),
+            "timestamp out of tolerance: 4s outside the allowed 3.5s window"
         );
     }
 
