@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PayPal timestamp parsing: strict RFC 3339 leap-second position
   (spec §3.8).
 - Doc consistency nits for Zoom and SendGrid provider entries.
+- Broken `HashMap` doc link in `HeaderMap` docs under `no_std` (the link
+  resolved only with the `std` feature enabled).
 - `verify_any` semantics for asymmetric providers clarified in docs.
 - README example code fixed (undefined variables).
 - `no_std` CI spec drift corrected.

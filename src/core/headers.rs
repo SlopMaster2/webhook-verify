@@ -22,7 +22,7 @@ use std::collections::HashMap;
 ///
 /// # `HashMap` caveat
 ///
-/// For [`HashMap`] the inherent exact-case `get` shadows this trait method in
+/// For `HashMap` the inherent exact-case `get` shadows this trait method in
 /// method-call position. Pass the map to `HeaderMap::get(&map, name)` to get
 /// the case-insensitive lookup this crate relies on.
 ///
