@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `From<&str>`, `From<String>`, and `From<&String>` for [`Secret`](crate::Secret),
+  so signing material can be built with the idiomatic `.into()`/`From`
+  conversion as well as the explicit `Secret::new` constructor.
 - `Provider` now implements `FromStr` (case-insensitive, canonical display
   names) for config-driven provider selection, with `ProviderParseError`.
 - Cloudflare (Stream) webhook provider — HMAC-SHA256 over `time.body`,

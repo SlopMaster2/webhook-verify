@@ -29,6 +29,24 @@ impl Secret {
     }
 }
 
+impl From<&str> for Secret {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<String> for Secret {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&String> for Secret {
+    fn from(value: &String) -> Self {
+        Self::new(value)
+    }
+}
+
 impl fmt::Debug for Secret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Secret(**redacted**)")
@@ -59,5 +77,19 @@ mod tests {
         // redacted Debug is what renders — never the inner value.
         let s = Secret::new("leak-me");
         assert_eq!(format!("{s:?}"), "Secret(**redacted**)");
+    }
+
+    #[test]
+    fn from_str_and_string_construct_the_same_secret() {
+        // `From<&str>`/`From<String>`/`From<&String>` are the idiomatic
+        // counterparts of `Secret::new`; they must produce identical secrets
+        // (and identical redacted Debug output).
+        let borrowed = Secret::from("shared-secret");
+        let owned = Secret::from(String::from("shared-secret"));
+        let borrowed_owned = Secret::from(&String::from("shared-secret"));
+        for s in [&borrowed, &owned, &borrowed_owned] {
+            assert_eq!(format!("{s:?}"), "Secret(**redacted**)");
+            assert_eq!(s.as_bytes(), b"shared-secret");
+        }
     }
 }
