@@ -88,6 +88,12 @@ pub(crate) fn verify(
     let id_raw = headers
         .get(ID_HEADER)
         .ok_or(VerifyError::MissingHeader { header: ID_HEADER })?;
+    if id_raw.is_empty() {
+        return Err(VerifyError::MalformedHeader {
+            header: ID_HEADER,
+            reason: "header is empty",
+        });
+    }
     let signature_value = headers
         .get(SIGNATURE_HEADER)
         .ok_or(VerifyError::MissingHeader {
@@ -726,6 +732,28 @@ mod tests {
             clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
         );
         assert_eq!(result, Err(VerifyError::SignatureMismatch));
+    }
+
+    #[test]
+    fn malformed_id_header_errors_distinctly() {
+        let cases: Vec<(&str, VerifyError)> = vec![(
+            "",
+            VerifyError::MalformedHeader {
+                header: ID_HEADER,
+                reason: "header is empty",
+            },
+        )];
+        for (value, expected) in cases {
+            let result = verify_with(
+                BODY,
+                value,
+                &format!("v1,{SIGNATURE}"),
+                &TIMESTAMP.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+            );
+            assert_eq!(result, Err(expected), "input: {value:?}");
+        }
     }
 
     #[test]

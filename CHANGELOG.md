@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Standard Webhooks: empty `webhook-id` header now fails closed with
+  `MalformedHeader` instead of silently building a wrong signed string
+  that masquerades as `SignatureMismatch` (spec §5.5 consistency).
 - `verify_any` doc example now actually runs and verifies (it previously
   showed empty headers/body under `no_run`, which would have failed with
   `MissingHeader` if executed).
