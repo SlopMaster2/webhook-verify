@@ -96,6 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `Provider` enum reordered to match the lib.rs doc table.
+- README "Releasing" instructions now tag the release `v0.1.0` (matching
+  `Cargo.toml`'s version) instead of the template's `v0.2.0`.
 
 ## [0.1.0] - Unreleased
 
