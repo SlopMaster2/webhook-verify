@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Coinbase (CDP) webhook provider — HMAC-SHA256 over `{t}.{raw_body}`,
+  hex-encoded, `v0` scheme in the combined `X-Hook0-Signature` header
+  (`t=`/`v0=` fields, `h=`/`v1=` header-binding fields tolerated but not
+  interpreted) with timestamp tolerance. Follows the documented construction
+  in Coinbase's Developer Platform webhook docs.
 - Notion webhook provider — HMAC-SHA256 over the raw body, hex-encoded,
   `sha256=` prefix in the `X-Notion-Signature` header, keyed by the
   subscription's `verification_token`. Backed by an official test vector from

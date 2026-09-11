@@ -51,6 +51,7 @@ pub enum Provider {
     Notion,
     Zoom,
     Cloudflare,
+    Coinbase,
     Dropbox,
     Xero,
     StandardWebhooks,
@@ -674,6 +675,47 @@ Cloudflare has other webhook schemes (e.g. the legacy Apps
   vector's `time` and `secret` mirror the docs' own examples; the docs'
   example header itself is replayed as a well-formed-but-mismatching input).
   Replace them if Cloudflare ever publishes fixed vectors.
+
+### Coinbase
+
+Source: <https://docs.cdp.coinbase.com/webhooks/verify-signatures>
+("Verify Signatures", Coinbase Developer Platform — CDP webhooks) and the
+reference verification code in the docs. This entry covers Coinbase **CDP**
+webhooks (wallets, transfers, onchain activity, etc.), which all share the
+`X-Hook0-Signature` scheme. The legacy Coinbase Commerce product uses a
+different scheme (`X-CC-Webhook-Signature`, bare hex HMAC of the body — cover
+with [`CustomScheme`] if needed) and is not this provider.
+
+- Header: `X-Hook0-Signature: t=<unix_ts>,v0=<hex_hmac>,h=<header names>,v1=<hex_hmac>`
+  — a comma-separated `key=value` list. `t` is the integer unix-seconds value
+  set by the server; `v0` is HMAC-SHA256 over `{t}.{raw_body}` ("protects the
+  body and timestamp only"); `h`/`v1` additionally bind the listed HTTP
+  headers. Unknown fields are ignored; the header must carry both `t` and `v0`
+  fields or it fails closed as `MalformedHeader`.
+- Verified variant: `v0`. The docs' own guidance is "unless you want to bind
+  the headers, which is unnecessary for most use cases, use `v0`", so only
+  `v0` is interpreted and verified; `h` and `v1` (and any future fields) are
+  tolerated but ignored. A `t`+`v1`-only header fails closed as missing `v0`.
+- Signed string: `"{t}.{raw_body}"` — the `t` value exactly as it appears in
+  the header, a literal dot, then the raw request body bytes, unmodified
+  (the docs warn that parsing the JSON payload before verification breaks the
+  signature).
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded
+- Key: the webhook subscription secret as a plain UTF-8 string (not decoded),
+  matching the docs' reference implementations
+  (`crypto.createHmac("sha256", secret)`).
+- Replay protection: the docs' reference code rejects webhooks older than a
+  `maxAgeMinutes` window (default 5 minutes), so the shared symmetric
+  `|now - t| > max_age` (default 300s) semantics apply, as with Slack, Zoom,
+  and Cloudflare. The future-dated half of the symmetry is stricter than the
+  docs' example enforces but cannot reject legitimate deliveries.
+- Test-vector provenance: Coinbase publishes the `X-Hook0-Signature` header
+  format (including a full example header) and an example payload, but no
+  byte-exact signed `v0` value, so the implementation is validated against
+  locally constructed, deterministic vectors over exactly the documented
+  construction (the vector's `t` and `secret` mirror the docs' own examples;
+  the docs' example header shape is replayed as a well-formed-but-mismatching
+  input). Replace them if Coinbase ever publishes fixed vectors.
 
 ### Standard Webhooks spec
 

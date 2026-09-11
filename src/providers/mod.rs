@@ -6,6 +6,7 @@
 //! [`VerifyError::UnsupportedProvider`].
 
 mod cloudflare;
+mod coinbase;
 mod custom;
 mod discord;
 mod dropbox;
@@ -109,6 +110,17 @@ pub enum Provider {
     /// `X-Signature-HMAC-SHA256-HEX` raw-body scheme); those are not this
     /// variant — see the provider module for the exact scheme.
     Cloudflare,
+    /// Coinbase (`X-Hook0-Signature`, HMAC-SHA256 over `t.body`).
+    ///
+    /// Covers Coinbase CDP webhooks (wallets, transfers, onchain activity;
+    /// `docs.cdp.coinbase.com/webhooks`). Verifies the `v0` path the docs
+    /// recommend for most use cases: the `t` and `v0` fields ride inside the
+    /// single `X-Hook0-Signature` header, the signed string is
+    /// `{t}.{raw_body}`, hex-encoded, with timestamp replay protection. The
+    /// `h`/`v1` fields (which bind additional HTTP headers into the
+    /// signature) are tolerated but not interpreted, matching the docs'
+    /// guidance to use `v0` unless header binding is needed.
+    Coinbase,
     /// Dropbox (`X-Dropbox-Signature`, HMAC-SHA256 over the raw body).
     Dropbox,
     /// Xero (`x-xero-signature`, base64-encoded HMAC-SHA256 over the raw body).
@@ -139,6 +151,7 @@ impl fmt::Display for Provider {
             Provider::Notion => f.write_str("Notion"),
             Provider::Zoom => f.write_str("Zoom"),
             Provider::Cloudflare => f.write_str("Cloudflare"),
+            Provider::Coinbase => f.write_str("Coinbase"),
             Provider::Dropbox => f.write_str("Dropbox"),
             Provider::Xero => f.write_str("Xero"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
@@ -177,6 +190,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("notion") => Ok(Provider::Notion),
             n if n.eq_ignore_ascii_case("zoom") => Ok(Provider::Zoom),
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
+            n if n.eq_ignore_ascii_case("coinbase") => Ok(Provider::Coinbase),
             n if n.eq_ignore_ascii_case("dropbox") => Ok(Provider::Dropbox),
             n if n.eq_ignore_ascii_case("xero") => Ok(Provider::Xero),
             n if n.eq_ignore_ascii_case("standardwebhooks") => Ok(Provider::StandardWebhooks),
@@ -195,8 +209,8 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `shopify`, `slack`, \
              `square`, `twilio`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, `notion`, \
-             `zoom`, `cloudflare`, `dropbox`, `xero`, or `standardwebhooks` (case-insensitive); \
-             `custom` requires a `CustomScheme` and must be built directly",
+             `zoom`, `cloudflare`, `coinbase`, `dropbox`, `xero`, or `standardwebhooks` \
+             (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -230,6 +244,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Linear => vec![linear::SIGNATURE_HEADER],
         Provider::Notion => vec![notion::SIGNATURE_HEADER],
         Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
+        Provider::Coinbase => vec![coinbase::SIGNATURE_HEADER],
         Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
@@ -316,6 +331,7 @@ pub fn verify(
         }
         Provider::Twilio => twilio::verify(headers, raw_body, secret, &options),
         Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, &options),
+        Provider::Coinbase => coinbase::verify(headers, raw_body, secret, &options),
         Provider::Dropbox => dropbox::verify(headers, raw_body, secret, &options),
         Provider::Xero => xero::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
@@ -882,6 +898,7 @@ mod tests {
         assert_eq!(Provider::Notion.to_string(), "Notion");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
+        assert_eq!(Provider::Coinbase.to_string(), "Coinbase");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
         assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
@@ -916,6 +933,7 @@ mod tests {
             ("notion", Provider::Notion),
             ("zoom", Provider::Zoom),
             ("cloudflare", Provider::Cloudflare),
+            ("coinbase", Provider::Coinbase),
             ("dropbox", Provider::Dropbox),
             ("xero", Provider::Xero),
             ("standardwebhooks", Provider::StandardWebhooks),
@@ -950,6 +968,7 @@ mod tests {
             Provider::Notion,
             Provider::Zoom,
             Provider::Cloudflare,
+            Provider::Coinbase,
             Provider::Dropbox,
             Provider::Xero,
             Provider::StandardWebhooks,

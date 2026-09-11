@@ -99,6 +99,7 @@ hand-copied signing-string logic to get wrong.
 | Paddle | HMAC-SHA256, hex, `Paddle-Signature` (`ts=;h1=` list, rotation-safe) + replay window | ✅ |
 | Zoom | HMAC-SHA256, `v0=` scheme, `x-zm-signature` + timestamp | ✅ |
 | Cloudflare (Stream webhooks) | HMAC-SHA256 over `time.body`, hex, in a combined `Webhook-Signature` header + timestamp tolerance | ✅ |
+| Coinbase (CDP webhooks) | HMAC-SHA256 over `t.body`, hex, `v0` scheme in a combined `X-Hook0-Signature` header + timestamp tolerance | ✅ |
 | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` | ✅ |
 | Xero | HMAC-SHA256, base64, `x-xero-signature` | ✅ |
 | Standard Webhooks spec (Svix, Clerk, Resend, ...) | HMAC-SHA256, `webhook-signature` (`v1,` base64, rotation list) + replay window | ✅ |

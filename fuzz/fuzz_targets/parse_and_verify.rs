@@ -34,6 +34,11 @@ const IMPLEMENTED: &[Provider] = &[
     // and empty-header rejection, and a well-formed-shaped attempt below
     // reaches its hex-decode/comparison paths too.
     Provider::Cloudflare,
+    // Coinbase (CDP) needs a combined `t=...,v0=...` header to reach its
+    // signature path; arbitrary bytes exercise the comma/key-value splitting
+    // and empty-header rejection, and a well-formed-shaped attempt below
+    // reaches its hex-decode/comparison paths too.
+    Provider::Coinbase,
     // Xero is a single-header raw-body HMAC (base64); arbitrary header bytes
     // exercise its base64 parsing path and empty-header rejection.
     Provider::Xero,
@@ -276,6 +281,21 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "X-Notion-Signature".to_string(),
             "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Coinbase: a well-formed-shaped `X-Hook0-Signature` (valid hex v0,
+    // digit t) lets arbitrary body bytes reach the 32-byte length gate and
+    // HMAC comparison; without it the loop above mostly fails earlier on
+    // malformed/missing header fields.
+    attempt(
+        Provider::Coinbase,
+        &[(
+            "X-Hook0-Signature".to_string(),
+            "t=1700000000,v0=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

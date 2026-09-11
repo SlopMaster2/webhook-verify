@@ -52,6 +52,7 @@
 //! | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` |
 //! | Zoom | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Cloudflare (Stream) | HMAC-SHA256 over `time.body`, hex, `Webhook-Signature` |
+//! | Coinbase (CDP) | HMAC-SHA256 over `t.body`, hex, `X-Hook0-Signature` + tolerance window |
 //! | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` |
 //! | Xero | HMAC-SHA256, base64, `x-xero-signature` |
 //! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, ...) |
