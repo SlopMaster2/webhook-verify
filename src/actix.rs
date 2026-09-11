@@ -421,6 +421,15 @@ mod tests {
     const SLACK_SIGNATURE: &str =
         "a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503";
 
+    /// Standard Webhooks official test-suite vector (same constants as
+    /// `src/providers/standard_webhooks.rs`, which links the source; also
+    /// reused by the tower adapter tests).
+    const STANDARD_WEBHOOKS_SECRET: &str = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+    const STANDARD_WEBHOOKS_ID: &str = "msg_p5jXN8AQM9LWM0D4loKWxJek";
+    const STANDARD_WEBHOOKS_TIMESTAMP: u64 = 1_614_265_330;
+    const STANDARD_WEBHOOKS_BODY: &[u8] = br#"{"test": 2432232314}"#;
+    const STANDARD_WEBHOOKS_SIGNATURE: &str = "g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=";
+
     /// Handler echoing how many body bytes it received, so tests assert the
     /// verified bytes reach handlers byte-for-byte.
     async fn echo_len(body: VerifiedBody) -> HttpResponse {
@@ -565,6 +574,97 @@ mod tests {
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     }
 
+    #[actix_web::test]
+    async fn conflicting_duplicate_id_header_is_rejected_for_standard_webhooks() {
+        // Standard Webhooks reads three headers (webhook-id,
+        // webhook-timestamp, webhook-signature); the ambiguity scan covers
+        // all three. The signature below is the official vector's over the
+        // *first* id and the clock is pinned to the vector timestamp, so if
+        // the duplicate `webhook-id` were not flagged this request would
+        // verify — 400 therefore proves the ambiguity check itself fired.
+        // Clock pinned to the vector's timestamp so replay accepts the
+        // single-header form (assertion below) and cannot be the rejector.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::with_options(
+                    Provider::StandardWebhooks,
+                    Secret::new(STANDARD_WEBHOOKS_SECRET),
+                    crate::VerifyOptions {
+                        clock: Some(Arc::new(FixedClock(epoch(STANDARD_WEBHOOKS_TIMESTAMP)))),
+                        ..crate::VerifyOptions::default()
+                    },
+                ))
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("webhook-id", STANDARD_WEBHOOKS_ID))
+            .insert_header(("webhook-timestamp", STANDARD_WEBHOOKS_TIMESTAMP.to_string()))
+            .insert_header((
+                "webhook-signature",
+                format!("v1,{STANDARD_WEBHOOKS_SIGNATURE}"),
+            ))
+            .append_header(("webhook-id", "msg_forged"))
+            .set_payload(Bytes::from_static(STANDARD_WEBHOOKS_BODY))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // Sanity: the same headers without the duplicate verify end to end.
+        let req = aw_test::TestRequest::post()
+            .insert_header(("webhook-id", STANDARD_WEBHOOKS_ID))
+            .insert_header(("webhook-timestamp", STANDARD_WEBHOOKS_TIMESTAMP.to_string()))
+            .insert_header((
+                "webhook-signature",
+                format!("v1,{STANDARD_WEBHOOKS_SIGNATURE}"),
+            ))
+            .set_payload(Bytes::from_static(STANDARD_WEBHOOKS_BODY))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[actix_web::test]
+    async fn conflicting_third_signature_value_is_rejected() {
+        // [valid, valid, forged]: the differing value is not adjacent to the
+        // first one. The scan must compare every value against the first, not
+        // just the first pair — a "first-two-only" implementation would let
+        // this verify against the valid first value.
+        let app = github_app!();
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Hub-Signature-256", GITHUB_SIGNATURE))
+            .append_header(("X-Hub-Signature-256", GITHUB_SIGNATURE))
+            .append_header((
+                "X-Hub-Signature-256",
+                "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+            ))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn comma_joined_signature_value_fails_closed() {
+        // A single header *line* carrying comma-joined values is one HTTP
+        // value, so the ambiguity scan does not (and must not) split it.
+        // Rejection is guaranteed downstream: GitHub hex-decodes the whole
+        // remainder after `sha256=` as one unit and the comma is not hex.
+        // The invariant this pins is "never verifies" — today that is 400.
+        let app = github_app!();
+        let req = aw_test::TestRequest::post()
+            .insert_header((
+                "X-Hub-Signature-256",
+                format!(
+                    "{GITHUB_SIGNATURE},sha256=0000000000000000000000000000000000000000000000000000000000000000"
+                ),
+            ))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
     // --- replay protection through the adapter -------------------------------
 
     #[actix_web::test]
@@ -648,7 +748,66 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
     }
 
-    // PayPal stays "unsupported" only when the `paypal` feature is off; the
+    #[actix_web::test]
+    async fn conflicting_timestamp_header_is_rejected_for_custom_scheme() {
+        // A CustomScheme's `timestamp_header` participates in the ambiguity
+        // scan like a built-in provider's. The clock is pinned to the
+        // timestamp and the digest is valid, so the single-header form would
+        // verify — 400 proves the duplicate timestamp was flagged, not a
+        // replay or signature failure.
+        const DIGEST: &str = "11316937114e6970aa59bd5326a6f38dd525f4ade64670e402bff41e2f7c4071";
+        let scheme = crate::CustomScheme {
+            hash: crate::HashAlg::Sha256,
+            signature_header: "X-My-Sig",
+            timestamp_header: Some("X-My-Ts"),
+            encoding: crate::Encoding::Hex,
+            prefix: Some("sha256="),
+            signed_string: |_headers, body| body.to_vec(),
+        };
+        let ambiguous_app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::with_options(
+                    Provider::Custom(scheme),
+                    Secret::new("k"),
+                    crate::VerifyOptions {
+                        clock: Some(Arc::new(FixedClock(epoch(1_700_000_000)))),
+                        ..crate::VerifyOptions::default()
+                    },
+                ))
+                .route("/", web::post().to(echo_len_slack)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-My-Sig", format!("sha256={DIGEST}")))
+            .insert_header(("X-My-Ts", "1700000000"))
+            .append_header(("x-my-ts", "1700000001"))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&ambiguous_app, req).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // Sanity: a single timestamp verifies end to end under the same clock.
+        let good_app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::with_options(
+                    Provider::Custom(scheme),
+                    Secret::new("k"),
+                    crate::VerifyOptions {
+                        clock: Some(Arc::new(FixedClock(epoch(1_700_000_000)))),
+                        ..crate::VerifyOptions::default()
+                    },
+                ))
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-My-Sig", format!("sha256={DIGEST}")))
+            .insert_header(("X-My-Ts", "1700000000"))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&good_app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+    }
     // mapping of that error class to 500 lives in core::adapter_utils tests.
     #[cfg(not(feature = "paypal"))]
     #[actix_web::test]
@@ -854,6 +1013,27 @@ mod tests {
         headers.append(name.clone(), value.clone());
         headers.append(name, value);
         assert!(conflicting_signature_header(&headers, &["X-Hub-Signature-256"]).is_none());
+    }
+
+    #[test]
+    fn mixed_opaque_and_parsed_signature_values_are_rejected_as_ambiguous() {
+        // One opaque-byte value plus a parsable one: distinct underlying
+        // bytes, so §4.4 ambiguity applies even though only the parsable
+        // value could ever verify. The scan compares bytes, not decoded
+        // signatures.
+        let name = HeaderName::from_static("x-hub-signature-256");
+        let mut headers = ActixHeaderMap::new();
+        let opaque = http::header::HeaderValue::from_bytes(&[0xFF])
+            .unwrap_or_else(|_| unreachable!("permitted"));
+        headers.append(name.clone(), opaque);
+        headers.append(
+            name,
+            http::header::HeaderValue::from_static(GITHUB_SIGNATURE),
+        );
+        assert_eq!(
+            conflicting_signature_header(&headers, &["X-Hub-Signature-256"]),
+            Some("X-Hub-Signature-256")
+        );
     }
 
     #[test]

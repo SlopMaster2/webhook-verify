@@ -262,6 +262,8 @@ mod tests {
             // Numeric ±HH:MM offsets resolve to the same UTC instant.
             assert_eq!(parse_header("2024-05-16T07:19:23+02:00"), Ok(1_715_836_763));
             assert_eq!(parse_header("2024-05-16T01:19:23-04:00"), Ok(1_715_836_763));
+            // `+00:00` is the numeric spelling of the same instant as `Z`.
+            assert_eq!(parse_header("2024-05-16T05:19:23+00:00"), Ok(1_715_836_763));
         }
 
         #[test]
@@ -323,6 +325,7 @@ mod tests {
                 "2024-05-16T05:19:23+25:00",
                 "2024-05-16T05:19:23+02:60",
                 "2024-05-16T05:19:23+0200", // no colon in offset
+                "2024-05-16T24:00:00Z",     // RFC 3339 §5.6: 24:00:00 is not a valid hour
                 "2024-05-16T05:19:23.jZ",   // empty fraction
                 "0000-01-01T00:00:00Z",     // pre-epoch
                 "2024-05-16T05:19:23-04",   // truncated offset
@@ -402,6 +405,24 @@ mod tests {
     }
 
     #[test]
+    fn whitespace_padded_timestamp_is_malformed() {
+        // `u64::from_str` trims nothing, but a provider's reverse proxy might
+        // re-emit a padded header value; the signed string uses the header
+        // value verbatim, so padding must fail closed rather than be
+        // normalized away. Mirrors the `+`-prefix case above.
+        for value in [" 1700000000", "1700000000 ", "\t1700000000"] {
+            assert_eq!(
+                parse_timestamp("X-Timestamp", value),
+                Err(VerifyError::MalformedHeader {
+                    header: "X-Timestamp",
+                    reason: "timestamp is not a valid unix timestamp",
+                }),
+                "input: {value:?}"
+            );
+        }
+    }
+
+    #[test]
     fn overflowing_timestamp_is_malformed() {
         assert_eq!(
             parse_timestamp("X-Timestamp", "99999999999999999999"),
@@ -464,6 +485,27 @@ mod tests {
             ..VerifyOptions::default()
         };
         assert!(check_replay(ts, &opts).is_ok());
+    }
+
+    #[test]
+    fn zero_clock_fails_closed_on_realistic_timestamps() {
+        // Under `--no-default-features`, a missing `Clock` makes
+        // `options.now()` return 0 (options.rs). A clock reading 0 must
+        // reject any realistic delivery timestamp rather than treating every
+        // delivery as "from the epoch" — the doc-comment contract of
+        // `check_replay` (replay.rs). `FixedClock(0)` reproduces the no_std
+        // fallback deterministically.
+        let opts = VerifyOptions {
+            max_age: Some(Duration::from_secs(300)),
+            clock: Some(Arc::new(FixedClock(0))),
+            ..VerifyOptions::default()
+        };
+        assert!(matches!(
+            check_replay(1_700_000_000, &opts),
+            Err(VerifyError::TimestampOutOfTolerance { .. })
+        ));
+        // An exact-epoch timestamp is the only peer a 0-reading clock accepts.
+        assert!(check_replay(0, &opts).is_ok());
     }
 
     #[test]

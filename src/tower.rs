@@ -400,6 +400,14 @@ mod tests {
     const SLACK_SIGNATURE: &str =
         "a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503";
 
+    /// Standard Webhooks official test-suite vector (same constants as
+    /// `src/providers/standard_webhooks.rs`, which links the source).
+    const STANDARD_WEBHOOKS_SECRET: &str = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+    const STANDARD_WEBHOOKS_ID: &str = "msg_p5jXN8AQM9LWM0D4loKWxJek";
+    const STANDARD_WEBHOOKS_TIMESTAMP: u64 = 1_614_265_330;
+    const STANDARD_WEBHOOKS_BODY: &[u8] = br#"{"test": 2432232314}"#;
+    const STANDARD_WEBHOOKS_SIGNATURE: &str = "g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=";
+
     type TestBody = Full<Bytes>;
 
     /// Inner service echoing how many body bytes it saw, so tests assert the
@@ -581,6 +589,123 @@ mod tests {
         });
     }
 
+    #[test]
+    fn conflicting_duplicate_id_header_is_rejected_for_standard_webhooks() {
+        // Standard Webhooks reads three headers (webhook-id,
+        // webhook-timestamp, webhook-signature); the ambiguity scan covers
+        // all three. The signature below is the official vector's over the
+        // *first* id and the clock is pinned to the vector timestamp, so if
+        // the duplicate `webhook-id` were not flagged this request would
+        // verify — 400 therefore proves the ambiguity check itself fired.
+        let request = Request::builder()
+            .header("webhook-id", STANDARD_WEBHOOKS_ID)
+            .header("webhook-timestamp", STANDARD_WEBHOOKS_TIMESTAMP.to_string())
+            .header(
+                "webhook-signature",
+                format!("v1,{STANDARD_WEBHOOKS_SIGNATURE}"),
+            )
+            .header("webhook-id", "msg_forged")
+            .body(TestBody::new(Bytes::from_static(STANDARD_WEBHOOKS_BODY)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+
+        // Clock pinned to the vector's timestamp so replay accepts the
+        // single-header form (assertion below) and cannot be the rejector.
+        let svc = VerifyLayer::with_options(
+            Provider::StandardWebhooks,
+            Secret::new(STANDARD_WEBHOOKS_SECRET),
+            crate::VerifyOptions {
+                clock: Some(Arc::new(FixedClock(epoch(STANDARD_WEBHOOKS_TIMESTAMP)))),
+                ..crate::VerifyOptions::default()
+            },
+        )
+        .layer(EchoLen);
+        block_on(async {
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        });
+
+        // Sanity: the same headers without the duplicate verify end to end.
+        let good = Request::builder()
+            .header("webhook-id", STANDARD_WEBHOOKS_ID)
+            .header("webhook-timestamp", STANDARD_WEBHOOKS_TIMESTAMP.to_string())
+            .header(
+                "webhook-signature",
+                format!("v1,{STANDARD_WEBHOOKS_SIGNATURE}"),
+            )
+            .body(TestBody::new(Bytes::from_static(STANDARD_WEBHOOKS_BODY)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+        block_on(async {
+            let svc = VerifyLayer::with_options(
+                Provider::StandardWebhooks,
+                Secret::new(STANDARD_WEBHOOKS_SECRET),
+                crate::VerifyOptions {
+                    clock: Some(Arc::new(FixedClock(epoch(STANDARD_WEBHOOKS_TIMESTAMP)))),
+                    ..crate::VerifyOptions::default()
+                },
+            )
+            .layer(EchoLen);
+            let response = svc
+                .oneshot(good)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+        });
+    }
+
+    #[test]
+    fn conflicting_third_signature_value_is_rejected() {
+        // [valid, valid, forged]: the differing value is not adjacent to the
+        // first one. The scan must compare every value against the first, not
+        // just the first pair — a "first-two-only" implementation would let
+        // this verify against the valid first value.
+        let request = Request::builder()
+            .header("X-Hub-Signature-256", GITHUB_SIGNATURE)
+            .header("X-Hub-Signature-256", GITHUB_SIGNATURE)
+            .header(
+                "X-Hub-Signature-256",
+                "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+        block_on(async {
+            let svc = github_service();
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        });
+    }
+
+    #[test]
+    fn comma_joined_signature_value_fails_closed() {
+        // A single header *line* carrying comma-joined values is one HTTP
+        // value, so the ambiguity scan does not (and must not) split it.
+        // Rejection is guaranteed downstream: GitHub hex-decodes the whole
+        // remainder after `sha256=` as one unit and the comma is not hex.
+        // The invariant this pins is "never verifies" — today that is 400.
+        let request = Request::builder()
+            .header(
+                "X-Hub-Signature-256",
+                format!(
+                    "{GITHUB_SIGNATURE},sha256=0000000000000000000000000000000000000000000000000000000000000000"
+                ),
+            )
+            .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+        block_on(async {
+            let svc = github_service();
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        });
+    }
+
     // --- replay protection through the adapter -------------------------------
 
     #[test]
@@ -660,6 +785,62 @@ mod tests {
     }
 
     #[test]
+    fn conflicting_timestamp_header_is_rejected_for_custom_scheme() {
+        // A CustomScheme's `timestamp_header` participates in the ambiguity
+        // scan like a built-in provider's. The clock is pinned to the
+        // timestamp and the digest is valid, so the single-header form would
+        // verify — 400 proves the duplicate timestamp was flagged, not a
+        // replay or signature failure.
+        const DIGEST: &str = "11316937114e6970aa59bd5326a6f38dd525f4ade64670e402bff41e2f7c4071";
+        let scheme = crate::CustomScheme {
+            hash: crate::HashAlg::Sha256,
+            signature_header: "X-My-Sig",
+            timestamp_header: Some("X-My-Ts"),
+            encoding: crate::Encoding::Hex,
+            prefix: Some("sha256="),
+            signed_string: |_headers, body| body.to_vec(),
+        };
+        let options = crate::VerifyOptions {
+            clock: Some(Arc::new(FixedClock(epoch(1_700_000_000)))),
+            ..crate::VerifyOptions::default()
+        };
+
+        let ambiguous = Request::builder()
+            .header("X-My-Sig", format!("sha256={DIGEST}"))
+            .header("X-My-Ts", "1700000000")
+            .header("x-my-ts", "1700000001")
+            .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+        let svc =
+            VerifyLayer::with_options(Provider::Custom(scheme), Secret::new("k"), options.clone())
+                .layer(EchoLen);
+        block_on(async {
+            let response = svc
+                .oneshot(ambiguous)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        });
+
+        // Sanity: a single timestamp verifies end to end under the same clock.
+        let good = Request::builder()
+            .header("X-My-Sig", format!("sha256={DIGEST}"))
+            .header("X-My-Ts", "1700000000")
+            .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+        block_on(async {
+            let svc =
+                VerifyLayer::with_options(Provider::Custom(scheme), Secret::new("k"), options)
+                    .layer(EchoLen);
+            let response = svc
+                .oneshot(good)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+        });
+    }
+
+    #[test]
     fn unsupported_provider_maps_to_internal_server_error() {
         // PayPal stays "unsupported" only when the `paypal` feature is off;
         // see the feature-gated variant below for the implemented path.
@@ -723,6 +904,26 @@ mod tests {
         headers.append("X-Hub-Signature-256", value.clone());
         headers.append("X-Hub-Signature-256", value);
         assert!(conflicting_signature_header(&headers, &["X-Hub-Signature-256"]).is_none());
+    }
+
+    #[test]
+    fn mixed_opaque_and_parsed_signature_values_are_rejected_as_ambiguous() {
+        // One opaque-byte value plus a parsable one: distinct underlying
+        // bytes, so §4.4 ambiguity applies even though only the parsable
+        // value could ever verify. The scan compares bytes, not decoded
+        // signatures.
+        let mut headers = ::http::HeaderMap::new();
+        let opaque = ::http::HeaderValue::from_bytes(&[0xFF])
+            .unwrap_or_else(|_| unreachable!("0xFF is permitted"));
+        headers.append("X-Hub-Signature-256", opaque);
+        headers.append(
+            "X-Hub-Signature-256",
+            ::http::HeaderValue::from_static(GITHUB_SIGNATURE),
+        );
+        assert_eq!(
+            conflicting_signature_header(&headers, &["X-Hub-Signature-256"]),
+            Some("X-Hub-Signature-256")
+        );
     }
 
     #[test]
