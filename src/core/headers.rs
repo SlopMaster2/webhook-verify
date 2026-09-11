@@ -10,7 +10,13 @@ use std::collections::HashMap;
 /// Case-insensitive, read-only header lookup.
 ///
 /// Returns the value of the *first* header matching `name` (ASCII
-/// case-insensitively), or `None` if absent.
+/// case-insensitively), or `None` if absent. For ordered collections
+/// (`Vec`, arrays, slices) "first" means insertion order. For `BTreeMap`
+/// the winner among case-variant keys (e.g. `X-Sig` vs `x-sig`) is the
+/// lexicographically smallest; for `HashMap` it is hash-seed-dependent
+/// and nondeterministic across Rust versions. **Callers must not supply
+/// case-variant keys** when using map-backed `HeaderMap` impls — the
+/// value returned in that scenario is unspecified for those types.
 ///
 /// # Ambiguity contract
 ///
@@ -24,13 +30,17 @@ use std::collections::HashMap;
 ///
 /// For `HashMap` the inherent exact-case `get` shadows this trait method in
 /// method-call position. Pass the map to `HeaderMap::get(&map, name)` to get
-/// the case-insensitive lookup this crate relies on.
+/// the case-insensitive lookup this crate relies on. If the map contains
+/// case-variant keys (e.g. `X-Sig` and `x-sig`), which value is returned
+/// is unspecified — it depends on hash-seed-dependent iteration order.
 ///
 /// # `BTreeMap` caveat
 ///
 /// For [`BTreeMap`] the inherent exact-case `get` shadows this trait method in
 /// method-call position. Pass the map to `HeaderMap::get(&map, name)` to get
-/// the case-insensitive lookup this crate relies on.
+/// the case-insensitive lookup this crate relies on. If the map contains
+/// case-variant keys, the returned value is that of the key that is
+/// lexicographically smallest (by ASCII byte value).
 ///
 /// # Slice caveat
 ///
