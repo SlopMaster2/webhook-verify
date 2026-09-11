@@ -21,6 +21,13 @@
 //! [`VerifyOptions::request_url`] contents, construct your scheme headers to
 //! carry the URL.
 //!
+//! **Ambiguity-check gap:** The tower/actix adapters scan only
+//! [`signature_header`](CustomScheme::signature_header) and
+//! [`timestamp_header`](CustomScheme::timestamp_header) for conflicting
+//! duplicate values (per `spec.md` §4.4). If `signed_string` reads
+//! *additional* headers, duplicates in those are **not** detected. See the
+//! [`CustomScheme`] struct docs for details.
+//!
 //! # Example
 //!
 //! ```
@@ -125,6 +132,19 @@ impl fmt::Display for Encoding {
 /// All comparisons are constant-time and all decoding fails closed, exactly
 /// as for built-in providers.
 ///
+/// **Ambiguity-check caveat.** Framework adapters (`tower`, `actix`) reject
+/// duplicate headers whose values differ — but they only scan the headers
+/// listed by [`signature_header_names`](crate::Provider::signature_header_names),
+/// which for `Custom` is limited to [`signature_header`] and
+/// [`timestamp_header`]. If `signed_string` reads *additional* headers from
+/// the map (e.g. a nonce, a URL, or a second timestamp), duplicate values in
+/// those extra headers are **not** detected. An attacker who can inject a
+/// conflicting value for such a header can cause the proxy and verifier to
+/// disagree on the signed input — the exact scenario `spec.md` §4.4 exists
+/// to prevent. When designing a custom scheme, either limit `signed_string`
+/// to the two declared headers, or accept that the adapter cannot guard
+/// against proxy disagreement on undeclared headers.
+///
 /// [`PartialEq`] compares the declarative configuration only; `signed_string`
 /// is excluded — function pointers have no meaningful or reliable equality.
 #[must_use]
@@ -151,6 +171,12 @@ pub struct CustomScheme {
     /// headers and the **raw** body bytes. Read any additional signed inputs
     /// (timestamps, URL context) out of `headers`; never re-serialize or
     /// normalize `raw_body`.
+    ///
+    /// **Note:** If this function reads headers beyond
+    /// [`signature_header`](Self::signature_header) and
+    /// [`timestamp_header`](Self::timestamp_header), the framework adapters'
+    /// duplicate-header ambiguity check will **not** cover them — see the
+    /// struct-level safety note.
     pub signed_string: fn(&dyn HeaderMap, &[u8]) -> Vec<u8>,
 }
 

@@ -254,6 +254,9 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
             standard_webhooks::SIGNATURE_HEADER,
         ],
         Provider::Custom(scheme) => {
+            // Only the two declared headers are scanned for duplicates.
+            // Additional headers read by signed_string are *not* covered —
+            // see the CustomScheme struct-level safety note.
             let mut names = vec![scheme.signature_header];
             if let Some(timestamp) = scheme.timestamp_header {
                 names.push(timestamp);

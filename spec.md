@@ -763,7 +763,11 @@ ambiguity).
    `HeaderMap` lookup cannot see duplicates, so framework adapters (the
    `tower` and `actix` features) check the raw header map against the
    provider's scheme-relevant signature headers before verifying; identical
-   repeats are not ambiguous and verify normally.
+   repeats are not ambiguous and verify normally. For built-in providers the
+   scan covers every header the scheme declares; for `Custom` providers the
+   scan covers only `signature_header` and `timestamp_header` — if the
+   user's `signed_string` closure reads additional headers, duplicates in
+   those are **not** detected (see `CustomScheme` docs).
 5. **No panics on attacker-controlled input.** Every parsing path
    (`base64::decode`, `hex::decode`, header splitting, integer parsing of
    timestamps) must return `Result`, not `unwrap()`/`expect()`, and this is
