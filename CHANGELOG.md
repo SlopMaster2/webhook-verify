@@ -48,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `CustomScheme` docs: the ambiguity-check caveat referenced
+  `signature_header_names` (a crate-private helper, not a public item) and the
+  two scheme header names via broken intra-doc links, producing rustdoc
+  warnings on every `cargo doc` build (including docs.rs). The links now
+  resolve to the `CustomScheme` fields, and CI builds the docs with
+  `-D warnings` so broken links cannot regress silently.
 - Crate-level docs: the Paddle row in the supported-providers table misstated
   the signed-string construction as `ts.body`; it is `{timestamp}:{raw_body}`
   (literal colon), matching `spec.md` §3 and the implementation.
