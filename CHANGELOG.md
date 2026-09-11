@@ -57,6 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Crate-level docs: the Paddle row in the supported-providers table misstated
   the signed-string construction as `ts.body`; it is `{timestamp}:{raw_body}`
   (literal colon), matching `spec.md` §3 and the implementation.
+- Crate-level docs and README: the SendGrid row described the signed message
+  as `timestamp.body` (implying a dot separator); it is the raw timestamp
+  header immediately concatenated with the raw body, no separator,
+  matching `spec.md` §3 and the implementation.
 - GitHub: the `sha256=` prefix in `X-Hub-Signature-256` is now matched
   case-sensitively, matching GitHub's reference implementations
   (octokit/Ruby). Uppercase/mixed-case prefixes (`SHA256=…`, `Sha256=…`)

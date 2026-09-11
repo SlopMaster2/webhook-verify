@@ -100,9 +100,11 @@ pub(crate) fn verify(
 /// The docs define the format as a comma-separated `key=value` list. The `h`
 /// and `v1` fields (and any unknown future fields) are ignored — they bind
 /// additional HTTP headers into the signature, which this provider does not
-/// verify (the docs recommend the `v0` path for most use cases). A field whose
-/// value is empty is indistinguishable from an absent one and fails closed as
-/// missing. When a field appears more than once, the first occurrence wins
+/// verify (the docs recommend the `v0` path for most use cases). Absent fields
+/// fail closed as `missing ...`. A present field with an empty value also
+/// fails closed, but downstream and with a distinct error (`header is empty`
+/// for `t=`, `signature value is empty` for `v0=`) — not the same as an absent
+/// field. When a field appears more than once, the first occurrence wins
 /// (matching the crate's first-match header semantics).
 fn parse_header(value: &str) -> Result<(String, String), VerifyError> {
     if value.is_empty() {
