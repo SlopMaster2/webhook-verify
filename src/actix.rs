@@ -107,7 +107,7 @@ use actix_web::{
     web::Bytes,
 };
 
-use crate::core::adapter_utils::rejection_status;
+use crate::core::adapter_utils::{conflicting_signature_header, rejection_status};
 use crate::{
     HeaderMap, Provider, Secret, VerifyError, VerifyOptions, providers::signature_header_names,
 };
@@ -282,28 +282,6 @@ impl ResponseError for WebhookVerificationError {
     // The default `error_response` builds an empty-bodied response from
     // `status_code`; that is exactly what we want (spec.md §2.1 / tower
     // adapter parity), so it is not overridden.
-}
-
-/// Returns the name of the first header in `names` that occurs in `headers`
-/// more than once with *differing* values — the ambiguity `spec.md` §4.4
-/// requires rejecting — or `None` when none is ambiguous.
-///
-/// Static header-name constants always parse, so the parse-error arm is
-/// unreachable in practice and simply fails closed (reported as ambiguous).
-fn conflicting_signature_header(
-    headers: &ActixHeaderMap,
-    names: &[&'static str],
-) -> Option<&'static str> {
-    names.iter().copied().find(|name| {
-        let Ok(key) = HeaderName::from_bytes(name.as_bytes()) else {
-            return true;
-        };
-        let mut values = headers.get_all(&key);
-        let Some(first) = values.next() else {
-            return false;
-        };
-        values.any(|value| value != first)
-    })
 }
 
 type ExtractFuture = Pin<Box<dyn Future<Output = Result<VerifiedBody, WebhookVerificationError>>>>;
