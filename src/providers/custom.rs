@@ -134,16 +134,16 @@ impl fmt::Display for Encoding {
 ///
 /// **Ambiguity-check caveat.** Framework adapters (`tower`, `actix`) reject
 /// duplicate headers whose values differ — but they only scan the headers
-/// listed by [`signature_header_names`](crate::Provider::signature_header_names),
-/// which for `Custom` is limited to [`signature_header`] and
-/// [`timestamp_header`]. If `signed_string` reads *additional* headers from
-/// the map (e.g. a nonce, a URL, or a second timestamp), duplicate values in
-/// those extra headers are **not** detected. An attacker who can inject a
-/// conflicting value for such a header can cause the proxy and verifier to
-/// disagree on the signed input — the exact scenario `spec.md` §4.4 exists
-/// to prevent. When designing a custom scheme, either limit `signed_string`
-/// to the two declared headers, or accept that the adapter cannot guard
-/// against proxy disagreement on undeclared headers.
+/// listed by the crate's adapter ambiguity check, which for `Custom` is
+/// limited to [`signature_header`](Self::signature_header) and
+/// [`timestamp_header`](Self::timestamp_header). If `signed_string` reads
+/// *additional* headers from the map (e.g. a nonce, a URL, or a second
+/// timestamp), duplicate values in those extra headers are **not** detected.
+/// An attacker who can inject a conflicting value for such a header can cause
+/// the proxy and verifier to disagree on the signed input — the exact
+/// scenario `spec.md` §4.4 exists to prevent. When designing a custom scheme,
+/// either limit `signed_string` to the two declared headers, or accept that
+/// the adapter cannot guard against proxy disagreement on undeclared headers.
 ///
 /// [`PartialEq`] compares the declarative configuration only; `signed_string`
 /// is excluded — function pointers have no meaningful or reliable equality.
