@@ -100,6 +100,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `Provider` enum reordered to match the lib.rs doc table.
+- Contributor gate (AGENTS.md): the PR definition-of-done now includes
+  `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, so broken
+  intra-doc links (rustdoc warnings) are caught pre-merge. docs.rs builds with
+  `-D warnings` by default; the corresponding CI job is blocked on the runner
+  token's missing `workflows` permission (issue #18), so this local gate is
+  the backstop.
 - README "Releasing" instructions now tag the release `v0.1.0` (matching
   `Cargo.toml`'s version) instead of the template's `v0.2.0`.
 
