@@ -33,7 +33,7 @@ exclude = [
 
 # build all-features docs on docs.rs so the feature-gated provider (sendgrid,
 # paypal) and adapter (tower, actix) module docs are browsable there — the
-# default-features-only build would otherwise hide them (issue #65).
+# default-features-only build would otherwise hide them.
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

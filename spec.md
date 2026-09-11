@@ -192,7 +192,7 @@ Design rules for errors:
   disguised as `SignatureMismatch` attack signals; the request is still
   rejected.
 
-#### `verify_any` aggregation (decision record, issue #64)
+#### `verify_any` aggregation (decision record)
 
 `verify_any()` iterates a slice of secrets during a rotation window and
 returns `Ok(())` if any one of them verifies. Its error aggregation rules:
@@ -908,7 +908,7 @@ A provider implementation is not mergeable until it has:
   automated key rotation handling is ever requested — it stays out of this
   crate either way.
 
-- **Secret rotation UX.** *Resolved (2026-09, issue #64).* Stripe/Standard
+- **Secret rotation UX.** *Resolved (2026-09).* Stripe/Standard
   Webhooks allow multiple valid signatures during a rotation window
   (`v1=...,v1=...`). `verify()` keeps `Secret` singular in the core
   signature for ergonomics (multi-`v1=` rotation lists remain accepted
@@ -919,7 +919,7 @@ A provider implementation is not mergeable until it has:
   base64/hex decoding and header string handling; target `no_std + alloc`
   and validate against `wasm32-unknown-unknown` as the primary constrained
   target (webhook verification at the edge, e.g. Cloudflare Workers via
-  `wasm-bindgen`, is a plausible real use case). *Implemented (issue #76):
+  `wasm-bindgen`, is a plausible real use case). *Implemented:
   the core is `no_std + alloc` behind the `std` feature (default on). Building
   with `--no-default-features` drops the wall clock: [`Clock::now`] returns
   unix seconds directly (no `SystemTime`), [`SystemClock`] is `std`-only, and

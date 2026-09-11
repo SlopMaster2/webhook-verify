@@ -452,7 +452,7 @@ pub fn verify_any(
 ) -> Result<(), VerifyError> {
     // First InvalidSecret seen, reported only if *every* secret turns out
     // to be unusable. Not a structural error: it is specific to one secret,
-    // so it must not abort the rotation search (issue #64).
+    // so it must not abort the rotation search.
     let mut first_invalid_secret: Option<VerifyError> = None;
     // Set once a well-formed key fails to match. A signature that fails
     // against a usable key is the definitive total-failure signal and takes
