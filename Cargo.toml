@@ -36,6 +36,7 @@ exclude = [
 # default-features-only build would otherwise hide them (issue #65).
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 actix-web = { version = "4", optional = true, default-features = false }
