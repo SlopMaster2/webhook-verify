@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CustomScheme::new()` convenience constructor plus the
   `with_timestamp_header` / `with_prefix` builders, so declarative schemes
   can be configured without a struct literal (spec §2.2).
+- docs.rs now annotates feature-gated items (the `paypal`/`sendgrid`
+  providers and the `tower`/`actix`/`http` adapters) with the crate feature
+  they require, via `doc_auto_cfg` + the `docsrs` rustdoc cfg. Local/stable
+  builds are unaffected (the cfg is set only on docs.rs).
 
 ### Fixed
 
