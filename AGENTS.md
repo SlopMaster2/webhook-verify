@@ -98,8 +98,9 @@ for CI to catch you — apply them while writing the diff:
    categories present, even if some feel repetitive — they cover distinct
    failure modes.
 5. Update the provider table in `README.md`.
-6. Run `cargo test --all-features && cargo clippy --all-features -- -D warnings`
-   locally before proposing the change.
+6. Run `cargo test --all-features`, `cargo clippy --all-features -- -D warnings`,
+   and `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps` locally
+   before proposing the change.
 
 ## 5. Workflow for fixing a reported verification bug
 
@@ -124,6 +125,10 @@ shouldn't verify does" report as security-relevant until proven otherwise:
       (official vector, negative, tamper, replay, malformed-header)
 - [ ] `cargo test --all-features`, `cargo clippy --all-features -- -D warnings`
       pass locally
+- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps` passes
+      locally (docs.rs builds with `-D warnings`, so a broken intra-doc link is
+      a rustdoc warning that would otherwise surface only there, after merge —
+      see issue #18)
 - [ ] No new dependency added without justification in the PR description
 - [ ] No secret/body/signature material appears in any log, error message,
       panic message, or test-failure output beyond what's needed
