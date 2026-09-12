@@ -81,9 +81,7 @@ impl fmt::Display for VerifyError {
             VerifyError::SignatureMismatch => write!(f, "signature mismatch"),
             VerifyError::TimestampOutOfTolerance { skew, max_age } => write!(
                 f,
-                "timestamp out of tolerance: {}s outside the allowed {:?} window",
-                skew.as_secs(),
-                max_age
+                "timestamp out of tolerance: {skew:?} outside the allowed {max_age:?} window",
             ),
             VerifyError::UnsupportedProvider => {
                 write!(f, "provider not available (feature disabled)")
@@ -170,6 +168,32 @@ mod tests {
         assert_eq!(
             e.to_string(),
             "timestamp out of tolerance: 4s outside the allowed 3.5s window"
+        );
+    }
+
+    #[test]
+    fn display_timestamp_out_of_tolerance_preserves_sub_second_skew() {
+        // A sub-second skew must not be truncated to "0s" in operator-facing
+        // logs either (mirroring the max_age fix): a 150ms skew over a 100ms
+        // window previously read "0s outside the allowed 100ms window",
+        // which does not describe the actual skew. Duration's Debug renders
+        // sub-second values faithfully.
+        let e = VerifyError::TimestampOutOfTolerance {
+            skew: Duration::from_millis(150),
+            max_age: Duration::from_millis(100),
+        };
+        assert_eq!(
+            e.to_string(),
+            "timestamp out of tolerance: 150ms outside the allowed 100ms window"
+        );
+
+        let e = VerifyError::TimestampOutOfTolerance {
+            skew: Duration::from_millis(1_500),
+            max_age: Duration::from_secs(1),
+        };
+        assert_eq!(
+            e.to_string(),
+            "timestamp out of tolerance: 1.5s outside the allowed 1s window"
         );
     }
 
