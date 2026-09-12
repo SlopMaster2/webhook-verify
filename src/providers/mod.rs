@@ -1008,14 +1008,47 @@ mod tests {
     }
 
     #[test]
-    fn provider_parse_error_display_lists_known_names() {
-        assert!(
-            ProviderParseError.to_string().contains("stripe"),
-            "error message should guide the operator toward valid names"
-        );
-        assert!(
-            ProviderParseError.to_string().contains("standardwebhooks"),
-            "error message should guide the operator toward valid names"
-        );
+    fn provider_parse_error_display_lists_every_provider() {
+        // The `ProviderParseError` message hardcodes the provider list; this
+        // guard keeps it from drifting out of sync with `FromStr`/`Display`
+        // when a provider is added. Every canonical lowercase name must be
+        // present so the error actually guides operators back to a parseable
+        // value. `Provider::Custom` is intentionally not listed (it cannot be
+        // parsed from a bare name), matching the message's own wording.
+        let message = ProviderParseError.to_string();
+        for provider in provider_list() {
+            let name = provider.to_string().to_ascii_lowercase();
+            assert!(
+                message.contains(&name),
+                "error message should list `{name}` so operators can recover"
+            );
+        }
+    }
+
+    /// Every name-constructible [`Provider`] variant. Kept beside the
+    /// parse-error guard it serves; the display/round-trip tests retain their
+    /// own explicit lists so a mismatch between the two is caught, not
+    /// masked by shared state.
+    fn provider_list() -> [Provider; 18] {
+        [
+            Provider::Stripe,
+            Provider::GitHub,
+            Provider::Shopify,
+            Provider::Slack,
+            Provider::Square,
+            Provider::Twilio,
+            Provider::Discord,
+            Provider::PayPal,
+            Provider::SendGrid,
+            Provider::Paddle,
+            Provider::Linear,
+            Provider::Notion,
+            Provider::Zoom,
+            Provider::Cloudflare,
+            Provider::Coinbase,
+            Provider::Dropbox,
+            Provider::Xero,
+            Provider::StandardWebhooks,
+        ]
     }
 }
