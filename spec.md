@@ -39,6 +39,7 @@ and the testing bar every provider implementation must clear before merge.
 pub enum Provider {
     Stripe,
     GitHub,
+    HubSpot,
     Shopify,
     Slack,
     Square,

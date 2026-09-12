@@ -138,9 +138,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guarantee. The docs now say the limit bounds the signature-verification
   CPU work only — a `413` still fires before any signature work, but memory
   buffering of an oversized body is not prevented.
-
-### Changed
-
 - Crate-level doc example: the GitHub delivery snippet is no longer `no_run`.
   It executes as a doc-test, so a regression in GitHub's verification fails
   `cargo test` through its doctests (mirroring the earlier `verify_any` doc
