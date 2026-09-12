@@ -478,7 +478,13 @@ mod tests {
                 },
             ),
             (
-                format!("ts=not-a-number,h1={SIGNATURE}"),
+                // `Paddle-Signature` elements are `;`-separated (see
+                // `parse_header`), so this is a well-formed `h1=` signature
+                // coexisting with an unparsable `ts=` value. The bad
+                // timestamp rejects the request; the signature field must
+                // not be folded into the timestamp value (comma would let
+                // `parse_header` swallow it as `ts`'s raw value).
+                format!("ts=not-a-number;h1={SIGNATURE}"),
                 VerifyError::MalformedHeader {
                     header: SIGNATURE_HEADER,
                     reason: "timestamp is not a valid unix timestamp",

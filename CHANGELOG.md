@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Paddle malformed-header test battery: the `ts=not-a-number` case used a
+  comma (`ts=not-a-number,h1=…`) where `Paddle-Signature` elements are
+  `;`-separated. `parse_header` split the lump into a single `ts` element,
+  folding the `h1=` field into the timestamp value, so the test passed
+  without ever parsing the signature field it claimed to cover. The header
+  now uses the documented `;` separator and genuinely exercises a
+  well-formed `h1=` signature coexisting with an unparsable timestamp.
 - `CustomScheme` docs: the ambiguity-check caveat referenced
   `signature_header_names` (a crate-private helper, not a public item) and the
   two scheme header names via broken intra-doc links, producing rustdoc
