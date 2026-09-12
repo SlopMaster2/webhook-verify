@@ -24,9 +24,10 @@
 //!   error response; the request never reaches the inner service.
 //! - **Optional body size limit** (DoS hardening): use
 //!   [`VerifyLayer::with_max_body_size`] to reject oversized request bodies
-//!   with `413 Payload Too Large` before any signature work, preventing a
-//!   malicious client from forcing the server to buffer and HMAC an
-//!   arbitrarily large payload.
+//!   with `413 Payload Too Large` before any signature work, so a malicious
+//!   client cannot force an arbitrarily large HMAC/verification computation.
+//!   The body is always fully buffered (verification requires the exact wire
+//!   bytes); the limit bounds the signature work, not the buffering itself.
 //!
 //! # Status codes
 //!
@@ -162,9 +163,10 @@ impl fmt::Debug for Config {
 /// from `Bytes` works, e.g. `axum::body::Body`.
 ///
 /// Use [`VerifyLayer::with_max_body_size`] to reject oversized request bodies
-/// (`413 Payload Too Large`) before any signature verification work. This
-/// prevents a malicious client from forcing the server to buffer an arbitrarily
-/// large payload and compute HMACs over it.
+/// (`413 Payload Too Large`) before any signature verification work, so a
+/// malicious client cannot force an arbitrarily large HMAC/verification
+/// computation. The body is buffered regardless (verification requires the
+/// exact wire bytes); the limit bounds the verification work, not memory.
 #[must_use]
 #[derive(Clone, Debug)]
 pub struct VerifyLayer<B = Bytes> {
@@ -196,9 +198,11 @@ impl<B> VerifyLayer<B> {
     /// Sets an optional maximum body size in bytes.
     ///
     /// When set, requests whose body exceeds this limit are rejected with
-    /// `413 Payload Too Large` *before* any signature verification work,
-    /// preventing a malicious client from forcing the server to buffer an
-    /// arbitrarily large payload and compute HMACs over it.
+    /// `413 Payload Too Large` *before* any signature verification work, so a
+    /// malicious client cannot force an arbitrarily large HMAC/verification
+    /// computation. The body is fully buffered regardless (verification
+    /// requires the exact wire bytes); the limit bounds the verification
+    /// work, not the buffering itself.
     ///
     /// When `None` (the default), the body is buffered without a size limit.
     ///

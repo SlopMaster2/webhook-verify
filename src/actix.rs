@@ -35,9 +35,10 @@
 //!   sees unverified bytes.
 //! - **Optional body size limit** (DoS hardening): use
 //!   [`WebhookConfig::with_max_body_size`] to reject oversized request bodies
-//!   with `413 Payload Too Large` before any signature work, preventing a
-//!   malicious client from forcing the server to buffer and HMAC an
-//!   arbitrarily large payload.
+//!   with `413 Payload Too Large` before any signature work, so a malicious
+//!   client cannot force an arbitrarily large HMAC/verification computation.
+//!   The body is always fully buffered (verification requires the exact wire
+//!   bytes); the limit bounds the signature work, not the buffering itself.
 //!
 //! # Status codes
 //!
@@ -161,9 +162,11 @@ impl WebhookConfig {
     /// Sets an optional maximum body size in bytes (DoS hardening).
     ///
     /// When set, requests whose body exceeds this limit are rejected with
-    /// `413 Payload Too Large` *before* any signature verification work,
-    /// preventing a malicious client from forcing the server to buffer an
-    /// arbitrarily large payload and compute HMACs over it.
+    /// `413 Payload Too Large` *before* any signature verification work, so a
+    /// malicious client cannot force an arbitrarily large HMAC/verification
+    /// computation. The body is fully buffered regardless (verification
+    /// requires the exact wire bytes); the limit bounds the verification
+    /// work, not the buffering itself.
     ///
     /// When `None` (the default), the body is buffered without a
     /// crate-level size limit (actix-web's own extractor bound still
