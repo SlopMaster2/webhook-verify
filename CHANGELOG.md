@@ -67,6 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `VerifyError::TimestampOutOfTolerance` `Display` no longer truncates the
+  reported skew to whole seconds: a sub-second skew over a sub-second
+  `max_age` window previously read e.g. `0s outside the allowed 100ms
+  window`, which misdescribes the rejection. The skew now renders like the
+  window does (`Duration`'s `Debug`), e.g. `150ms outside the allowed 100ms
+  window` — the same second half of the sub-second-tolerance fix that
+  already applied to `max_age`.
 - Square: the signature-header constant and README table used the
   title-cased `X-Square-HmacSha256-Signature`, but Square's own docs, the
   crate's `spec.md` §3, and the provider module docs all spell the header

@@ -246,9 +246,7 @@ mod tests {
             &hubspot_headers(signature, timestamp_ms),
             body,
             &Secret::new(SECRET),
-            options
-                .with_request_method(method)
-                .with_request_url(url),
+            options.with_request_method(method).with_request_url(url),
         )
     }
 
@@ -286,14 +284,22 @@ mod tests {
 
     #[test]
     fn local_vector_verifies() {
-        assert_eq!(verify_pinned(BODY, SIGNATURE, TIMESTAMP_MS, TIMESTAMP_SECS), Ok(()));
+        assert_eq!(
+            verify_pinned(BODY, SIGNATURE, TIMESTAMP_MS, TIMESTAMP_SECS),
+            Ok(())
+        );
     }
 
     #[test]
     fn boundary_bodies_verify() {
         // Empty body (boundary case), at its own timestamp's clock.
         assert_eq!(
-            verify_pinned(b"", SIGNATURE_EMPTY_BODY, EMPTY_BODY_TIMESTAMP_MS, 1_700_000_001),
+            verify_pinned(
+                b"",
+                SIGNATURE_EMPTY_BODY,
+                EMPTY_BODY_TIMESTAMP_MS,
+                1_700_000_001
+            ),
             Ok(())
         );
 

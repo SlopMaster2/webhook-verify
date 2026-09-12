@@ -267,10 +267,7 @@ impl fmt::Debug for VerifyOptions {
             .field("max_age", &self.max_age)
             .field("clock", &self.clock.as_ref().map(|_| "<injected>"))
             .field("request_url_set", &self.request_url.is_some())
-            .field(
-                "request_method_set",
-                &self.request_method.is_some(),
-            )
+            .field("request_method_set", &self.request_method.is_some())
             .field(
                 "form_params_count",
                 &self.form_params.as_ref().map(|p| p.len()),
