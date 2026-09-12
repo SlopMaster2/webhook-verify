@@ -20,6 +20,11 @@ const MAX_HEADER_LINES: usize = 64;
 const IMPLEMENTED: &[Provider] = &[
     Provider::Stripe,
     Provider::GitHub,
+    // HubSpot needs both a method and a URL in VerifyOptions to get past its
+    // context check and into the signature path; arbitrary header bytes
+    // exercise its header splitting and MissingContext fail-closed paths, and
+    // a well-formed-shaped attempt below reaches base64 decode + HMAC paths.
+    Provider::HubSpot,
     Provider::Shopify,
     Provider::Slack,
     Provider::Linear,
@@ -128,6 +133,11 @@ fuzz_target!(|data: &[u8]| {
     let url_scoped_options =
         VerifyOptions::default().with_request_url("https://example.com/webhook");
 
+    // HubSpot additionally signs the request method into its source string.
+    let hubspot_options = VerifyOptions::default()
+        .with_request_method("POST")
+        .with_request_url("https://example.com/webhook");
+
     // Twilio additionally needs parsed form params; arbitrary field bytes
     // exercise its signed-string construction and base64 parsing paths.
     let twilio_options = VerifyOptions::default()
@@ -145,6 +155,11 @@ fuzz_target!(|data: &[u8]| {
     attempt(Provider::Square, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
     attempt(Provider::Twilio, &headers, body, WELL_FORMED_SECRET, &twilio_options);
     attempt(Provider::Twilio, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
+    // HubSpot: method-only and url-only options exercise the two MissingContext
+    // fail-closed paths; the combined options reach the signature path below.
+    attempt(Provider::HubSpot, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default().with_request_method("POST"));
+    attempt(Provider::HubSpot, &headers, body, WELL_FORMED_SECRET, &url_scoped_options);
+    attempt(Provider::HubSpot, &headers, body, WELL_FORMED_SECRET, &hubspot_options);
 
     // Discord's secret must be a *valid hex public key* to get past the key
     // gate and reach its signature header parsing; neither WELL_FORMED_SECRET
@@ -315,6 +330,28 @@ fuzz_target!(|data: &[u8]| {
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,
+    );
+
+    // HubSpot: a well-formed-shaped `X-HubSpot-Signature-V3` (base64 32-byte,
+    // per WELL_FORMED_SECRET) plus a digit millisecond timestamp lets
+    // arbitrary body/method/URL bytes reach the 32-byte length gate and HMAC
+    // comparison (via the constant-time path), and its ms→s replay handling;
+    // without the context the loop above mostly fails earlier.
+    attempt(
+        Provider::HubSpot,
+        &[
+            (
+                "X-HubSpot-Signature-V3".to_string(),
+                WELL_FORMED_SECRET.to_string(),
+            ),
+            (
+                "X-HubSpot-Request-Timestamp".to_string(),
+                "1700000000000".to_string(),
+            ),
+        ],
+        body,
+        WELL_FORMED_SECRET,
+        &hubspot_options,
     );
 
     for &provider in IMPLEMENTED {
