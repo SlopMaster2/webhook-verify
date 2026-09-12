@@ -67,6 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `VerifyOptions::with_form_params` docs: the builder claimed "Order does not
+  matter; fields are sorted into signing order during verification." That
+  holds for distinct field names, but Twilio's scheme signs same-named fields
+  in their received relative order (the sort is stable, `spec.md` §3, Twilio
+  row), so passing duplicates reordered broke verification while the docs
+  implied any order was safe. The docs now state the duplicate-names
+  exception, matching the field documentation and the implementation.
 - `VerifyError::TimestampOutOfTolerance` `Display` no longer truncates the
   reported skew to whole seconds: a sub-second skew over a sub-second
   `max_age` window previously read e.g. `0s outside the allowed 100ms
