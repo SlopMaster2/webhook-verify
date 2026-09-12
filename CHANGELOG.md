@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- HubSpot webhook provider (v3 scheme) — HMAC-SHA256 over
+  `{method}{uri}{raw_body}{timestamp}`, base64-encoded,
+  `X-HubSpot-Signature-V3` with the `X-HubSpot-Request-Timestamp` header
+  carrying unix **epoch milliseconds**, and a replay window (ms → whole
+  seconds by integer division, shared symmetric tolerance). Requires the new
+  `VerifyOptions::request_method` option alongside `request_url`, since this
+  is the only scheme that signs the HTTP method. Backed by an official test
+  vector from HubSpot's webhook docs (the worked example reproduces the
+  published `base64(HMAC-SHA256(...))` byte-for-byte).
 - Coinbase (CDP) webhook provider — HMAC-SHA256 over `{t}.{raw_body}`,
   hex-encoded, `v0` scheme in the combined `X-Hook0-Signature` header
   (`t=`/`v0=` fields, `h=`/`v1=` header-binding fields tolerated but not

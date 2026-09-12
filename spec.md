@@ -81,8 +81,13 @@ pub struct VerifyOptions {  // #[non_exhaustive]: configure via Default + the
     /// Clock used for "now", injectable for deterministic tests.
     pub clock: Option<Arc<dyn Clock>>,
     /// Full URL of the receiving endpoint, for URL-scoped schemes
-    /// (currently Square, Twilio). See §3.
+    /// (currently Square, Twilio, HubSpot). See §3.
     pub request_url: Option<String>,
+    /// HTTP request method (uppercase, e.g. `POST`), for schemes that sign
+    /// the method into their source string (currently HubSpot's v3 scheme).
+    /// Must match the method the provider actually sent for the delivery.
+    /// No effect on providers that do not sign the method. See §3.
+    pub request_method: Option<String>,
     /// Parsed `application/x-www-form-urlencoded` fields, required by
     /// schemes that sign form fields rather than the raw body
     /// (currently Twilio). Pass every field as received; sorting into
@@ -110,6 +115,7 @@ impl Default for VerifyOptions {
             max_age: Some(Duration::from_secs(300)),
             clock: None,
             request_url: None,
+            request_method: None,
             form_params: None,
             verifying_material: None,
             webhook_id: None,
@@ -296,6 +302,43 @@ body, multi-value headers, etc.).
   this explicitly rather than silently ignoring the option.
 - Legacy `X-Hub-Signature` (SHA1) supported only via `CustomScheme` — not a
   default path, since GitHub itself deprecated SHA1.
+
+### HubSpot
+
+Source: hubspot.com/docs/api/webhooks (the "webhooks" feature's
+error-handling page, "Signature Version 3", and its worked
+endpoint-confirmation example) — linked in the provider module docs. The
+published example produces a concrete signature that the implementation
+reproduces byte-for-byte.
+
+- Headers: `X-HubSpot-Request-Timestamp` (unix **epoch milliseconds**) and
+  `X-HubSpot-Signature-V3` (`<base64_hmac>`)
+- Signed string: `{request_method}{request_uri}{raw_body}{timestamp}` — the
+  delivery's HTTP method, then the request URI, then the raw body bytes, then
+  the timestamp **exactly as it appears in its header**, all concatenated with
+  no separators
+- Algorithm: HMAC-SHA256, base64-encoded (standard alphabet, padded)
+- Key: the app's "App secret", used as its UTF-8 bytes verbatim
+- Caller-supplied context required: `VerifyOptions::request_method` **and**
+  `VerifyOptions::request_url` (this is the only scheme that signs the HTTP
+  method; the method must match what the provider actually sent). Missing or
+  empty either fails closed with `MissingContext`. The URI must match the
+  exact string HubSpot signed for the delivery; HubSpot documents that *when
+  computing the signature* it decodes certain URL-encoded characters
+  (`%3A`, `%2F`, `%40`, `%26`, `%3D`, `%2B`, `%24`, `%60`, `%22`, `%2C`,
+  `%3B`, `%3E`, `%3C`, `%3F`) in the URI — callers behind those encodings
+  pass the URI in the same decoded form.
+- Replay protection required: signed-timestamp provider, shared symmetric
+  tolerance (`|now - t| <= max_age`, injectable clock), with the timestamp
+  converted from milliseconds to whole seconds by integer division
+  (`millis / 1000`, dropping the sub-second remainder as HubSpot's official
+  Java reference does). HubSpot's own reference snippets use a one-sided
+  five-minute check; this crate applies its single audited symmetric replay
+  backend for consistency with every other provider.
+- Test-vector provenance: the docs' worked example (secret, method, URI, body,
+  millisecond timestamp, expected base64 signature) is reproduced
+  byte-for-byte. Boundary-vector bodies are locally constructed over the
+  documented recipe, pinned against the official example first.
 
 ### Shopify
 

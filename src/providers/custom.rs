@@ -756,6 +756,7 @@ mod tests {
                 max_age: Some(Duration::ZERO),
                 clock: None,
                 request_url: None,
+                request_method: None,
                 form_params: None,
                 verifying_material: None,
                 webhook_id: None,

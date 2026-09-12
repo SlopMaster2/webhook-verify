@@ -12,6 +12,44 @@ use crate::core::options::VerifyOptions;
 /// which header was malformed so callers (built-in and `Custom`) surface
 /// the correct name.
 pub(crate) fn parse_timestamp(header: &'static str, value: &str) -> Result<u64, VerifyError> {
+    parse_unsigned_decimal(
+        header,
+        value,
+        "timestamp is not a valid unix timestamp",
+        "timestamp overflows unix seconds",
+    )
+}
+
+/// Parses an epoch-*milliseconds* header value into a `u64`.
+///
+/// HubSpot's `X-HubSpot-Request-Timestamp` is delivered in milliseconds
+/// (`spec.md` §3, HubSpot row), unlike every other timestamped provider's
+/// whole-second values. The shape rules are identical to [`parse_timestamp`]
+/// (pure ASCII digits, no sign/whitespace); only the diagnostics say
+/// milliseconds so operators debugging a rejected delivery are pointed at
+/// the right unit.
+pub(crate) fn parse_millis(header: &'static str, value: &str) -> Result<u64, VerifyError> {
+    parse_unsigned_decimal(
+        header,
+        value,
+        "timestamp is not valid epoch milliseconds",
+        "timestamp overflows epoch milliseconds",
+    )
+}
+
+/// Shared core of [`parse_timestamp`] / [`parse_millis`]: a value must be a
+/// non-empty sequence of pure ASCII digits that fits in `u64`.
+///
+/// Rejects leading `+`/`-`, whitespace, and non-numeric text, all of which
+/// would otherwise pass through Rust's `u64::from_str` (e.g. `+1531420618`).
+/// Timestamps are "integer unix seconds" per `spec.md` §3 (or integer
+/// milliseconds for HubSpot) — no sign prefix is valid.
+fn parse_unsigned_decimal(
+    header: &'static str,
+    value: &str,
+    not_digits_reason: &'static str,
+    overflow_reason: &'static str,
+) -> Result<u64, VerifyError> {
     if value.is_empty() {
         return Err(VerifyError::MalformedHeader {
             header,
@@ -19,15 +57,11 @@ pub(crate) fn parse_timestamp(header: &'static str, value: &str) -> Result<u64, 
         });
     }
 
-    // Reject any value that isn't a pure sequence of ASCII digits. This
-    // refuses leading `+`/`-`, whitespace, and non-numeric text, all of which
-    // would otherwise pass through Rust's `u64::from_str` (e.g. `+1531420618`).
-    // Timestamps are "integer unix seconds" per `spec.md` §3 — no sign prefix
-    // is valid.
+    // Reject any value that isn't a pure sequence of ASCII digits.
     if !value.bytes().all(|b| b.is_ascii_digit()) {
         return Err(VerifyError::MalformedHeader {
             header,
-            reason: "timestamp is not a valid unix timestamp",
+            reason: not_digits_reason,
         });
     }
 
@@ -35,7 +69,7 @@ pub(crate) fn parse_timestamp(header: &'static str, value: &str) -> Result<u64, 
         .parse::<u64>()
         .map_err(|_| VerifyError::MalformedHeader {
             header,
-            reason: "timestamp overflows unix seconds",
+            reason: overflow_reason,
         })
 }
 

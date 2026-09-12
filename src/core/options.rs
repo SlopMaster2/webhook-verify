@@ -112,16 +112,23 @@ pub struct VerifyOptions {
     pub clock: Option<Arc<dyn Clock>>,
     /// Full URL of the receiving endpoint, required by providers whose
     /// signature incorporates it (currently Square, whose scheme signs the
-    /// notification URL followed by the raw body, and Twilio, which signs the
-    /// full request URL). The value must match the URL configured with the
-    /// provider **exactly** — a differing trailing slash or scheme makes every
-    /// signature fail. Providers whose scheme does not sign the URL document
-    /// that this option has no effect on them.
+    /// notification URL followed by the raw body, Twilio, which signs the
+    /// full request URL, and HubSpot's v3 scheme, which signs the request
+    /// method + full request URI + body + timestamp). The value must match the
+    /// URL configured with the provider **exactly** — a differing trailing
+    /// slash or scheme makes every signature fail. Providers whose scheme does
+    /// not sign the URL document that this option has no effect on them.
     ///
     /// Supplying the configured constant from the provider dashboard is the
     /// intended use; reconstructing the URL from request headers behind a
     /// proxy is a common source of verification failures.
     pub request_url: Option<String>,
+    /// HTTP request method (uppercase, e.g. `POST`), required by providers
+    /// whose scheme signs it (currently HubSpot's v3 scheme, which signs
+    /// `{method}{uri}{raw_body}{timestamp}`). Must match the method HubSpot
+    /// actually sent for the delivery. Providers whose scheme does not sign
+    /// the method document that this option has no effect on them.
+    pub request_method: Option<String>,
     /// Parsed `application/x-www-form-urlencoded` fields, required by Twilio:
     /// its signature covers the request URL concatenated with the sorted
     /// form-field names/values, not the raw body. Pass **every** field as
@@ -166,6 +173,7 @@ impl Default for VerifyOptions {
             max_age: Some(Duration::from_secs(300)),
             clock: None,
             request_url: None,
+            request_method: None,
             form_params: None,
             verifying_material: None,
             webhook_id: None,
@@ -177,6 +185,13 @@ impl VerifyOptions {
     /// Sets [`VerifyOptions::request_url`], for URL-scoped schemes.
     pub fn with_request_url(mut self, url: impl Into<String>) -> Self {
         self.request_url = Some(url.into());
+        self
+    }
+
+    /// Sets [`VerifyOptions::request_method`], the HTTP request method
+    /// (uppercase) for schemes that sign it (currently HubSpot's v3 scheme).
+    pub fn with_request_method(mut self, method: impl Into<String>) -> Self {
+        self.request_method = Some(method.into());
         self
     }
 
@@ -253,6 +268,10 @@ impl fmt::Debug for VerifyOptions {
             .field("clock", &self.clock.as_ref().map(|_| "<injected>"))
             .field("request_url_set", &self.request_url.is_some())
             .field(
+                "request_method_set",
+                &self.request_method.is_some(),
+            )
+            .field(
                 "form_params_count",
                 &self.form_params.as_ref().map(|p| p.len()),
             )
@@ -288,6 +307,7 @@ mod tests {
             max_age: Some(Duration::from_secs(300)),
             clock: Some(Arc::new(FixedClock(epoch(1_700_000_000)))),
             request_url: None,
+            request_method: None,
             form_params: None,
             verifying_material: None,
             webhook_id: None,
@@ -302,6 +322,13 @@ mod tests {
             opts.request_url.as_deref(),
             Some("https://example.com/webhook")
         );
+    }
+
+    #[test]
+    fn builder_sets_request_method() {
+        let opts = VerifyOptions::default().with_request_method("POST");
+        assert_eq!(opts.request_method.as_deref(), Some("POST"));
+        assert!(VerifyOptions::default().request_method.is_none());
     }
 
     #[test]
