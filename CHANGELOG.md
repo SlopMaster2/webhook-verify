@@ -58,6 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Square: the signature-header constant and README table used the
+  title-cased `X-Square-HmacSha256-Signature`, but Square's own docs, the
+  crate's `spec.md` §3, and the provider module docs all spell the header
+  `x-square-hmacsha256-signature`. The constant and README now match the
+  provider's spelling (lookup is ASCII case-insensitive, so this only
+  changes the header name surfaced in `VerifyError` messages on the
+  adapter duplicate-scan, aligning operator-facing output with Square's
+  documentation).
 - Paddle malformed-header test battery: the `ts=not-a-number` case used a
   comma (`ts=not-a-number,h1=…`) where `Paddle-Signature` elements are
   `;`-separated. `parse_header` split the lump into a single `ts` element,

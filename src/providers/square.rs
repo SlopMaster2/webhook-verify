@@ -53,7 +53,13 @@ use crate::core::secret::Secret;
 use base64::Engine;
 
 /// The header carrying Square's signature.
-pub(crate) const SIGNATURE_HEADER: &str = "X-Square-HmacSha256-Signature";
+///
+/// Square's docs and official SDKs spell this header lowercase
+/// (`x-square-hmacsha256-signature`); the `HeaderMap` lookup is ASCII
+/// case-insensitive, so the raw-bytes spelling surfaced in `VerifyError`
+/// messages and adapter scans follows the provider's own spelling
+/// (`spec.md` §3, Square row).
+pub(crate) const SIGNATURE_HEADER: &str = "x-square-hmacsha256-signature";
 
 /// HMAC-SHA256 output length in bytes.
 const SIGNATURE_LEN_BYTES: usize = 32;
