@@ -9,8 +9,12 @@
 //!
 //! ## Example: verifying a GitHub delivery
 //!
-//! ```no_run
-//! use webhook_verify::{verify, HeaderMap, Provider, Secret};
+//! The [`VerifyError`] assertions make this snippet run as a doc-test, so a
+//! regression in GitHub's verification fails `cargo test` through its
+//! doctests rather than only through the unit tests.
+//!
+//! ```
+//! use webhook_verify::{verify, HeaderMap, Provider, Secret, VerifyError};
 //!
 //! let headers: Vec<(String, String)> = vec![(
 //!     "X-Hub-Signature-256".to_string(),
@@ -26,7 +30,17 @@
 //!     Default::default(),
 //! );
 //!
-//! assert!(result.is_ok());
+//! assert_eq!(result, Ok(()));
+//!
+//! // A tampered delivery fails closed through the same call.
+//! let tampered = verify(
+//!     Provider::GitHub,
+//!     &headers,
+//!     b"Hello, World?",
+//!     &Secret::new("It's a Secret to Everybody"),
+//!     Default::default(),
+//! );
+//! assert_eq!(tampered, Err(VerifyError::SignatureMismatch));
 //! ```
 //!
 //! `raw_body` **must** be the exact bytes the provider sent — before any JSON

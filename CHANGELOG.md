@@ -107,6 +107,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Crate-level doc example: the GitHub delivery snippet is no longer `no_run`.
+  It executes as a doc-test, so a regression in GitHub's verification fails
+  `cargo test` through its doctests (mirroring the earlier `verify_any` doc
+  example conversion).
 - `Provider` enum reordered to match the lib.rs doc table.
 - Contributor gate (AGENTS.md): the PR definition-of-done now includes
   `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, so broken
