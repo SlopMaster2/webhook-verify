@@ -131,6 +131,15 @@ pub enum Provider {
     /// providers and internal senders without waiting on a crate release,
     /// with the same constant-time and fail-closed guarantees as the
     /// built-ins. See [`CustomScheme`].
+    ///
+    /// **Equality caveat.** [`CustomScheme`]'s `PartialEq`/`Eq`/`Hash`
+    /// compare the declarative configuration *only*: `signed_string` is a
+    /// function pointer and is excluded (it has no reliable equality). Two
+    /// `Provider::Custom` values can therefore compare equal while building
+    /// entirely different signed strings — so `Provider` equality must not
+    /// be used to dispatch or deduplicate custom schemes. Rely on
+    /// [`fmt::Display`], which *does* reflect the full declarative
+    /// configuration, to identify one custom scheme in logs and config.
     Custom(CustomScheme),
 }
 
@@ -156,7 +165,15 @@ impl fmt::Display for Provider {
             Provider::Xero => f.write_str("Xero"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
-                write!(f, "Custom({})", scheme.signature_header)
+                write!(f, "Custom({}", scheme.signature_header)?;
+                write!(f, ", {}, {}", scheme.hash, scheme.encoding)?;
+                if let Some(prefix) = scheme.prefix {
+                    write!(f, ", prefix `{prefix}`")?;
+                }
+                if let Some(timestamp) = scheme.timestamp_header {
+                    write!(f, ", timestamp header `{timestamp}`")?;
+                }
+                f.write_str(")")
             }
         }
     }
@@ -914,7 +931,23 @@ mod tests {
             prefix: None,
             signed_string: |_h, b| b.to_vec(),
         });
-        assert_eq!(custom.to_string(), "Custom(X-My-Sig)");
+        assert_eq!(custom.to_string(), "Custom(X-My-Sig, SHA-256, hex)");
+
+        // A scheme sharing the header but differing in encoding, prefix, or
+        // timestamp header must render differently so operators can tell two
+        // configurations apart even when they share a header name.
+        let prefixed = Provider::Custom(CustomScheme {
+            hash: HashAlg::Sha512,
+            signature_header: "X-My-Sig",
+            timestamp_header: Some("X-My-Ts"),
+            encoding: Encoding::Base64,
+            prefix: Some("v1="),
+            signed_string: |_h, b| b.to_vec(),
+        });
+        assert_eq!(
+            prefixed.to_string(),
+            "Custom(X-My-Sig, SHA-512, base64, prefix `v1=`, timestamp header `X-My-Ts`)"
+        );
     }
 
     #[test]

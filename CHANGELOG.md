@@ -46,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   they require, via `doc_auto_cfg` + the `docsrs` rustdoc cfg. Local/stable
   builds are unaffected (the cfg is set only on docs.rs).
 
+### Changed
+
+- [`Provider`](crate::Provider) `Display` for the `Custom` variant now
+  renders the full declarative scheme configuration (signature header, hash
+  algorithm, encoding, and any configured prefix/timestamp header) instead
+  of only the signature header name. Two custom schemes sharing a header
+  name but differing in encoding or hash previously logged identically;
+  operators can now tell them apart. The `signed_string` closure has no
+  reliable textual form and is intentionally not rendered.
+
 ### Fixed
 
 - Paddle malformed-header test battery: the `ts=not-a-number` case used a
