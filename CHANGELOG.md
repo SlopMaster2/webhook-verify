@@ -96,6 +96,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `default-features = false` previously broke with raw `cannot find crate
   std` errors, even though the `no_std + alloc` guarantee is scoped to the
   core path (`spec.md` §7). The combos now compile (they reintroduce `std`).
+- Adapter docs (tower `VerifyLayer`/actix `WebhookConfig` module docs,
+  `with_max_body_size` rustdoc, README): the `max_body_size` limit was
+  described as preventing the server from *buffering* an arbitrarily large
+  payload. Both adapters fully buffer the body before the size check
+  (verification requires the exact wire bytes), so the claim overstated the
+  guarantee. The docs now say the limit bounds the signature-verification
+  CPU work only — a `413` still fires before any signature work, but memory
+  buffering of an oversized body is not prevented.
 
 ### Changed
 

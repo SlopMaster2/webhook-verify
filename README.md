@@ -231,9 +231,9 @@ then deserialize freely. Verification failures never reach your handler:
 | Signature mismatch / stale timestamp | `401 Unauthorized` |
 | Operator misconfiguration | `500 Internal Server Error` |
 
-By default the body is buffered with no size limit. To prevent a malicious
-client from streaming an arbitrarily large payload (a memory/CPU amplification
-vector), configure an optional maximum body size with
+By default the body is buffered with no size limit. To stop a malicious
+client from forcing an arbitrarily large HMAC/verification computation,
+configure an optional maximum body size with
 `VerifyLayer::with_max_body_size(bytes)`:
 
 ```rust
@@ -245,8 +245,11 @@ let layer = VerifyLayer::new(Provider::Stripe, Secret::new("whsec_..."))
     .with_max_body_size(256 * 1024);
 ```
 
-Requests whose body exceeds the limit are rejected with `413 Payload Too
-Large` before any signature verification work.
+The body is always fully buffered (verification requires the exact wire
+bytes), so this limit bounds the signature-verification work on oversized
+payloads rather than the buffering itself. Requests whose body exceeds the
+limit are rejected with `413 Payload Too Large` before any signature
+verification work.
 
 Plain tower stacks receive `Request<Bytes>`; axum users get their own body
 type back automatically via type inference:
