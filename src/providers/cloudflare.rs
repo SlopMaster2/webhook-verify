@@ -96,9 +96,9 @@ pub(crate) fn verify(
 /// (forward compatible). Absent fields fail closed as `missing ...`. A present
 /// field with an empty value also fails closed, but downstream and with a
 /// distinct error (`header is empty` for `time=`, `signature value is empty`
-/// for `sig1=`) — not the same as an absent field. When a field appears more
-/// than once, the first occurrence wins (matching the crate's first-match
-/// header semantics).
+/// for `sig1=`) — not the same as an absent field. A duplicate `time` or
+/// `sig1` field is rejected as ambiguous (`spec.md` §4.4) rather than
+/// first-wins like the reference code — this crate fails closed on ambiguity.
 fn parse_header(value: &str) -> Result<(String, String), VerifyError> {
     if value.is_empty() {
         return Err(VerifyError::MalformedHeader {
@@ -114,9 +114,21 @@ fn parse_header(value: &str) -> Result<(String, String), VerifyError> {
         let Some((key, val)) = element.split_once('=') else {
             continue;
         };
-        if key == TIME_FIELD && time.is_none() {
+        if key == TIME_FIELD {
+            if time.is_some() {
+                return Err(VerifyError::MalformedHeader {
+                    header: SIGNATURE_HEADER,
+                    reason: "multiple timestamps",
+                });
+            }
             time = Some(val);
-        } else if key == SIG_FIELD && sig1.is_none() {
+        } else if key == SIG_FIELD {
+            if sig1.is_some() {
+                return Err(VerifyError::MalformedHeader {
+                    header: SIGNATURE_HEADER,
+                    reason: "multiple signatures",
+                });
+            }
             sig1 = Some(val);
         }
     }
@@ -473,6 +485,22 @@ mod tests {
                 VerifyError::MalformedHeader {
                     header: SIGNATURE_HEADER,
                     reason: "timestamp overflows unix seconds",
+                },
+            ),
+            // Ambiguous duplicate `time` field: reject, never first-wins.
+            (
+                format!("time={TIME},time={},{SIG_FIELD}={SIGNATURE}", TIME + 60),
+                VerifyError::MalformedHeader {
+                    header: SIGNATURE_HEADER,
+                    reason: "multiple timestamps",
+                },
+            ),
+            // Ambiguous duplicate `sig1` field: reject, never first-wins.
+            (
+                format!("time={TIME},{SIG_FIELD}={SIGNATURE},{SIG_FIELD}={SIGNATURE}"),
+                VerifyError::MalformedHeader {
+                    header: SIGNATURE_HEADER,
+                    reason: "multiple signatures",
                 },
             ),
         ];
