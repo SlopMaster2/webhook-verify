@@ -108,6 +108,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the backstop.
 - README "Releasing" instructions now tag the release `v0.1.0` (matching
   `Cargo.toml`'s version) instead of the template's `v0.2.0`.
+- Cloudflare and Coinbase combined-header fields (`time`/`sig1` and `t`/`v0`)
+  are now rejected when repeated instead of first-wins: ambiguous signing
+  material fails closed (`spec.md` §4.4), matching the existing Stripe and
+  Paddle behavior.
 
 ## [0.1.0] - Unreleased
 

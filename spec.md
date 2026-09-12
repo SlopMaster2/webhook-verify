@@ -654,6 +654,10 @@ Cloudflare has other webhook schemes (e.g. the legacy Apps
   set by the server; `sig1` is the hex-encoded signature over the body.
   Unknown fields are ignored; the header must carry both `time` and `sig1`
   fields or it fails closed as `MalformedHeader`.
+- Duplicate `time` or `sig1` fields are rejected as ambiguous — never
+  first-wins, following the crate-wide rule that malformed/ambiguous signing
+  material fails closed rather than defaulting to valid (the reference code
+  takes the first occurrence; this crate does not).
 - Signed string: `"{time}.{raw_body}"` — the `time` value exactly as it
   appears in the header, a literal dot, then the raw request body bytes,
   unmodified. ("Every byte in the request body must remain unaltered for
@@ -692,6 +696,10 @@ with [`CustomScheme`] if needed) and is not this provider.
   body and timestamp only"); `h`/`v1` additionally bind the listed HTTP
   headers. Unknown fields are ignored; the header must carry both `t` and `v0`
   fields or it fails closed as `MalformedHeader`.
+- Duplicate `t` or `v0` fields are rejected as ambiguous — never first-wins,
+  following the crate-wide rule that malformed/ambiguous signing material
+  fails closed rather than defaulting to valid (the reference code takes the
+  first occurrence; this crate does not).
 - Verified variant: `v0`. The docs' own guidance is "unless you want to bind
   the headers, which is unnecessary for most use cases, use `v0`", so only
   `v0` is interpreted and verified; `h` and `v1` (and any future fields) are
