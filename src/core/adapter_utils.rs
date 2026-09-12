@@ -114,6 +114,8 @@ pub(crate) fn rejection_status(error: &VerifyError) -> u16 {
 mod tests {
     use super::rejection_status;
     use crate::VerifyError;
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
 
     fn status_of(error: VerifyError) -> u16 {
         rejection_status(&error)

@@ -287,6 +287,8 @@ impl fmt::Debug for VerifyOptions {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
     use std::sync::Arc;
     use std::time::Duration;
 

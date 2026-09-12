@@ -4,6 +4,19 @@
 use alloc::sync::Arc;
 use core::time::Duration;
 
+// The `std` prelude is not injected under `#![no_std]`, so while the crate
+// itself only needs core+alloc, the test modules were written assuming the
+// standard prelude (String, Vec, ToString, format!, vec!). Re-export exactly
+// that subset here so a single glob (`use crate::test_helpers::*;`) restores
+// it under `no_std` test builds without pulling in core-prelude duplicates.
+#[cfg(not(feature = "std"))]
+pub use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+
 use crate::core::options::{Clock, VerifyOptions};
 
 /// A [`Clock`] pinned to a fixed unix-seconds instant.

@@ -370,6 +370,8 @@ mod tests {
     use crate::core::secret::Secret;
     use crate::providers::Provider;
     use crate::test_helpers::clocked_at;
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
     use crate::verify;
     use std::time::Duration;
 

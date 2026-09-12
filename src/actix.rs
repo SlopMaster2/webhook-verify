@@ -377,6 +377,8 @@ impl HeaderMap for ActixHeaderMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
     // Aliased: a plain `use ..::test` would make `#[test]` resolve to the
     // actix module instead of the built-in attribute.
     #[cfg(feature = "paypal")]

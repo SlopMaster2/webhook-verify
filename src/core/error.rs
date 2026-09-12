@@ -99,6 +99,9 @@ impl std::error::Error for VerifyError {}
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
+
     use super::VerifyError;
     use core::time::Duration;
 

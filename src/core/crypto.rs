@@ -419,6 +419,8 @@ pub(crate) fn check_rsa_pkcs1v15_sha256(
 #[cfg(test)]
 mod tests {
     use super::{verify_ed25519, verify_hmac_sha1, verify_hmac_sha256, verify_hmac_sha512};
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
 
     /// Decodes a hardcoded vector; keeps the crate-wide
     /// `clippy::unwrap_used`/`expect_used` denials intact in tests too.
@@ -574,6 +576,9 @@ mod tests {
 
     #[cfg(feature = "paypal")]
     mod paypal {
+        #[cfg(not(feature = "std"))]
+        use crate::test_helpers::*;
+
         use super::super::{check_rsa_pkcs1v15_sha256, crc32_body, extract_rsa_pubkey_from_x509};
         use crate::core::crypto::RsaSha256Check;
         use crate::core::error::VerifyError;

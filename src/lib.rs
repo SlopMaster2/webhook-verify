@@ -111,6 +111,8 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 extern crate alloc;
+#[cfg(all(test, not(feature = "std")))]
+extern crate std;
 
 mod core;
 mod providers;

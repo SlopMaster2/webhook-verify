@@ -154,7 +154,11 @@ impl HeaderMap for ::http::HeaderMap {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
+    use std::collections::BTreeMap;
+    #[cfg(feature = "std")]
+    use std::collections::HashMap;
 
     use super::HeaderMap;
 

@@ -874,6 +874,12 @@ A provider implementation is not mergeable until it has:
 
 - `cargo test --all-features` on stable, MSRV, and beta.
 - `cargo clippy --all-features -- -D warnings`.
+- `cargo test --no-default-features --features sendgrid,paypal` on stable, so
+  the `no_std + alloc` paths (the wall-clock fallback in [`Clock::now`], the
+  `std::error::Error`-less [`VerifyError`], and the `no_std` re-exports) are
+  behaviorally covered rather than only build-checked for wasm32.
+- `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, so a
+  broken intra-doc link fails CI instead of silently degrading docs.rs.
 - `cargo fuzz build` (build-only in normal CI; timed fuzz runs in a
   scheduled nightly job).
 - A grep-based CI check that fails the build if any of `println!`,
@@ -980,8 +986,11 @@ A provider implementation is not mergeable until it has:
   (replay-protected) providers; a missing clock reads 0 and fail-closes replay
   checks. The wasm regression job ships in CI
   (`.github/workflows/ci.yml`: `cargo build --no-default-features --features
-  sendgrid,paypal --target wasm32-unknown-unknown`), so this configuration
-  cannot silently regress. The `no_std + alloc` scope covers the core
+  sendgrid,paypal --target wasm32-unknown-unknown`), and the full test suite
+  also runs against the `--no-default-features` build on the host
+  (`cargo test --no-default-features --features sendgrid,paypal`, §6) once the
+  `test-nostd` job ships, so this configuration cannot silently regress. The
+  `no_std + alloc` scope covers the core
   verification path only: the `tower` and `actix` adapters are std-only
   framework glue and therefore imply the `std` feature when enabled —
   a `default-features = false` build with either of them simply gets `std`

@@ -360,6 +360,8 @@ mod tests {
     use super::*;
     #[cfg(feature = "paypal")]
     use crate::VerifyingKeyMaterial;
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
     use crate::test_helpers::{FixedClock, clocked_at, epoch};
     use ::http_body_util::Full;
     use ::tower::ServiceExt;

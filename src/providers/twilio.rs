@@ -168,6 +168,8 @@ mod tests {
     use crate::core::error::VerifyError;
     use crate::core::options::VerifyOptions;
     use crate::core::secret::Secret;
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
     use crate::verify;
 
     /// Official vector from Twilio's own documentation ("Explore the

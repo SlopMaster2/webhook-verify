@@ -67,6 +67,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `no_std + alloc` configuration is now behaviorally testable: the full test
+  suite compiles and passes with `cargo test --no-default-features --features
+  sendgrid,paypal` (tests run on the host, no wasm target needed). Test modules
+  pick up the standard-prelude names they assume (`String`, `Vec`,
+  `ToString`, `format!`, `vec!`) through a `no_std`-gated re-export in the
+  shared test helpers — previously the `cfg(not(feature = "std"))` branches
+  (the wall-clock fallback in `VerifyOptions::now()`, the
+  `std::error::Error`-less `VerifyError`, and the `no_std` re-exports) were
+  only build-checked for `wasm32`, so a behavioral regression in them would
+  pass CI.
+- CI now builds the docs with `RUSTDOCFLAGS="-D warnings"`, so a broken
+  intra-doc link fails the build instead of silently degrading docs.rs output.
 - `VerifyOptions::with_form_params` docs: the builder claimed "Order does not
   matter; fields are sorted into signing order during verification." That
   holds for distinct field names, but Twilio's scheme signs same-named fields

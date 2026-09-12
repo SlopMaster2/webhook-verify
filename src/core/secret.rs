@@ -61,6 +61,9 @@ impl fmt::Display for Secret {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
+
     use super::Secret;
 
     #[test]

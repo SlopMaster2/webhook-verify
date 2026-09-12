@@ -533,6 +533,8 @@ mod tests {
     use crate::core::error::VerifyError;
     use crate::core::secret::Secret;
     use crate::test_helpers::clocked_at;
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
     use std::time::Duration;
 
     /// Locally constructs a Slack `v0=` signature over `v0:{ts}:{body}` with

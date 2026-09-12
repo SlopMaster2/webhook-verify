@@ -106,6 +106,8 @@ mod tests {
     use super::SIGNATURE_HEADER;
     use crate::core::error::VerifyError;
     use crate::core::secret::Secret;
+    #[cfg(not(feature = "std"))]
+    use crate::test_helpers::*;
     use crate::verify;
     use std::time::Duration;
 
