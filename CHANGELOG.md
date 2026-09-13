@@ -64,6 +64,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The crate-level `missing_docs` lint is `deny` instead of `warn`: an
+  undocumented public item is now a hard compile error in every configuration
+  (stable/MSRV/beta, clippy, and the `no_std` feature matrix) instead of a
+  warning the contributor gates never promoted to failure. Docs on every
+  existing public item already satisfy the bar; this only guards future API
+  surface against silent doc drift.
 - [`Provider`](crate::Provider) `Display` for the `Custom` variant now
   renders the full declarative scheme configuration (signature header, hash
   algorithm, encoding, and any configured prefix/timestamp header) instead
