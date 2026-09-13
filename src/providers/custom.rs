@@ -28,6 +28,17 @@
 //! *additional* headers, duplicates in those are **not** detected. See the
 //! [`CustomScheme`] struct docs for details.
 //!
+//! **Replay-check caveat:** Setting `timestamp_header` runs the shared replay
+//! window (`|now - t| <= max_age`) against whatever the header says — but the
+//! check only *binds* when `signed_string` copies that value into the bytes
+//! it returns. A closure that signs the body alone leaves the timestamp
+//! attacker-rewriteable: replaying a captured request with a freshened
+//! timestamp header still verifies (the header is not part of the HMAC
+//! input), silently defeating the protection. The built-in timestamped
+//! providers wire the timestamp into the signed string by construction; a
+//! `Custom` scheme must do so deliberately — see
+//! [`CustomScheme::with_timestamp_header`].
+//!
 //! # Example
 //!
 //! ```
@@ -159,6 +170,10 @@ pub struct CustomScheme {
     /// shared symmetric tolerance (`|now - t| <= max_age`, default 300s);
     /// leaving it `None` disables replay checks for this scheme, mirroring
     /// built-ins like GitHub whose schemes sign no timestamp.
+    ///
+    /// **The replay check only binds when `signed_string` copies this
+    /// header's value into the signed bytes** — see
+    /// [`CustomScheme::with_timestamp_header`].
     pub timestamp_header: Option<&'static str>,
     /// Encoding of the signature value in its header.
     pub encoding: Encoding,
@@ -242,6 +257,16 @@ impl CustomScheme {
 
     /// Sets the timestamp header, enabling replay protection with the shared
     /// symmetric tolerance (`|now - t| <= max_age`, default 300s).
+    ///
+    /// **Replay protection only binds if `signed_string` incorporates the
+    /// timestamp value into the signed bytes.** The replay check runs against
+    /// the header value alone; a closure that signs the body only leaves the
+    /// timestamp attacker-rewriteable — an attacker replaying a captured
+    /// request can rewrite this header to any fresh in-window value and the
+    /// signature still verifies, silently defeating the protection. Include
+    /// the timestamp in `signed_string`'s output (as the built-in
+    /// timestamped schemes do by construction, e.g. Slack's
+    /// `v0:{timestamp}:{raw_body}`) before relying on this setting.
     pub fn with_timestamp_header(mut self, timestamp_header: &'static str) -> Self {
         self.timestamp_header = Some(timestamp_header);
         self
@@ -765,6 +790,62 @@ mod tests {
             },
         );
         assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn declared_timestamp_header_not_signed_leaves_replay_bypassable() {
+        // The documented replay-check caveat (module docs + the
+        // `timestamp_header`/`with_timestamp_header` docs), pinned so the
+        // limitation stays deliberate: a scheme may declare a
+        // `timestamp_header` whose value its `signed_string` never copies
+        // into the HMAC input. The replay window then runs against the header
+        // alone — stale headers are rejected, but an attacker replaying a
+        // captured request merely rewrites the header to a fresh in-window
+        // value and the signature still verifies. This test demonstrates both
+        // halves so the caveat cannot silently drift from the behavior.
+        let unsigned_ts_scheme = CustomScheme {
+            hash: HashAlg::Sha256,
+            signature_header: "X-Raw-Sig",
+            // Declared, so a timestamp header is required and replay-checked...
+            timestamp_header: Some("X-Raw-Timestamp"),
+            encoding: Encoding::Hex,
+            prefix: None,
+            // ...but the signed bytes cover the body only, not the stamp.
+            signed_string: |_headers, raw_body| raw_body.to_vec(),
+        };
+        let raw_sig = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
+        let now = 1_700_000_000u64;
+        let options = clocked_at(now, Some(Duration::from_secs(300)));
+
+        // Half 1: with the *original, stale* header the replay check rejects.
+        let stale = verify_custom(
+            &unsigned_ts_scheme,
+            &[("X-Raw-Sig", raw_sig), ("X-Raw-Timestamp", "1000000000")],
+            RFC_DATA,
+            RFC_KEY,
+            options.clone(),
+        );
+        assert_eq!(
+            stale,
+            Err(VerifyError::TimestampOutOfTolerance {
+                skew: Duration::from_secs(700_000_000),
+                max_age: Duration::from_secs(300),
+            })
+        );
+
+        // Half 2: the attacker rewrites the header to a fresh value. The
+        // signature (over the body only) still matches and the window passes
+        // — replay protection is silently defeated. Only copying the stamp
+        // into `signed_string`'s output (as `ts_signed_string` does) closes
+        // this; the built-in timestamped schemes do so by construction.
+        let freshened = verify_custom(
+            &unsigned_ts_scheme,
+            &[("X-Raw-Sig", raw_sig), ("X-Raw-Timestamp", "1700000000")],
+            RFC_DATA,
+            RFC_KEY,
+            options,
+        );
+        assert_eq!(freshened, Ok(()));
     }
 
     // --- 5. Malformed-header battery -------------------------------------------

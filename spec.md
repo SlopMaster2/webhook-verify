@@ -267,6 +267,16 @@ This lets callers cover a long-tail provider today without waiting on a
 crate release, and it's how new built-in providers get prototyped before
 being promoted into the `Provider` enum.
 
+**Replay-check caveat.** Setting `timestamp_header` runs the shared replay
+window (`|now - t| <= max_age`) against the header value, but the check only
+*binds* when `signed_string` copies that value into the signed bytes. A
+closure that signs the body alone leaves the timestamp attacker-rewriteable:
+replaying a captured request with a freshened timestamp header still verifies
+(the header is not part of the HMAC input), silently defeating the protection.
+The built-in timestamped providers (e.g. Slack's `v0:{timestamp}:{raw_body}`)
+wire the timestamp into the signed string by construction; a `Custom` scheme
+must do so deliberately.
+
 ---
 
 ## 3. Per-provider signing schemes

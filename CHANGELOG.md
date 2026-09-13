@@ -97,6 +97,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   row), so passing duplicates reordered broke verification while the docs
   implied any order was safe. The docs now state the duplicate-names
   exception, matching the field documentation and the implementation.
+- `CustomScheme` replay-protection caveat: the docs now state that the replay
+  window only *binds* when the `timestamp_header` value is copied into the
+  bytes `signed_string` returns. The check runs against the header alone, so
+  a closure that signs the body only leaves the timestamp
+  attacker-rewriteable — replaying a captured request with a freshened header
+  still verifies, silently defeating the protection. A test pins both halves
+  of the documented limitation (stale header rejected, freshened header
+  accepted) so the caveat cannot silently drift from the behavior; the
+  built-in timestamped providers are unaffected (their signed strings embed
+  the timestamp by construction).
 - `VerifyError::TimestampOutOfTolerance` `Display` no longer truncates the
   reported skew to whole seconds: a sub-second skew over a sub-second
   `max_age` window previously read e.g. `0s outside the allowed 100ms
