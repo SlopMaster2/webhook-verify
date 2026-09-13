@@ -138,8 +138,9 @@ pub trait HeaderMap {
 // Blanket impls provided for the built-in collections (Vec<(String,String)>,
 // Vec<(&str,&str)>, fixed-size arrays of (String,String) and (&str,&str),
 // borrowed slices of both, BTreeMap<String,String>, HashMap<String,String>),
-// unconditionally; the http::HeaderMap impl is provided behind the "http"
-// feature flag.
+// unconditionally — the HashMap impl requires the "std" feature, since
+// std::collections::HashMap is itself std-only (BTreeMap lives in alloc); the
+// http::HeaderMap impl is provided behind the "http" feature flag.
 
 pub fn verify(
     provider: Provider,
