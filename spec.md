@@ -561,8 +561,15 @@ certificate is supplied by the caller, mirroring SendGrid (§3).
   instant is normalized to UTC (offsets and fractional seconds — truncated,
   not rounded — are supported) before the window applies.
 - Feature gate: shipped behind `features = ["paypal"]` (optional `rsa`,
-  `x509-parser`, `crc32fast`; `no_std`-compatible). Without the feature,
-  `Provider::PayPal` fails closed with `UnsupportedProvider`.
+  `x509-parser`, `crc32fast`). **Std-bounded today**: the certificate path's
+  transitive defaults (`der-parser` and `nom`, pulled via `x509-parser`)
+  re-enable `std` in `num-traits`/`num-bigint`/`memchr`, and Cargo's union
+  feature-unification means a `no_std` edge declared here cannot revoke them
+  — so `paypal` cannot build for a genuinely std-less target (the wasm32 CI
+  gate does not catch this; wasm32 ships std). The `no_std + alloc`
+  guarantee (spec §1) is scoped to the core verification path + `sendgrid`;
+  see §7 and issue #23. Without the feature, `Provider::PayPal` fails closed
+  with `UnsupportedProvider`.
 - Test-vector provenance: PayPal publishes no byte-exact *signed* test vector
   (their example signature covers a transmission string built from a body the
   docs stress must be the exact received bytes, which cannot be reconstructed
@@ -976,9 +983,17 @@ A provider implementation is not mergeable until it has:
   `SignatureMismatch`.
 
   Implementation notes: asymmetric verification uses feature-gated
-  RustCrypto dependencies (`p256`, optional `no_std`-compatible; `rsa` +
+  RustCrypto dependencies (`p256`, optional, genuinely `no_std`-compatible —
+  the `sendgrid` feature builds for a std-less target; `rsa` +
   `x509-parser` + `crc32fast` behind the `paypal` feature — see the crate's
-  `Cargo.toml`). The
+  `Cargo.toml`). The `paypal` feature is **std-bounded in practice**:
+  `x509-parser` pulls `der-parser` and `nom` with their default features,
+  re-enabling `std` in `num-traits`/`num-bigint`/`memchr`, and Cargo's union
+  feature-unification means this crate's `default-features = false` edge
+  cannot revoke those, so `--no-default-features --features sendgrid,paypal`
+  fails for a genuinely std-less target inside `num-traits` (invisible to
+  the wasm32 gate, which ships std). The `no_std + alloc` scope is core +
+  `sendgrid` (§3). The
   optional `webhook-verify-fetch` companion crate remains future work if
   automated key rotation handling is ever requested — it stays out of this
   crate either way.

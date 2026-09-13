@@ -104,6 +104,10 @@ tower = [
 # Enables the PayPal provider: certificate-based RSA verification (`spec.md` §3, §7).
 # Pulls in `rsa`, `x509-parser`, and `crc32fast` (optional dependencies).
 # Only the verification path is used; no key generation and no network access.
+# Unlike `sendgrid`, this feature is std-bounded in practice: `x509-parser`
+# depends on `der-parser`/`nom` with defaults on, re-enabling `std` in
+# `num-traits`/`num-bigint`/`memchr` (spec.md §3, issue #23) — the core +
+# `sendgrid` `no_std + alloc` guarantee is unaffected.
 paypal = ["dep:rsa", "dep:x509-parser", "dep:crc32fast"]
 
 [dev-dependencies]

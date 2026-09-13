@@ -215,6 +215,11 @@ feature, so enabling either on a `default-features = false` build still
 compiles (it just pulls `std` back in). For a truly `std`-free build, leave
 those two features off; the `http` feature alone stays `no_std`-compatible.
 
+The `sendgrid` provider feature is `no_std`-compatible; the certificate-based
+`paypal` feature is **not** — its transitive dependencies (`der-parser`,
+`nom`) re-enable `std`, so a genuinely std-less build cannot include it (the
+wasm32 target hides this because it ships std). See `spec.md` §3.
+
 ## Framework adapters
 
 ### Tower (also Axum)

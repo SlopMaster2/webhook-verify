@@ -123,6 +123,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (base64/hex keep [`alloc`]), matching every other dependency's
   no_std-first posture; the `--no-default-features` core and `sendgrid` build
   now compile for `riscv32imac-unknown-none-elf`.
+- spec.md/README/Cargo.toml: the `paypal` feature is now documented as
+  std-bounded in practice. The §3 PayPal row and the §7 implementation notes
+  previously described the feature as `no_std`-compatible, but its
+  certificate path pulls `der-parser` and `nom` (via `x509-parser`) with
+  their default features, re-enabling `std` in `num-traits`/`num-bigint`/
+  `memchr` — and Cargo's union feature-unification means a
+  `default-features = false` edge on this crate's own dependency cannot
+  revoke those. A `--no-default-features --features sendgrid,paypal` build
+  for a genuinely std-less target fails inside `num-traits` with
+  `can't find crate for std` (invisible to the wasm32 CI gate, which ships
+  std). The `no_std + alloc` scope is core + `sendgrid`, unchanged; the
+  host-based no_std test in §6 still passes because host builds have std.
+  See issue #23.
 - Square: the signature-header constant and README table used the
   title-cased `X-Square-HmacSha256-Signature`, but Square's own docs, the
   crate's `spec.md` §3, and the provider module docs all spell the header
