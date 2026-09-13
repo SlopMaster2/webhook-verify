@@ -1023,8 +1023,10 @@ A provider implementation is not mergeable until it has:
   bare-metal/wasm targets supply their own [`Clock`] for timestamped
   (replay-protected) providers; a missing clock reads 0 and fail-closes replay
   checks. The wasm regression job ships in CI
-  (`.github/workflows/ci.yml`: `cargo build --no-default-features --features
-  sendgrid,paypal --target wasm32-unknown-unknown`), and the full test suite
+  (`.github/workflows/ci.yml`, mirroring the `test-nostd` feature matrix:
+  `cargo build --no-default-features --features sendgrid,paypal --target
+  wasm32-unknown-unknown` and `cargo build --no-default-features --features
+  http --target wasm32-unknown-unknown`), and the full test suite
   also runs against the `--no-default-features` build on the host
   (`cargo test --no-default-features --features sendgrid,paypal` and — for the
   `no_std` promise of the `http` feature — `cargo test --no-default-features

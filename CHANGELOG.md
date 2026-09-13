@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The `no_std` wasm32 build gate now covers the `http` feature: the
+  `no-std-wasm` CI job (`cargo build --no-default-features --features
+  sendgrid,paypal --target wasm32-unknown-unknown`) mirrors the `test-nostd`
+  matrix and additionally build-checks `cargo build --no-default-features
+  --features http --target wasm32-unknown-unknown`. A `std` leak specific to
+  the `http` feature would previously only surface on a host build, where
+  `std` is always available (issue #25). Spec §7 and the README's `no_std`
+  section now name both feature sets for the genuinely std-less build.
 - The `no_std` behavioral bar now includes the `http` feature: the full test
   suite runs with `cargo test --no-default-features --features http` (spec
   §6, AGENTS.md §4.6/§6). The README has long promised that `http` alone

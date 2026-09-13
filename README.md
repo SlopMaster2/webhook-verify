@@ -225,7 +225,8 @@ the full test suite both with `--no-default-features --features sendgrid,paypal`
 and with `--no-default-features --features http` (the `test-nostd` job,
 `.github/workflows/ci.yml`), so the core clock fallback and the
 `http::HeaderMap` impl cannot silently regress into a `std` leak. The companion
-wasm32 job still proves the std-less build itself.
+wasm32 job proves the std-less build itself — for *both* feature sets (`http`
+and `sendgrid,paypal`), mirroring the `test-nostd` matrix.
 
 ## Framework adapters
 
