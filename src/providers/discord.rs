@@ -50,6 +50,7 @@ use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::replay::{check_replay, parse_timestamp};
 use crate::core::secret::Secret;
+use ed25519_dalek::VerifyingKey;
 
 /// The header carrying the hex-encoded Ed25519 signature.
 pub(crate) const SIGNATURE_HEADER: &str = "X-Signature-Ed25519";
@@ -102,9 +103,10 @@ pub(crate) fn verify(
 /// Decodes the hex-encoded Ed25519 public key held in [`Secret`].
 ///
 /// Unlike HMAC keys, an Ed25519 verifying key has a strict canonical shape;
-/// anything that does not decode to exactly 32 bytes means the operator
-/// pasted something other than the Developer Portal value, so fail closed
-/// with [`VerifyError::InvalidSecret`] instead of attempting verification.
+/// anything that does not decode to exactly 32 bytes, or does not represent a
+/// valid compressed Edwards point, means the operator pasted something other
+/// than the Developer Portal value, so fail closed with
+/// [`VerifyError::InvalidSecret`] instead of attempting verification.
 fn decode_public_key(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
     let secret_str = core::str::from_utf8(secret).map_err(|_| VerifyError::InvalidSecret {
         reason: "public key must be a hex-encoded string",
@@ -117,6 +119,15 @@ fn decode_public_key(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
             reason: "public key does not decode to 32 bytes",
         });
     }
+    // A 32-byte value that fails point decompression is configuration
+    // damage, not a forged request: classify it as InvalidSecret like every
+    // other malformed key instead of letting `verify_ed25519` surface it as
+    // a SignatureMismatch (which adapters report as 401 "attacker").
+    let mut key_bytes = [0u8; PUBLIC_KEY_LEN_BYTES];
+    key_bytes.copy_from_slice(&decoded);
+    VerifyingKey::from_bytes(&key_bytes).map_err(|_| VerifyError::InvalidSecret {
+        reason: "public key is not a valid Ed25519 compressed point",
+    })?;
     Ok(decoded)
 }
 
@@ -568,6 +579,13 @@ mod tests {
             ("abcd".to_string(), "public key does not decode to 32 bytes"),
             // Empty configuration.
             (String::new(), "public key does not decode to 32 bytes"),
+            // Valid hex, 32 bytes, but not a valid Ed25519 compressed point
+            // (fails point decompression): must be InvalidSecret per the
+            // module docs, not SignatureMismatch.
+            (
+                "ed".repeat(31) + "7f",
+                "public key is not a valid Ed25519 compressed point",
+            ),
         ];
         for (secret_value, reason) in cases {
             let result = verify_with(

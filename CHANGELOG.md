@@ -74,6 +74,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Discord: a configured public key that decodes to 32 bytes but is not a valid
+  Ed25519 compressed point now fails closed with
+  [`VerifyError::InvalidSecret`](crate::VerifyError), matching the module's
+  documented contract, instead of surfacing as
+  [`VerifyError::SignatureMismatch`](crate::VerifyError). The two are distinct
+  failure classes in the adapters: a bad key is operator misconfiguration
+  (HTTP 500), while a signature mismatch is treated as a forged request (HTTP
+  401). Verification outcome is unchanged — such keys could never have verified
+  — only the error classification is corrected. Roughly half of random 32-byte
+  values fail point decompression, so this catches a common class of
+  copy-paste-corrupted Developer Portal keys.
 - The `no_std + alloc` configuration is now behaviorally testable: the full test
   suite compiles and passes with `cargo test --no-default-features --features
   sendgrid,paypal` (tests run on the host, no wasm target needed). Test modules
