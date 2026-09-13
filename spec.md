@@ -1039,8 +1039,8 @@ A provider implementation is not mergeable until it has:
   `--no-default-features --features paypal`:
   1. **The premise about `rsa 0.9.10` in issue #23 is wrong**: `rsa` already
      declares its `num-traits` edge with `default-features = false`, and so
-     does `num-bigint-dig` (`[features] i128`, `std` only behind
-     `default-features = false` edges of its own). Neither crate leaks `std`.
+     does `num-bigint-dig` (its edge enables only `i128`). Neither crate
+     leaks `std`.
   2. The real enablers are `x509-parser`'s own transitive defaults:
      `der-parser` (`default = ["std"]`, pulls `num-traits`/`num-bigint`
      `std`), `asn1-rs` (`default` includes `std`), and `nom` (`default =
