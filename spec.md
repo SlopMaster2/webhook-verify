@@ -866,7 +866,8 @@ A provider implementation is not mergeable until it has:
    early-exit comparison produces |t| in the hundreds. `#[ignore]`d because
    timing tests are noisy on shared runners; run it locally in release mode
    with `cargo test --release --all-features -- constant_time_comparison
-   --ignored`. Running it as an informational CI job is tracked separately.*
+   --ignored`. Ships in CI as a non-blocking informational job
+   (`.github/workflows/ci.yml`).*
 
 ---
 
@@ -877,9 +878,15 @@ A provider implementation is not mergeable until it has:
 - `cargo test --no-default-features --features sendgrid,paypal` on stable, so
   the `no_std + alloc` paths (the wall-clock fallback in [`Clock::now`], the
   `std::error::Error`-less [`VerifyError`], and the `no_std` re-exports) are
-  behaviorally covered rather than only build-checked for wasm32.
-- `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, so a
-  broken intra-doc link fails CI instead of silently degrading docs.rs.
+  behaviorally covered rather than only build-checked for wasm32. (CI wiring
+  pending — blocked on the runner token's missing `workflows` permission, issue
+  #22; run it locally until the `test-nostd` job ships, and it is in the
+  AGENTS.md §6 "done" bar.)
+- `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, so a broken
+  intra-doc link is caught before merge instead of silently degrading the
+  user-facing docs. (docs.rs itself builds with `-D warnings`, so a broken link
+  still fails the docs.rs build; the dedicated CI job is blocked on the runner
+  token's missing `workflows` permission, issue #18.)
 - `cargo fuzz build` (build-only in normal CI; timed fuzz runs in a
   scheduled nightly job).
 - A grep-based CI check that fails the build if any of `println!`,
@@ -914,7 +921,7 @@ A provider implementation is not mergeable until it has:
   — `VerifyingKeyMaterial::EcdsaP256PublicKey`, the `verifying_material`
   option, and the ECDSA P-256 verification path are implemented with the
   provider's own test vector (see §3 SendGrid row). **PayPal shipped
-  (2026-10) behind `features = ["paypal"]`** — `X509Certificate`
+  (2026-09) behind `features = ["paypal"]`** — `X509Certificate`
   certificate material, the `webhook_id` option, and the RSASSA-PKCS1-v1_5
   SHA-256 verification path over the documented
   `{transmission_id}|{transmission_time}|{webhook_id}|{crc32}` construction

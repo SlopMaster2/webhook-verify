@@ -77,8 +77,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `std::error::Error`-less `VerifyError`, and the `no_std` re-exports) were
   only build-checked for `wasm32`, so a behavioral regression in them would
   pass CI.
-- CI now builds the docs with `RUSTDOCFLAGS="-D warnings"`, so a broken
-  intra-doc link fails the build instead of silently degrading docs.rs output.
+- The contributor gate now builds the docs with `RUSTDOCFLAGS="-D warnings"`
+  (AGENTS.md §6), so a broken intra-doc link is caught at review time instead
+  of silently degrading docs.rs output. (docs.rs itself builds with
+  `-D warnings`; a dedicated CI job is blocked on the runner token's missing
+  `workflows` permission, issue #18.)
+- spec.md: corrected CI claims that outran the workflow wiring. The
+  `-D warnings` doc build and the `no_std` behavioral test run are now
+  marked as local/pre-merge gates whose CI jobs are blocked on the runner
+  token's missing `workflows` permission (issues #18/#22); the §5.7
+  constant-time bullet no longer describes its already-shipped informational
+  CI job as "tracked separately"; and the §7 PayPal ship date typo
+  `(2026-10)` is fixed to `(2026-09)` (PayPal and SendGrid both shipped in the
+  initial 2026-09 commit).
 - `VerifyOptions::with_form_params` docs: the builder claimed "Order does not
   matter; fields are sorted into signing order during verification." That
   holds for distinct field names, but Twilio's scheme signs same-named fields
