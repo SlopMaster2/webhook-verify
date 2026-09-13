@@ -81,7 +81,7 @@ hand-copied signing-string logic to get wrong.
    proxy webhooks. Those are separate, composable concerns (and separate
    crates) on purpose.
 
-## Supported providers (target v0.1 matrix)
+## Supported providers
 
 | Provider | Scheme | Status |
 |---|---|---|
@@ -220,11 +220,14 @@ The `sendgrid` provider feature is `no_std`-compatible; the certificate-based
 `nom`) re-enable `std`, so a genuinely std-less build cannot include it (the
 wasm32 target hides this because it ships std). See `spec.md` §3.
 
-The `no_std + alloc` bar is behaviorally verified, not just claimed: the full
-test suite runs both with `--no-default-features --features sendgrid,paypal`
-and with `--no-default-features --features http`, so the core clock fallback
-and the `http::HeaderMap` impl cannot silently regress into a `std` leak
-(`spec.md` §6).
+The `no_std + alloc` bar is verified behaviorally, not just claimed: the
+contributor gate (AGENTS.md §6) runs the full test suite both with
+`--no-default-features --features sendgrid,paypal` and with
+`--no-default-features --features http` before merge, so the core clock
+fallback and the `http::HeaderMap` impl cannot silently regress into a `std`
+leak. A dedicated `test-nostd` CI job is the pending wiring (issue #22;
+`spec.md` §6) — today CI only build-checks the no_std configuration for
+`wasm32`.
 
 ## Framework adapters
 
