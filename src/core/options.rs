@@ -119,6 +119,13 @@ pub struct VerifyOptions {
     /// slash or scheme makes every signature fail. Providers whose scheme does
     /// not sign the URL document that this option has no effect on them.
     ///
+    /// HubSpot itself **URL-decodes certain characters** in the URI when
+    /// computing its signature (the list is in `spec.md` §3, HubSpot row).
+    /// The crate treats `request_url` as an exact verbatim constant — it
+    /// neither adds nor removes encoding — so a proxied or configured URI
+    /// carrying percent-encoding must be passed in the same decoded form
+    /// HubSpot signed, or every delivery fails with `SignatureMismatch`.
+    ///
     /// Supplying the configured constant from the provider dashboard is the
     /// intended use; reconstructing the URL from request headers behind a
     /// proxy is a common source of verification failures.

@@ -192,6 +192,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are now rejected when repeated instead of first-wins: ambiguous signing
   material fails closed (`spec.md` §4.4), matching the existing Stripe and
   Paddle behavior.
+- Docs: the HubSpot URI-decoding caveat is now surfaced where operators
+  configure it. `VerifyOptions::request_url` and the README provider table
+  state that HubSpot URL-decodes certain characters (`spec.md` §3 lists them)
+  when computing its signature, so the URI must be passed in the same decoded
+  form HubSpot signed. Previously only the provider module docs and the spec
+  carried the caveat, and a proxied percent-encoded URI failed with an opaque
+  `SignatureMismatch`.
 
 ## [0.1.0] - Unreleased
 
