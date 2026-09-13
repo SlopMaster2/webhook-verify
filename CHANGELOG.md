@@ -114,6 +114,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   window does (`Duration`'s `Debug`), e.g. `150ms outside the allowed 100ms
   window` — the same second half of the sub-second-tolerance fix that
   already applied to `max_age`.
+- The `no_std + alloc` guarantee now actually holds at the dependency level:
+  `base64`, `hex`, and `subtle` were declared with default features, each of
+  which turns on that crate's `std` feature (`extern crate std`) — invisible
+  to the wasm32 CI gate, which ships std, so a stray `--no-default-features`
+  build for a genuinely std-less target (bare-metal, no_std wasm) failed in
+  the dependency tree. All three are now declared `default-features = false`
+  (base64/hex keep [`alloc`]), matching every other dependency's
+  no_std-first posture; the `--no-default-features` core and `sendgrid` build
+  now compile for `riscv32imac-unknown-none-elf`.
 - Square: the signature-header constant and README table used the
   title-cased `X-Square-HmacSha256-Signature`, but Square's own docs, the
   crate's `spec.md` §3, and the provider module docs all spell the header

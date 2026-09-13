@@ -40,11 +40,18 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 actix-web = { version = "4", optional = true, default-features = false }
-base64 = "0.23.1"
+# base64/hex/subtle are declared default-feature-free so the `no_std + alloc`
+# guarantee (spec.md §1) really holds: `base64` and `hex` default to `std`
+# (which gates `extern crate std`), and their decode/encode/format paths only
+# need `alloc`; `subtle` defaults to `std` + `i128`. `--no-default-features`
+# builds only fail on a genuinely std-less target today — wasm32 ships std, so
+# the wasm32 CI gate cannot see this, exactly the trap the `std` feature
+# comment below documents for the adapters.
+base64 = { version = "0.23.1", default-features = false, features = ["alloc"] }
 bytes = { version = "1.12.1", optional = true }
 crc32fast = { version = "1.5.1", default-features = false, optional = true }
 ed25519-dalek = "3.0.0"
-hex = "0.4.3"
+hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 hmac = "0.13.0"
 http = { version = "1.5.0", optional = true }
 http-body = { version = "1.1.0", optional = true }
@@ -53,7 +60,7 @@ p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "pkc
 rsa = { version = "0.9.10", default-features = false, features = ["sha2"], optional = true }
 sha1 = "0.11.0"
 sha2 = "0.11.0"
-subtle = "2.6.1"
+subtle = { version = "2.6.1", default-features = false }
 tower-layer = { version = "0.3.3", optional = true }
 tower-service = { version = "0.3.3", optional = true }
 x509-parser = { version = "0.18.1", default-features = false, optional = true }
