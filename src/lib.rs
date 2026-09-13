@@ -85,6 +85,8 @@
 //! - `sendgrid` — enables the SendGrid provider (ECDSA P-256).
 //! - `paypal` — enables the PayPal provider (RSA, X.509, CRC-32).
 //! - `http` — `HeaderMap` impl for `http::HeaderMap` (axum, tower, hyper).
+//!   `no_std`-compatible; the full test suite runs with `std` off in this
+//!   configuration (spec §6), so a `std` leak in this impl is caught.
 //! - `tower` — generic `tower::Layer`/`Service` middleware (works with axum
 //!   routers too; `http` is implied). The `no_std + alloc` guarantee covers
 //!   the core verification path only, so `tower` also implies `std` — the

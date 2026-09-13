@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The `no_std` behavioral bar now includes the `http` feature: the full test
+  suite runs with `cargo test --no-default-features --features http` (spec
+  §6, AGENTS.md §4.6/§6). The README has long promised that `http` alone
+  stays `no_std`-compatible, but nothing exercised it — the `http::HeaderMap`
+  impl (and its `verify()` end-to-end tests) only ran under `--all-features`,
+  so a `std` leak in the impl would have passed CI. It is now covered the way
+  the `sendgrid`/`paypal` run covers the core clock fallback.
 - HubSpot webhook provider (v3 scheme) — HMAC-SHA256 over
   `{method}{uri}{raw_body}{timestamp}`, base64-encoded,
   `X-HubSpot-Signature-V3` with the `X-HubSpot-Request-Timestamp` header

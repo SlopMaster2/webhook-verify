@@ -99,11 +99,12 @@ for CI to catch you — apply them while writing the diff:
    failure modes.
 5. Update the provider table in `README.md`.
 6. Run `cargo test --all-features`, `cargo clippy --all-features -- -D warnings`,
-   `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, and
-   `cargo test --no-default-features --features sendgrid,paypal` (spec §6: the
-   `no_std + alloc` paths, e.g. the wall-clock fallback in `VerifyOptions::now`,
-   until the `test-nostd` CI job ships — issue #22) locally before proposing
-   the change.
+   `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`,
+   `cargo test --no-default-features --features sendgrid,paypal`, and
+   `cargo test --no-default-features --features http` (spec §6: the
+   `no_std + alloc` paths, e.g. the wall-clock fallback in `VerifyOptions::now`
+   and the `http::HeaderMap` impl, until the `test-nostd` CI job ships — issue
+   #22) locally before proposing the change.
 
 ## 5. Workflow for fixing a reported verification bug
 
@@ -127,8 +128,8 @@ shouldn't verify does" report as security-relevant until proven otherwise:
 - [ ] All five test categories present for any new/changed provider
       (official vector, negative, tamper, replay, malformed-header)
 - [ ] `cargo test --all-features`, `cargo clippy --all-features -- -D warnings`,
-      and `cargo test --no-default-features --features sendgrid,paypal`
-      pass locally
+      `cargo test --no-default-features --features sendgrid,paypal`, and
+      `cargo test --no-default-features --features http` pass locally
 - [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps` passes
       locally (docs.rs builds with `-D warnings`, so a broken intra-doc link is
       a rustdoc warning that would otherwise surface only there, after merge —

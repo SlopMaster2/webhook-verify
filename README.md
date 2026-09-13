@@ -220,6 +220,12 @@ The `sendgrid` provider feature is `no_std`-compatible; the certificate-based
 `nom`) re-enable `std`, so a genuinely std-less build cannot include it (the
 wasm32 target hides this because it ships std). See `spec.md` §3.
 
+The `no_std + alloc` bar is behaviorally verified, not just claimed: the full
+test suite runs both with `--no-default-features --features sendgrid,paypal`
+and with `--no-default-features --features http`, so the core clock fallback
+and the `http::HeaderMap` impl cannot silently regress into a `std` leak
+(`spec.md` §6).
+
 ## Framework adapters
 
 ### Tower (also Axum)
