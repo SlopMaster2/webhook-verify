@@ -899,6 +899,12 @@ A provider implementation is not mergeable until it has:
   pending — blocked on the runner token's missing `workflows` permission, issue
   #22; run it locally until the `test-nostd` job ships, and it is in the
   AGENTS.md §6 "done" bar.)
+- `cargo test --no-default-features --features http` on stable as the twin
+  of the run above: README §no_std promises the `http` feature alone stays
+  `no_std`-compatible, and nothing exercised it until this entry — the
+  `http::HeaderMap` impl (and its `verify()` end-to-end tests) now run with
+  `std` off, catching any `std`-leak regression in the `http` path on the
+  host the way the `sendgrid`/`paypal` run catches the core path.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, so a broken
   intra-doc link is caught before merge instead of silently degrading the
   user-facing docs. (docs.rs itself builds with `-D warnings`, so a broken link
@@ -1020,7 +1026,9 @@ A provider implementation is not mergeable until it has:
   (`.github/workflows/ci.yml`: `cargo build --no-default-features --features
   sendgrid,paypal --target wasm32-unknown-unknown`), and the full test suite
   also runs against the `--no-default-features` build on the host
-  (`cargo test --no-default-features --features sendgrid,paypal`, §6) once the
+  (`cargo test --no-default-features --features sendgrid,paypal` and — for the
+  `no_std` promise of the `http` feature — `cargo test --no-default-features
+  --features http`, §6) once the
   `test-nostd` job ships, so this configuration cannot silently regress. The
   `no_std + alloc` scope covers the core
   verification path only: the `tower` and `actix` adapters are std-only
