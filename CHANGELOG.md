@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   impl (and its `verify()` end-to-end tests) only ran under `--all-features`,
   so a `std` leak in the impl would have passed CI. It is now covered the way
   the `sendgrid`/`paypal` run covers the core clock fallback.
+- The `test-nostd` and `doc` CI jobs ship in `.github/workflows/ci.yml`,
+  retiring the earlier "CI wiring pending — blocked on the runner token's
+  missing `workflows` permission" notes (issues #18/#22): the `no_std`
+  behavioral test runs and the `RUSTDOCFLAGS="-D warnings"` doc build are now
+  enforced by CI itself, not just the local contributor gates.
 - HubSpot webhook provider (v3 scheme) — HMAC-SHA256 over
   `{method}{uri}{raw_body}{timestamp}`, base64-encoded,
   `X-HubSpot-Signature-V3` with the `X-HubSpot-Request-Timestamp` header
@@ -104,8 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The contributor gate now builds the docs with `RUSTDOCFLAGS="-D warnings"`
   (AGENTS.md §6), so a broken intra-doc link is caught at review time instead
   of silently degrading docs.rs output. (docs.rs itself builds with
-  `-D warnings`; a dedicated CI job is blocked on the runner token's missing
-  `workflows` permission, issue #18.)
+  `-D warnings`; the `doc` CI job now enforces the same flag.)
 - spec.md: corrected CI claims that outran the workflow wiring. The
   `-D warnings` doc build and the `no_std` behavioral test run are now
   marked as local/pre-merge gates whose CI jobs are blocked on the runner
@@ -239,9 +243,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contributor gate (AGENTS.md): the PR definition-of-done now includes
   `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, so broken
   intra-doc links (rustdoc warnings) are caught pre-merge. docs.rs builds with
-  `-D warnings` by default; the corresponding CI job is blocked on the runner
-  token's missing `workflows` permission (issue #18), so this local gate is
-  the backstop.
+  `-D warnings` by default; the `doc` CI job now enforces the same flag, so
+  the local gate and CI fail together.
 - README "Releasing" instructions now tag the release `v0.1.0` (matching
   `Cargo.toml`'s version) instead of the template's `v0.2.0`.
 - Cloudflare and Coinbase combined-header fields (`time`/`sig1` and `t`/`v0`)

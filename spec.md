@@ -896,10 +896,9 @@ A provider implementation is not mergeable until it has:
 - `cargo test --no-default-features --features sendgrid,paypal` on stable, so
   the `no_std + alloc` paths (the wall-clock fallback in [`Clock::now`], the
   `std::error::Error`-less [`VerifyError`], and the `no_std` re-exports) are
-  behaviorally covered rather than only build-checked for wasm32. (CI wiring
-  pending — blocked on the runner token's missing `workflows` permission, issue
-  #22; run it locally until the `test-nostd` job ships, and it is in the
-  AGENTS.md §6 "done" bar.)
+  behaviorally covered rather than only build-checked for wasm32. Shipped as
+  the `test-nostd` CI job (`.github/workflows/ci.yml`), paired with the `http`
+  run below.
 - `cargo test --no-default-features --features http` on stable as the twin
   of the run above: README §no_std promises the `http` feature alone stays
   `no_std`-compatible, and nothing exercised it until this entry — the
@@ -909,8 +908,8 @@ A provider implementation is not mergeable until it has:
 - `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, so a broken
   intra-doc link is caught before merge instead of silently degrading the
   user-facing docs. (docs.rs itself builds with `-D warnings`, so a broken link
-  still fails the docs.rs build; the dedicated CI job is blocked on the runner
-  token's missing `workflows` permission, issue #18.)
+  still fails the docs.rs build; shipped as the `doc` CI job,
+  `.github/workflows/ci.yml`.)
 - `cargo fuzz build` (build-only in normal CI; timed fuzz runs in a
   scheduled nightly job).
 - A grep-based CI check that fails the build if any of `println!`,
@@ -1029,8 +1028,9 @@ A provider implementation is not mergeable until it has:
   also runs against the `--no-default-features` build on the host
   (`cargo test --no-default-features --features sendgrid,paypal` and — for the
   `no_std` promise of the `http` feature — `cargo test --no-default-features
-  --features http`, §6) once the
-  `test-nostd` job ships, so this configuration cannot silently regress. The
+  --features http`, §6) via the
+  `test-nostd` CI job (`.github/workflows/ci.yml`), so this configuration
+  cannot silently regress. The
   `no_std + alloc` scope covers the core
   verification path only: the `tower` and `actix` adapters are std-only
   framework glue and therefore imply the `std` feature when enabled —

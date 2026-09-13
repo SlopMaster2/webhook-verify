@@ -103,8 +103,8 @@ for CI to catch you — apply them while writing the diff:
    `cargo test --no-default-features --features sendgrid,paypal`, and
    `cargo test --no-default-features --features http` (spec §6: the
    `no_std + alloc` paths, e.g. the wall-clock fallback in `VerifyOptions::now`
-   and the `http::HeaderMap` impl, until the `test-nostd` CI job ships — issue
-   #22) locally before proposing the change.
+   and the `http::HeaderMap` impl — shipped as the `test-nostd` CI job)
+   locally before proposing the change.
 
 ## 5. Workflow for fixing a reported verification bug
 
@@ -131,9 +131,9 @@ shouldn't verify does" report as security-relevant until proven otherwise:
       `cargo test --no-default-features --features sendgrid,paypal`, and
       `cargo test --no-default-features --features http` pass locally
 - [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps` passes
-      locally (docs.rs builds with `-D warnings`, so a broken intra-doc link is
-      a rustdoc warning that would otherwise surface only there, after merge —
-      see issue #18)
+      locally (docs.rs builds with `-D warnings`; the `doc` CI job enforces the
+      same flag, so a broken intra-doc link fails CI AND would surface on
+      docs.rs after merge)
 - [ ] No new dependency added without justification in the PR description
 - [ ] No secret/body/signature material appears in any log, error message,
       panic message, or test-failure output beyond what's needed

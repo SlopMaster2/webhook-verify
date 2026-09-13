@@ -220,14 +220,12 @@ The `sendgrid` provider feature is `no_std`-compatible; the certificate-based
 `nom`) re-enable `std`, so a genuinely std-less build cannot include it (the
 wasm32 target hides this because it ships std). See `spec.md` §3.
 
-The `no_std + alloc` bar is verified behaviorally, not just claimed: the
-contributor gate (AGENTS.md §6) runs the full test suite both with
-`--no-default-features --features sendgrid,paypal` and with
-`--no-default-features --features http` before merge, so the core clock
-fallback and the `http::HeaderMap` impl cannot silently regress into a `std`
-leak. A dedicated `test-nostd` CI job is the pending wiring (issue #22;
-`spec.md` §6) — today CI only build-checks the no_std configuration for
-`wasm32`.
+The `no_std + alloc` bar is verified behaviorally, not just claimed: CI runs
+the full test suite both with `--no-default-features --features sendgrid,paypal`
+and with `--no-default-features --features http` (the `test-nostd` job,
+`.github/workflows/ci.yml`), so the core clock fallback and the
+`http::HeaderMap` impl cannot silently regress into a `std` leak. The companion
+wasm32 job still proves the std-less build itself.
 
 ## Framework adapters
 
