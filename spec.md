@@ -1028,6 +1028,39 @@ A provider implementation is not mergeable until it has:
   a `default-features = false` build with either of them simply gets `std`
   back, which keeps the combination compiling instead of surfacing raw
   `cannot find crate std` errors.*
+- **PayPal feature is intentionally `std`-bounded (design decision,
+  2026-09).** *Resolved per the alternative framing in issue #23.* The
+  issue's literal fix — declaring direct `num-traits`/`memchr` edges with
+  `default-features = false` behind `paypal` — was checked and **cannot
+  work**: Cargo's feature union is monotonic (an edge with
+  `default-features = false` contributes no features but cannot *revoke*
+  features other edges enable), and the std pulls are both broader and
+  deeper than the issue's premise. Verified against the resolved tree for
+  `--no-default-features --features paypal`:
+  1. **The premise about `rsa 0.9.10` in issue #23 is wrong**: `rsa` already
+     declares its `num-traits` edge with `default-features = false`, and so
+     does `num-bigint-dig` (`[features] i128`, `std` only behind
+     `default-features = false` edges of its own). Neither crate leaks `std`.
+  2. The real enablers are `x509-parser`'s own transitive defaults:
+     `der-parser` (`default = ["std"]`, pulls `num-traits`/`num-bigint`
+     `std`), `asn1-rs` (`default` includes `std`), and `nom` (`default =
+     ["std"]`, via `memchr/std`).
+  3. Beyond the `num-*`/`memchr` layer there is `lazy_static` — an
+     unconditional, `std`-only `x509-parser` dependency — so the
+     whack-a-mole has no bottom without forking/patching `x509-parser`'s
+     dependency graph.
+  Ruling: no feature surgery (`paypal` does **not** gain `"std"` in its
+  feature list — that would silently change the semantics of
+  `--no-default-features --features paypal` and defeat the no_std behavioral
+  coverage §6 relies on) and no `build.rs` guard (a build script cannot
+  portably detect whether the *target* ships std). Instead the std-bound is
+  documented in §3 (PayPal row) and `Cargo.toml`, and the `no_std + alloc`
+  guarantee (§1) is core + `sendgrid` only. The honest acceptance check is
+  `cargo build --no-default-features --features paypal --target
+  riscv32imac-unknown-none-elf` failing inside `num-traits` with a clear
+  `can't find crate std`; the wasm32 CI gate proves the core + `sendgrid`
+  build is real, and is intentionally not extended to `paypal`. Issue #23
+  closed as resolved-by-design.
 - **Provider promotion criteria.** A `CustomScheme` recipe gets promoted to
   a first-class `Provider` variant once it has (a) official test vectors,
   (b) at least one external user request or contribution, and (c) no open
