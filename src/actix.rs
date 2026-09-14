@@ -329,7 +329,9 @@ impl FromRequest for VerifiedBody {
         // which still bounds the work.
         if let Some(limit) = config.max_body_size {
             if declared_content_length(req.headers()).is_some_and(|len| len > limit) {
-                return Box::pin(ready(Err(WebhookVerificationError(Rejection::BodyTooLarge))));
+                return Box::pin(ready(Err(WebhookVerificationError(
+                    Rejection::BodyTooLarge,
+                ))));
             }
         }
 
