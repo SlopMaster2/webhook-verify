@@ -236,9 +236,9 @@ of its own. Neither run can prove a std-less *build* — `paypal` and `http`
 pull `std` in via their enabling crates, and the run happens on a host that
 ships `std`. The companion wasm32 job build-checks
 `cargo build --no-default-features --features sendgrid,paypal --target
-wasm32-unknown-unknown`, and will build-check `--features http` the same way
-(parity with the `test-nostd` matrix) once the `.github/workflows/ci.yml`
-hunk from issue #25 is applied; it cannot catch a std-less-target failure either
+wasm32-unknown-unknown` and `cargo build --no-default-features --features
+http --target wasm32-unknown-unknown` (parity with the `test-nostd` matrix,
+issue #25); it cannot catch a std-less-target failure either
 (wasm32 ships std), which is why `sendgrid` — the one genuinely
 `no_std`-compatible feature beyond the core — is additionally verified
 behaviorally on the host.
