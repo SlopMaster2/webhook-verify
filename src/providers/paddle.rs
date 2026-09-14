@@ -116,6 +116,12 @@ fn parse_header(value: &str) -> Result<ParsedHeader<'_>, VerifyError> {
         let Some((key, val)) = element.split_once('=') else {
             continue;
         };
+        // Keys are compared after trimming surrounding whitespace: the
+        // semicolon-space spelling (`ts=...; h1=...`) that proxy header-folding
+        // and hand-copied values produce must not silently drop a recognized
+        // key. Values are never trimmed — the timestamp is reused verbatim in
+        // the signed string, so the raw bytes must stay byte-for-byte intact.
+        let key = key.trim();
 
         if key == TS_KEY {
             if timestamp_raw.is_some() {
@@ -283,6 +289,23 @@ mod tests {
             clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
         );
         assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn semicolon_space_spelling_is_tolerated() {
+        // Real integrations (proxy header-folding, hand-pasted requests) often
+        // emit `ts=...; h1=...` with a space after the semicolon; keys must
+        // not be silently dropped just because of that whitespace.
+        let value = format!("ts={TIMESTAMP}; h1={SIGNATURE}");
+        assert_eq!(
+            verify_with(
+                BODY,
+                &value,
+                clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+                SECRET,
+            ),
+            Ok(())
+        );
     }
 
     #[test]

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The combined `key=value` signature headers (Stripe, Paddle, Coinbase,
+  Cloudflare) now tolerate whitespace after the element separator: keys are
+  compared after trimming, so the comma-space/semicolon-space spelling real
+  integrations emit (`t=..., v1=...`, `ts=...; h1=...`, `time=..., sig1=...`,
+  `t=..., v0=...`) parses exactly like the canonical form instead of being
+  silently dropped into a misleading "missing `t` field" failure. Values are
+  never trimmed — timestamps still ride verbatim into the signed string, so
+  verification strength is unchanged (spec §3 rows updated).
 - The tower (`VerifyLayer`) and actix (`WebhookConfig`) adapters now reject a
   request whose declared `Content-Length` already exceeds
   `with_max_body_size` with `413 Payload Too Large` *before* any body bytes
