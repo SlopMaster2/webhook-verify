@@ -79,6 +79,14 @@ std = []
 # Pulls in `p256` (optional dependency, `no_std`-compatible build). Only the
 # verification path is used; no key generation and no network access.
 sendgrid = ["dep:p256"]
+# Enables the `http` `HeaderMap` impl so the crate verifies against any
+# `http::HeaderMap` (axum, tower, hyper, etc.) without pulling in a framework
+# adapter. The crate's own `http`-path code is `no_std`-clean, but the
+# feature is **std-bounded in practice**: the `http` crate itself requires
+# `std` (its `lib.rs` emits `compile_error!("std feature currently required,
+# support for no_std may be added later")`), so a genuinely std-less build
+# cannot include the `http` feature. The `no_std + alloc` guarantee (spec.md
+# §1) is scoped to core + `sendgrid` only (spec.md §6, §7, issue #23).
 http = ["dep:http"]
 # actix-web 4 adapter: extractor + header bridge (actix's internal `http`
 # 0.2 types need their own impl of the crate's `HeaderMap` trait). Contains

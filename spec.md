@@ -900,11 +900,14 @@ A provider implementation is not mergeable until it has:
   the `test-nostd` CI job (`.github/workflows/ci.yml`), paired with the `http`
   run below.
 - `cargo test --no-default-features --features http` on stable as the twin
-  of the run above: README §no_std promises the `http` feature alone stays
-  `no_std`-compatible, and nothing exercised it until this entry — the
-  `http::HeaderMap` impl (and its `verify()` end-to-end tests) now run with
-  `std` off, catching any `std`-leak regression in the `http` path on the
-  host the way the `sendgrid`/`paypal` run catches the core path.
+  of the run above: the `http` feature's crate (`http`) requires `std`
+  itself, so the feature is std-bounded in practice (like `paypal`, §3, §7) —
+  but the crate's own `http`-path code (the `http::HeaderMap` impl in
+  §2 and its `verify()` end-to-end tests) must stay `no_std`-clean: it
+  compiles and runs with the crate's own `std` feature off, catching a
+  `std`-leak regression in *this crate's* `http` code even though the
+  `http` dependency ships `std` regardless. This is a behavioral catch for
+  the crate's own code, not a std-less build proof.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`, so a broken
   intra-doc link is caught before merge instead of silently degrading the
   user-facing docs. (docs.rs itself builds with `-D warnings`, so a broken link
@@ -1022,23 +1025,33 @@ A provider implementation is not mergeable until it has:
   [`VerifyError`] does not implement `std::error::Error`. Callers on
   bare-metal/wasm targets supply their own [`Clock`] for timestamped
   (replay-protected) providers; a missing clock reads 0 and fail-closes replay
-  checks. The wasm regression job ships in CI
-  (`.github/workflows/ci.yml`, mirroring the `test-nostd` feature matrix:
-  `cargo build --no-default-features --features sendgrid,paypal --target
-  wasm32-unknown-unknown` and `cargo build --no-default-features --features
-  http --target wasm32-unknown-unknown`), and the full test suite
-  also runs against the `--no-default-features` build on the host
-  (`cargo test --no-default-features --features sendgrid,paypal` and — for the
-  `no_std` promise of the `http` feature — `cargo test --no-default-features
-  --features http`, §6) via the
-  `test-nostd` CI job (`.github/workflows/ci.yml`), so this configuration
-  cannot silently regress. The
+  checks. The wasm32 regression job ships in CI
+  (`.github/workflows/ci.yml`); it currently build-checks `cargo build
+  --no-default-features --features sendgrid,paypal --target
+  wasm32-unknown-unknown` (the `http` feature's wasm32 build is the subject
+  of issue #25). The full test suite runs against the `--no-default-features`
+  build on the host (`cargo test --no-default-features --features
+  sendgrid,paypal` and — for the crate's own `http`-path code —
+  `cargo test --no-default-features --features http`, §6) via the
+  `test-nostd` CI job (`.github/workflows/ci.yml`). The `http` and `paypal`
+  features are both **std-bounded in practice**: the `http` crate itself
+  requires `std` (its `lib.rs` contains `compile_error!("std feature
+  currently required, support for no_std may be added later")`), and
+  `x509-parser`'s transitive defaults force `std` for `paypal` (issue #23).
+  Neither feature can be included in a genuinely std-less build; the wasm32
+  gate proves the core + `sendgrid` build compiles with std present, and the
+  host `test-nostd` run verifies the crate's own code with the crate's `std`
+  feature off — the real std-less proof is the `sendgrid`+core-only
+  `riscv32imac-unknown-none-elf` build (see the Cargo.toml feature comments
+  and the §3 paypal row). The
   `no_std + alloc` scope covers the core
-  verification path only: the `tower` and `actix` adapters are std-only
-  framework glue and therefore imply the `std` feature when enabled —
+  verification path + `sendgrid` only: the `tower` and `actix` adapters are
+  std-only framework glue and therefore imply the `std` feature when enabled —
   a `default-features = false` build with either of them simply gets `std`
   back, which keeps the combination compiling instead of surfacing raw
-  `cannot find crate std` errors.*
+  `cannot find crate std` errors. Issue #23 closed as resolved-by-design;
+  the `http` feature's `std`-bound is the same class of dependency-forced
+  `std`.*
 - **PayPal feature is intentionally `std`-bounded (design decision,
   2026-09).** *Resolved per the alternative framing in issue #23.* The
   issue's literal fix — declaring direct `num-traits`/`memchr` edges with
