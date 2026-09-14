@@ -106,12 +106,14 @@ use actix_web::{
     dev::Payload,
     http::{
         StatusCode,
-        header::{CONTENT_LENGTH, HeaderMap as ActixHeaderMap, HeaderName},
+        header::{HeaderMap as ActixHeaderMap, HeaderName},
     },
     web::Bytes,
 };
 
-use crate::core::adapter_utils::{conflicting_signature_header, rejection_status};
+use crate::core::adapter_utils::{
+    conflicting_signature_header, declared_content_length, rejection_status,
+};
 use crate::{
     HeaderMap, Provider, Secret, VerifyError, VerifyOptions, providers::signature_header_names,
 };
@@ -375,17 +377,6 @@ impl FromRequest for VerifiedBody {
 }
 
 // --- header bridge ----------------------------------------------------------
-
-/// The request's declared `Content-Length`, when present and decodable.
-///
-/// A parsing failure is treated as "no declared length": the request then
-/// falls through to the post-buffer size check, which still bounds the
-/// verification work, and actix-http has already rejected inconsistent
-/// `Content-Length` fields at the framing layer.
-fn declared_content_length(headers: &ActixHeaderMap) -> Option<usize> {
-    let value = headers.get(CONTENT_LENGTH)?;
-    value.to_str().ok()?.trim().parse().ok()
-}
 
 /// Bridge for actix-web 4's internal `http` 0.2 header map: enables passing
 /// `req.headers()` straight into [`crate::verify()`].

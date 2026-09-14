@@ -127,7 +127,9 @@ use ::http_body_util::BodyExt;
 use ::tower_layer::Layer;
 use ::tower_service::Service;
 
-use crate::core::adapter_utils::{conflicting_signature_header, rejection_status};
+use crate::core::adapter_utils::{
+    conflicting_signature_header, declared_content_length, rejection_status,
+};
 use crate::{Provider, Secret, VerifyError, VerifyOptions, providers::signature_header_names};
 
 /// Boxed error type used by the middleware, per tower conventions.
@@ -272,17 +274,6 @@ impl<S: fmt::Debug, B> fmt::Debug for VerifyMiddleware<S, B> {
             .field("max_body_size", &self.max_body_size)
             .finish()
     }
-}
-
-/// The request's declared `Content-Length`, when present and decodable.
-///
-/// A parsing failure is treated as "no declared length": the request then
-/// falls through to the post-buffer size check, which still bounds the
-/// verification work, and the framing layer (`hyper`, `axum`) has already
-/// rejected inconsistent `Content-Length` fields.
-fn declared_content_length(headers: &::http::HeaderMap) -> Option<usize> {
-    let value = headers.get(::http::header::CONTENT_LENGTH)?.to_str().ok()?;
-    value.trim().parse().ok()
 }
 
 /// Empty-bodied rejection response; no error detail leaks over the wire.

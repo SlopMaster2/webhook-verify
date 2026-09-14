@@ -26,6 +26,18 @@ pub(crate) trait MultiValueHeaders {
     /// name can never be verified against, so reporting it as ambiguous is
     /// the only safe answer.
     fn get_all_bytes(&self, name: &str) -> Option<impl Iterator<Item = &[u8]>>;
+
+    /// The first value stored under `name`, decoded as a string — but only
+    /// when every byte is *visible ASCII*, per each framework's
+    /// `HeaderValue::to_str` semantics.
+    ///
+    /// [`declared_content_length`] relies on this precise behavior: a value
+    /// with non-visible-ASCII bytes must read as "no declared length", exactly
+    /// as each adapter's historical helper read it, rather than as a string
+    /// that happens to parse after trimming. Returns `None` for an unparseable
+    /// header name, an absent header, or a non-visible-ASCII value — all
+    /// fail-closed.
+    fn get_first_str(&self, name: &str) -> Option<&str>;
 }
 
 #[cfg(feature = "http")]
@@ -37,6 +49,11 @@ impl MultiValueHeaders for ::http::HeaderMap {
         let key = ::http::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
         Some(self.get_all(&key).iter().map(::http::HeaderValue::as_bytes))
     }
+
+    fn get_first_str(&self, name: &str) -> Option<&str> {
+        let key = ::http::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
+        self.get(&key).and_then(|value| value.to_str().ok())
+    }
 }
 
 #[cfg(feature = "actix")]
@@ -47,6 +64,11 @@ impl MultiValueHeaders for actix_web::http::header::HeaderMap {
             self.get_all(&key)
                 .map(actix_web::http::header::HeaderValue::as_bytes),
         )
+    }
+
+    fn get_first_str(&self, name: &str) -> Option<&str> {
+        let key = actix_web::http::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
+        self.get(&key).and_then(|value| value.to_str().ok())
     }
 }
 
@@ -73,6 +95,22 @@ pub(crate) fn conflicting_signature_header<H: MultiValueHeaders + ?Sized>(
         };
         values.any(|value| *value != *first)
     })
+}
+
+/// The request's declared `Content-Length`, when present and decodable.
+///
+/// A parsing failure — a non-visible-ASCII or non-numeric value, or an
+/// unparseable header name — is treated as "no declared length": the request
+/// then falls through to the post-buffer size check, which still bounds the
+/// verification work, and the framing layer (`hyper`/`axum` on tower,
+/// actix-http on actix) has already rejected inconsistent `Content-Length`
+/// fields. Shared between the adapters so the pre-buffer 413 guard cannot
+/// drift.
+#[must_use]
+pub(crate) fn declared_content_length<H: MultiValueHeaders + ?Sized>(
+    headers: &H,
+) -> Option<usize> {
+    headers.get_first_str("content-length")?.trim().parse().ok()
 }
 
 /// Maps a verification outcome to its rejection HTTP status code.
@@ -112,7 +150,7 @@ pub(crate) fn rejection_status(error: &VerifyError) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use super::rejection_status;
+    use super::{declared_content_length, rejection_status};
     use crate::VerifyError;
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
@@ -165,5 +203,25 @@ mod tests {
             status_of(VerifyError::MissingContext { reason: "boom" }),
             500
         );
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn declared_content_length_parses_and_ignores_garbage() {
+        // The shared helper over the http 1.x header map, mirroring the
+        // actix-side unit test in `src/actix.rs` so both impls of the
+        // underlying `MultiValueHeaders::get_first_str` are pinned.
+        let mut headers = ::http::HeaderMap::new();
+        assert_eq!(declared_content_length(&headers), None);
+        headers.insert(
+            ::http::header::CONTENT_LENGTH,
+            ::http::HeaderValue::from_static("131072"),
+        );
+        assert_eq!(declared_content_length(&headers), Some(131072));
+        headers.insert(
+            ::http::header::CONTENT_LENGTH,
+            ::http::HeaderValue::from_static("oops"),
+        );
+        assert_eq!(declared_content_length(&headers), None);
     }
 }
