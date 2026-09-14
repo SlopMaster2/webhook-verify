@@ -16,21 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content-length-bearing requests. Bodies sent without a length
   (`Transfer-Encoding: chunked`) fall through to the existing post-buffer
   check, which still bounds the signature work.
-- The `no_std` wasm32 build gate now covers the `http` feature: the
-  `no-std-wasm` CI job (`cargo build --no-default-features --features
-  sendgrid,paypal --target wasm32-unknown-unknown`) mirrors the `test-nostd`
-  matrix and additionally build-checks `cargo build --no-default-features
-  --features http --target wasm32-unknown-unknown`. A `std` leak specific to
-  the `http` feature would previously only surface on a host build, where
-  `std` is always available (issue #25). Spec §7 and the README's `no_std`
-  section now name both feature sets for the genuinely std-less build.
-- The `no_std` behavioral bar now includes the `http` feature: the full test
-  suite runs with `cargo test --no-default-features --features http` (spec
-  §6, AGENTS.md §4.6/§6). The README has long promised that `http` alone
-  stays `no_std`-compatible, but nothing exercised it — the `http::HeaderMap`
-  impl (and its `verify()` end-to-end tests) only ran under `--all-features`,
-  so a `std` leak in the impl would have passed CI. It is now covered the way
-  the `sendgrid`/`paypal` run covers the core clock fallback.
+- The `http` feature is now correctly documented as **std-bounded in practice**:
+  the `http` crate itself requires `std` (its own `lib.rs` emits
+  `compile_error!("std feature currently required...")` when built without it),
+  so a genuinely std-less build cannot include the `http` feature — the same
+  class of dependency-forced `std` as `paypal` (issue #23, `spec.md` §3).
+  The README, spec §6, and spec §7 `no_std` scope record now reflect this
+  honestly; the `no_std + alloc` guarantee is core + `sendgrid` only.
+- The `test-nostd` `http` CI run (`cargo test --no-default-features
+  --features http`) is now correctly framed: it exercises the crate's own
+  `http::HeaderMap` impl with the crate's own `std` feature off (a behavioral
+  catch for the crate's own code), but cannot prove a std-less build because
+  the `http` crate ships `std` regardless. The wasm32 `http` feature gate
+  (issue #25) remains pending.
 - The `test-nostd` and `doc` CI jobs ship in `.github/workflows/ci.yml`,
   retiring the earlier "CI wiring pending — blocked on the runner token's
   missing `workflows` permission" notes (issues #18/#22): the `no_std`

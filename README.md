@@ -209,24 +209,37 @@ Without `std`, [`Clock::now`] returns unix seconds directly, `SystemClock` is
 unavailable, and `VerifyError` does not implement `std::error::Error` — see
 `spec.md` §7.
 
-The `no_std + alloc` guarantee is scoped to the core verification path: the
-`tower` and `actix` adapters are async framework glue and **imply** the `std`
-feature, so enabling either on a `default-features = false` build still
-compiles (it just pulls `std` back in). For a truly `std`-free build, leave
-those two features off; the `http` feature alone stays `no_std`-compatible.
-
 The `sendgrid` provider feature is `no_std`-compatible; the certificate-based
 `paypal` feature is **not** — its transitive dependencies (`der-parser`,
 `nom`) re-enable `std`, so a genuinely std-less build cannot include it (the
-wasm32 target hides this because it ships std). See `spec.md` §3.
+wasm32 target hides this because it ships std). The `http` feature is likewise
+**std-bounded in practice**: the `http` crate itself requires `std`
+(`compile_error!` in its own source when built without it), so a genuinely
+std-less build cannot include the `http` feature either. See `spec.md` §3, §6,
+and §7.
+
+The `no_std + alloc` guarantee is therefore scoped to the **core verification
+path + `sendgrid`**: the `tower` and `actix` adapters are async framework glue
+and **imply** the `std` feature (enabling either on a
+`default-features = false` build still compiles — it just pulls `std` back
+in), and the `http` and `paypal` features force `std` through their enabling
+crates. For a truly `std`-free build, enable none of those features.
 
 The `no_std + alloc` bar is verified behaviorally, not just claimed: CI runs
-the full test suite both with `--no-default-features --features sendgrid,paypal`
+the full test suite with `--no-default-features --features sendgrid,paypal`
 and with `--no-default-features --features http` (the `test-nostd` job,
-`.github/workflows/ci.yml`), so the core clock fallback and the
-`http::HeaderMap` impl cannot silently regress into a `std` leak. The companion
-wasm32 job proves the std-less build itself — for *both* feature sets (`http`
-and `sendgrid,paypal`), mirroring the `test-nostd` matrix.
+`.github/workflows/ci.yml`). The `sendgrid,paypal` run exercises the core
+clock fallback with the crate's own `std` feature off; the `http` run does the
+same for the `http::HeaderMap` impl without enabling the crate's `std`
+feature, so the iterator-based impl cannot silently regress into a `std` leak
+of its own. Neither run can prove a std-less *build* — `paypal` and `http`
+pull `std` in via their enabling crates, and the run happens on a host that
+ships `std`. The companion wasm32 job build-checks
+`cargo build --no-default-features --features sendgrid,paypal --target
+wasm32-unknown-unknown`; it cannot catch a std-less-target failure either
+(wasm32 ships std), which is why `sendgrid` — the one genuinely
+`no_std`-compatible feature beyond the core — is additionally verified
+behaviorally on the host.
 
 ## Framework adapters
 
