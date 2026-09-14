@@ -114,6 +114,14 @@ fn parse_header(value: &str) -> Result<(String, String), VerifyError> {
         let Some((key, val)) = element.split_once('=') else {
             continue;
         };
+        // Keys are compared after trimming surrounding whitespace: the
+        // comma-space spelling (`time=..., sig1=...`) that proxy
+        // header-folding and hand-copied values produce must not silently drop
+        // a recognized key. Values are never trimmed — the timestamp is reused
+        // verbatim in the signed string, so the raw bytes must stay
+        // byte-for-byte intact.
+        let key = key.trim();
+
         if key == TIME_FIELD {
             if time.is_some() {
                 return Err(VerifyError::MalformedHeader {
@@ -249,6 +257,24 @@ mod tests {
     #[test]
     fn documented_recipe_vector_verifies() {
         assert_eq!(verify_fresh(BODY, SIGNATURE), Ok(()));
+    }
+
+    #[test]
+    fn comma_space_spelling_is_tolerated() {
+        // Real integrations (proxy header-folding, hand-pasted requests) often
+        // emit `time=..., sig1=...` with a space after the comma; keys must
+        // not be silently dropped (which would otherwise misreport a present
+        // `time=` as missing).
+        let value = format!("{TIME_FIELD}={TIME}, {SIG_FIELD}={SIGNATURE}");
+        assert_eq!(
+            verify_with(
+                BODY,
+                &value,
+                &Secret::new(SECRET),
+                clocked_at(TIME, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
     }
 
     #[test]

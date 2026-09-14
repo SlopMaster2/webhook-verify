@@ -297,6 +297,10 @@ body, multi-value headers, etc.).
   default to 5 minutes)
 - Multiple `v1=` values may be present during secret rotation; a match on
   *any* is accepted.
+- Keys are compared after trimming surrounding whitespace, so the comma-space
+  spelling `t=..., v1=...` (produced by proxy header-folding and hand-pasted
+  values) parses like the canonical `t=...,v1=...`. Values are never trimmed —
+  the timestamp rides verbatim into the signed string.
 - Timestamp validation: `t` must be a pure ASCII-digit unix-seconds value,
   validated through the shared timestamp parser. Sign-prefixed
   (`t=+1700000000`), whitespace-padded, empty, or overflowing values are
@@ -648,6 +652,10 @@ Source: <https://developer.paddle.com/webhooks/about/signature-verification>
 - Duplicate `ts` elements are rejected as ambiguous — never last-wins,
   following the crate-wide rule that malformed/ambiguous signing material
   fails closed rather than defaulting to valid.
+- Keys are compared after trimming surrounding whitespace, so the
+  semicolon-space spelling `ts=...; h1=...` (produced by proxy header-folding
+  and hand-pasted values) parses like the canonical `ts=...;h1=...`. Values
+  are never trimmed — the timestamp rides verbatim into the signed string.
 - Test vectors: the primary vector is Paddle's own published worked example
   (Go SDK `example_webhook_verifier_test.go`): secret key, request body, and
   signature reproduced verbatim. Additional vectors cover the empty and
@@ -720,6 +728,10 @@ Cloudflare has other webhook schemes (e.g. the legacy Apps
   first-wins, following the crate-wide rule that malformed/ambiguous signing
   material fails closed rather than defaulting to valid (the reference code
   takes the first occurrence; this crate does not).
+- Keys are compared after trimming surrounding whitespace, so the comma-space
+  spelling `time=..., sig1=...` (produced by proxy header-folding and
+  hand-pasted values) parses like the canonical `time=...,sig1=...`. Values
+  are never trimmed — the timestamp rides verbatim into the signed string.
 - Signed string: `"{time}.{raw_body}"` — the `time` value exactly as it
   appears in the header, a literal dot, then the raw request body bytes,
   unmodified. ("Every byte in the request body must remain unaltered for
@@ -762,6 +774,10 @@ with [`CustomScheme`] if needed) and is not this provider.
   following the crate-wide rule that malformed/ambiguous signing material
   fails closed rather than defaulting to valid (the reference code takes the
   first occurrence; this crate does not).
+- Keys are compared after trimming surrounding whitespace, so the comma-space
+  spelling `t=..., v0=...` (produced by proxy header-folding and hand-pasted
+  values) parses like the canonical `t=...,v0=...`. Values are never trimmed —
+  the timestamp rides verbatim into the signed string.
 - Verified variant: `v0`. The docs' own guidance is "unless you want to bind
   the headers, which is unnecessary for most use cases, use `v0`", so only
   `v0` is interpreted and verified; `h` and `v1` (and any future fields) are

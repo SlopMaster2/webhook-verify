@@ -113,6 +113,12 @@ fn parse_header(value: &str) -> Result<ParsedHeader<'_>, VerifyError> {
         let Some((key, val)) = element.split_once('=') else {
             continue;
         };
+        // Keys are compared after trimming surrounding whitespace: the
+        // comma-space spelling (`t=..., v1=...`) that proxy header-folding and
+        // hand-copied values produce must not silently drop a recognized key.
+        // Values are never trimmed — the timestamp is reused verbatim in the
+        // signed string, so the raw bytes must stay byte-for-byte intact.
+        let key = key.trim();
 
         if key == "t" {
             if timestamp_raw.is_some() {
@@ -279,6 +285,22 @@ mod tests {
         let value = format!("t={TIMESTAMP},v0=deadbeef,v1={SIGNATURE}");
         assert_eq!(
             verify_with(BODY, &value, clocked_at(TIMESTAMP, None)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn comma_space_spelling_is_tolerated() {
+        // Real integrations (proxy header-folding, hand-pasted requests) often
+        // emit `t=..., v1=...` with a space after the comma; keys must not be
+        // silently dropped just because of that whitespace.
+        let value = format!("t={TIMESTAMP}, v1={SIGNATURE}");
+        assert_eq!(
+            verify_with(
+                BODY,
+                &value,
+                clocked_at(TIMESTAMP, Some(Duration::from_secs(300)))
+            ),
             Ok(())
         );
     }
