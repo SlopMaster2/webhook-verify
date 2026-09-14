@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The tower (`VerifyLayer`) and actix (`WebhookConfig`) adapters now reject a
+  request whose declared `Content-Length` already exceeds
+  `with_max_body_size` with `413 Payload Too Large` *before* any body bytes
+  are buffered, closing the "bounds work, not memory" gap for
+  content-length-bearing requests. Bodies sent without a length
+  (`Transfer-Encoding: chunked`) fall through to the existing post-buffer
+  check, which still bounds the signature work.
 - The `no_std` wasm32 build gate now covers the `http` feature: the
   `no-std-wasm` CI job (`cargo build --no-default-features --features
   sendgrid,paypal --target wasm32-unknown-unknown`) mirrors the `test-nostd`
