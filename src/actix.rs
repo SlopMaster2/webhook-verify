@@ -976,7 +976,6 @@ mod tests {
 
     #[test]
     fn declared_content_length_helper_parses_and_ignores_garbage() {
-        use std::str::FromStr;
         let mut headers = ActixHeaderMap::new();
         assert_eq!(declared_content_length(&headers), None);
         headers.insert(
