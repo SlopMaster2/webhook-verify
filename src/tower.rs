@@ -26,8 +26,11 @@
 //!   [`VerifyLayer::with_max_body_size`] to reject oversized request bodies
 //!   with `413 Payload Too Large` before any signature work, so a malicious
 //!   client cannot force an arbitrarily large HMAC/verification computation.
-//!   The body is always fully buffered (verification requires the exact wire
-//!   bytes); the limit bounds the signature work, not the buffering itself.
+//!   A request whose `Content-Length` already exceeds the limit is rejected
+//!   before a single byte is buffered; otherwise the body is fully buffered
+//!   (verification requires the exact wire bytes) and the limit bounds the
+//!   signature work — the buffered allocation may still exceed the limit for
+//!   bodies sent without a length (`Transfer-Encoding: chunked`).
 //!
 //! # Status codes
 //!
@@ -165,8 +168,9 @@ impl fmt::Debug for Config {
 /// Use [`VerifyLayer::with_max_body_size`] to reject oversized request bodies
 /// (`413 Payload Too Large`) before any signature verification work, so a
 /// malicious client cannot force an arbitrarily large HMAC/verification
-/// computation. The body is buffered regardless (verification requires the
-/// exact wire bytes); the limit bounds the verification work, not memory.
+/// computation. Requests declaring an oversized `Content-Length` are rejected
+/// before any body bytes are buffered; the limit otherwise bounds the
+/// signature work, not the buffering itself.
 #[must_use]
 #[derive(Clone, Debug)]
 pub struct VerifyLayer<B = Bytes> {
@@ -200,9 +204,11 @@ impl<B> VerifyLayer<B> {
     /// When set, requests whose body exceeds this limit are rejected with
     /// `413 Payload Too Large` *before* any signature verification work, so a
     /// malicious client cannot force an arbitrarily large HMAC/verification
-    /// computation. The body is fully buffered regardless (verification
-    /// requires the exact wire bytes); the limit bounds the verification
-    /// work, not the buffering itself.
+    /// computation. Requests that declare an oversized `Content-Length` are
+    /// rejected before any body bytes are buffered; otherwise the body is
+    /// buffered in full (verification requires the exact wire bytes) and the
+    /// limit bounds the verification work. Bodies sent without a length
+    /// (`Transfer-Encoding: chunked`) are always fully buffered.
     ///
     /// When `None` (the default), the body is buffered without a size limit.
     ///
@@ -268,6 +274,17 @@ impl<S: fmt::Debug, B> fmt::Debug for VerifyMiddleware<S, B> {
     }
 }
 
+/// The request's declared `Content-Length`, when present and decodable.
+///
+/// A parsing failure is treated as "no declared length": the request then
+/// falls through to the post-buffer size check, which still bounds the
+/// verification work, and the framing layer (`hyper`, `axum`) has already
+/// rejected inconsistent `Content-Length` fields.
+fn declared_content_length(headers: &::http::HeaderMap) -> Option<usize> {
+    let value = headers.get(::http::header::CONTENT_LENGTH)?.to_str().ok()?;
+    value.trim().parse().ok()
+}
+
 /// Empty-bodied rejection response; no error detail leaks over the wire.
 fn rejection_response<ResB: Default>(error: &VerifyError) -> Response<ResB> {
     let mut response = Response::new(ResB::default());
@@ -308,6 +325,19 @@ where
             return Box::pin(async { Ok(response) });
         }
 
+        // Pre-buffer DoS guard: a declared `Content-Length` over the limit is
+        // rejected with 413 before a single body byte is buffered — previously
+        // the limit could not bound the buffered allocation at all. Requests
+        // without a declared length (chunked transfer) fall through to the
+        // post-buffer check below, which still bounds the work.
+        if let Some(limit) = self.max_body_size {
+            if declared_content_length(req.headers()).is_some_and(|len| len > limit) {
+                let mut response = Response::new(ResB::default());
+                *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
+                return Box::pin(async { Ok(response) });
+            }
+        }
+
         let mut inner = self.inner.clone();
         let config = self.config.clone();
         let max_body_size = self.max_body_size;
@@ -327,9 +357,12 @@ where
 
             // DoS hardening: reject oversized bodies before any signature
             // work. CPU amplification (HMAC over an arbitrarily large body)
-            // is the primary vector this defends against; a streaming body-
-            // size guard (e.g. `http_body_util::Limited`) would additionally
-            // bound memory, but this crate's verification semantics require
+            // is the primary vector this defends against; a declared
+            // Content-Length was already checked in `call` (pre-buffer), and
+            // this post-buffer check catches bodies sent without a length or
+            // lying about it. A streaming body-size guard (e.g.
+            // `http_body_util::Limited`) would additionally bound memory for
+            // chunked bodies, but this crate's verification semantics require
             // the full raw bytes, so the body must be collected regardless.
             if let Some(limit) = max_body_size {
                 if raw_body.len() > limit {
@@ -964,6 +997,79 @@ mod tests {
                 .await
                 .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
             assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        });
+    }
+
+    #[test]
+    fn declared_oversized_content_length_rejected_before_buffering() {
+        // The declared length exceeds the limit even though the actual body is
+        // small and its signature is valid: the pre-buffer Content-Length
+        // guard must reject with 413, proving no body bytes were read or
+        // buffered and the inner service never ran.
+        block_on(async {
+            let request = Request::builder()
+                .header("x-hub-signature-256", GITHUB_SIGNATURE)
+                .header("content-length", "1000000")
+                .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+                .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(10)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        });
+    }
+
+    #[test]
+    fn declared_content_length_at_or_below_limit_buffers_and_verifies() {
+        // A declared length within the limit still reaches the buffered
+        // verification path byte-for-byte.
+        block_on(async {
+            let request = Request::builder()
+                .header("x-hub-signature-256", GITHUB_SIGNATURE)
+                .header("content-length", "13")
+                .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+                .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(1024)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("verification should pass: {error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.into_body().into_inner().unwrap_or_default(),
+                Bytes::from_static(b"13")
+            );
+        });
+    }
+
+    #[test]
+    fn unparseable_declared_content_length_falls_through_to_post_buffer_check() {
+        // A non-numeric Content-Length cannot drive the pre-buffer guard; the
+        // request must still be processed (and, if within limit, verify).
+        block_on(async {
+            let request = Request::builder()
+                .header("x-hub-signature-256", GITHUB_SIGNATURE)
+                .header(
+                    "content-length",
+                    ::http::HeaderValue::from_bytes(b"not-a-number")
+                        .unwrap_or_else(|_| unreachable!("visible ASCII header value")),
+                )
+                .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+                .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(1024)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("verification should pass: {error}"));
+            assert_eq!(response.status(), StatusCode::OK);
         });
     }
 

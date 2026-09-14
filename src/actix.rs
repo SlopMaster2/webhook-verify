@@ -37,8 +37,11 @@
 //!   [`WebhookConfig::with_max_body_size`] to reject oversized request bodies
 //!   with `413 Payload Too Large` before any signature work, so a malicious
 //!   client cannot force an arbitrarily large HMAC/verification computation.
-//!   The body is always fully buffered (verification requires the exact wire
-//!   bytes); the limit bounds the signature work, not the buffering itself.
+//!   A request whose `Content-Length` already exceeds the limit is rejected
+//!   before a single byte is buffered; otherwise the body is fully buffered
+//!   (verification requires the exact wire bytes) and the limit bounds the
+//!   signature work — the buffered allocation may still exceed the limit for
+//!   bodies sent without a length (`Transfer-Encoding: chunked`).
 //!
 //! # Status codes
 //!
@@ -103,7 +106,7 @@ use actix_web::{
     dev::Payload,
     http::{
         StatusCode,
-        header::{HeaderMap as ActixHeaderMap, HeaderName},
+        header::{CONTENT_LENGTH, HeaderMap as ActixHeaderMap, HeaderName},
     },
     web::Bytes,
 };
@@ -164,9 +167,11 @@ impl WebhookConfig {
     /// When set, requests whose body exceeds this limit are rejected with
     /// `413 Payload Too Large` *before* any signature verification work, so a
     /// malicious client cannot force an arbitrarily large HMAC/verification
-    /// computation. The body is fully buffered regardless (verification
-    /// requires the exact wire bytes); the limit bounds the verification
-    /// work, not the buffering itself.
+    /// computation. Requests that declare an oversized `Content-Length` are
+    /// rejected before any body bytes are buffered; otherwise the body is
+    /// buffered in full (verification requires the exact wire bytes) and the
+    /// limit bounds the verification work. Bodies sent without a length
+    /// (`Transfer-Encoding: chunked`) are always fully buffered.
     ///
     /// When `None` (the default), the body is buffered without a
     /// crate-level size limit (actix-web's own extractor bound still
@@ -316,6 +321,18 @@ impl FromRequest for VerifiedBody {
             )))));
         }
 
+        // Pre-buffer DoS guard (parity with the tower adapter): a declared
+        // Content-Length over the limit is rejected with 413 before a single
+        // body byte is buffered — previously the limit could not bound the
+        // buffered allocation at all. Requests without a declared length
+        // (chunked transfer) fall through to the post-buffer check below,
+        // which still bounds the work.
+        if let Some(limit) = config.max_body_size {
+            if declared_content_length(req.headers()).is_some_and(|len| len > limit) {
+                return Box::pin(ready(Err(WebhookVerificationError(Rejection::BodyTooLarge))));
+            }
+        }
+
         let config = config.clone();
         let mut payload = payload.take();
         let req = req.clone();
@@ -331,7 +348,10 @@ impl FromRequest for VerifiedBody {
             // DoS hardening: reject oversized bodies before any signature
             // work (parity with `VerifyLayer::with_max_body_size` in the
             // tower adapter). CPU amplification (HMAC over an arbitrarily
-            // large body) is the primary vector this defends against.
+            // large body) is the primary vector this defends against; a
+            // declared Content-Length was already checked above (pre-buffer),
+            // and this post-buffer check catches bodies sent without a length
+            // or lying about it.
             if let Some(limit) = config.max_body_size {
                 if raw_body.len() > limit {
                     return Err(WebhookVerificationError(Rejection::BodyTooLarge));
@@ -353,6 +373,17 @@ impl FromRequest for VerifiedBody {
 }
 
 // --- header bridge ----------------------------------------------------------
+
+/// The request's declared `Content-Length`, when present and decodable.
+///
+/// A parsing failure is treated as "no declared length": the request then
+/// falls through to the post-buffer size check, which still bounds the
+/// verification work, and actix-http has already rejected inconsistent
+/// `Content-Length` fields at the framing layer.
+fn declared_content_length(headers: &ActixHeaderMap) -> Option<usize> {
+    let value = headers.get(CONTENT_LENGTH)?;
+    value.to_str().ok()?.trim().parse().ok()
+}
 
 /// Bridge for actix-web 4's internal `http` 0.2 header map: enables passing
 /// `req.headers()` straight into [`crate::verify()`].
@@ -901,6 +932,72 @@ mod tests {
         let req = github_request(GITHUB_BODY).to_request();
         let res = aw_test::call_service(&app, req).await;
         assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[actix_web::test]
+    async fn declared_oversized_content_length_rejected_before_buffering() {
+        // The declared length exceeds the limit even though the actual body is
+        // small and its signature is valid: the pre-buffer Content-Length
+        // guard must reject with 413, proving no body bytes were read or
+        // buffered and the handler never ran.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_max_body_size(10),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("content-length", "1000000"))
+            .insert_header(("X-Hub-Signature-256", GITHUB_SIGNATURE))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[actix_web::test]
+    async fn declared_content_length_at_or_below_limit_buffers_and_verifies() {
+        // A declared length within the limit still reaches the buffered
+        // verification path byte-for-byte.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_max_body_size(1024),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("content-length", "13"))
+            .insert_header(("X-Hub-Signature-256", GITHUB_SIGNATURE))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(aw_test::read_body(res).await, Bytes::from_static(b"13"));
+    }
+
+    #[test]
+    fn declared_content_length_helper_parses_and_ignores_garbage() {
+        use std::str::FromStr;
+        let mut headers = ActixHeaderMap::new();
+        assert_eq!(declared_content_length(&headers), None);
+        headers.insert(
+            HeaderName::from_static("content-length"),
+            http::header::HeaderValue::from_str("131072")
+                .unwrap_or_else(|_| unreachable!("digits parse")),
+        );
+        assert_eq!(declared_content_length(&headers), Some(131072));
+        headers.insert(
+            HeaderName::from_static("content-length"),
+            http::header::HeaderValue::from_str("oops")
+                .unwrap_or_else(|_| unreachable!("visible ASCII")),
+        );
+        assert_eq!(declared_content_length(&headers), None);
     }
 
     #[actix_web::test]
