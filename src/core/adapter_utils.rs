@@ -107,9 +107,7 @@ pub(crate) fn conflicting_signature_header<H: MultiValueHeaders + ?Sized>(
 /// fields. Shared between the adapters so the pre-buffer 413 guard cannot
 /// drift.
 #[must_use]
-pub(crate) fn declared_content_length<H: MultiValueHeaders + ?Sized>(
-    headers: &H,
-) -> Option<usize> {
+pub(crate) fn declared_content_length<H: MultiValueHeaders + ?Sized>(headers: &H) -> Option<usize> {
     headers.get_first_str("content-length")?.trim().parse().ok()
 }
 
