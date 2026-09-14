@@ -127,13 +127,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of silently degrading docs.rs output. (docs.rs itself builds with
   `-D warnings`; the `doc` CI job now enforces the same flag.)
 - spec.md: corrected CI claims that outran the workflow wiring. The
-  `-D warnings` doc build and the `no_std` behavioral test run are now
-  marked as local/pre-merge gates whose CI jobs are blocked on the runner
-  token's missing `workflows` permission (issues #18/#22); the §5.7
-  constant-time bullet no longer describes its already-shipped informational
-  CI job as "tracked separately"; and the §7 PayPal ship date typo
-  `(2026-10)` is fixed to `(2026-09)` (PayPal and SendGrid both shipped in the
-  initial 2026-09 commit).
+  `-D warnings` doc build and the `no_std` behavioral test run were
+  temporarily marked as local/pre-merge gates (issues #18/#22), and have
+  since shipped in `.github/workflows/ci.yml` (see the Added section above).
+  The §5.7 constant-time bullet no longer describes its already-shipped
+  informational CI job as "tracked separately"; and the §7 PayPal ship date
+  typo `(2026-10)` is fixed to `(2026-09)` (PayPal and SendGrid both shipped
+  in the initial 2026-09 commit).
 - `VerifyOptions::with_form_params` docs: the builder claimed "Order does not
   matter; fields are sorted into signing order during verification." That
   holds for distinct field names, but Twilio's scheme signs same-named fields
