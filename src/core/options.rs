@@ -107,8 +107,12 @@ pub struct VerifyOptions {
     /// Providers that do not sign timestamps document explicitly that this
     /// option has no effect on them (see `spec.md` §3).
     pub max_age: Option<Duration>,
-    /// Clock used for "now". `None` means real system time. Injectable for
-    /// deterministic tests of timestamp-based providers.
+    /// Clock used for "now". `None` means real system time under the `std`
+    /// feature; on a `no_std + alloc` target with no clock injected,
+    /// [`VerifyOptions::now`] has no wall clock to consult and reads 0, so
+    /// replay-protected providers fail closed on every realistic delivery
+    /// timestamp until the caller supplies a [`Clock`] (`spec.md` §1, §7).
+    /// Injectable for deterministic tests of timestamp-based providers.
     pub clock: Option<Arc<dyn Clock>>,
     /// Full URL of the receiving endpoint, required by providers whose
     /// signature incorporates it (currently Square, whose scheme signs the
@@ -235,8 +239,10 @@ impl VerifyOptions {
     }
 
     /// Sets [`VerifyOptions::clock`], the source of "now" used for replay
-    /// protection. `None` uses real system time. Injectable for deterministic
-    /// tests of timestamp-based providers.
+    /// protection. `None` uses real system time under the `std` feature; on a
+    /// `no_std` target it leaves [`VerifyOptions::now`] reading 0, which
+    /// fail-closes replay-protected providers until a [`Clock`] is injected.
+    /// Injectable for deterministic tests of timestamp-based providers.
     pub fn with_clock(mut self, clock: Option<Arc<dyn Clock>>) -> Self {
         self.clock = clock;
         self
@@ -258,7 +264,10 @@ impl VerifyOptions {
     }
 
     /// Resolves "now" in unix seconds from the injected clock, falling back to
-    /// the real wall clock under `std`.
+    /// the real wall clock under `std`. On a `no_std` target with no clock
+    /// injected there is no wall clock to consult, so this returns 0 — replay
+    /// protection then fail-closes on any realistic delivery timestamp
+    /// (`spec.md` §7); supply a [`Clock`] on such targets.
     #[must_use]
     pub fn now(&self) -> u64 {
         match &self.clock {
@@ -431,5 +440,16 @@ mod tests {
         // doesn't panic and the clock field is None.
         assert!(opts.clock.is_none());
         let _ = opts.now();
+    }
+
+    #[cfg(not(feature = "std"))]
+    #[test]
+    fn no_std_without_a_clock_reads_zero() {
+        // On a `no_std + alloc` target there is no wall clock; with no `Clock`
+        // injected, `now()` must read 0 so replay checks fail closed on any
+        // realistic delivery until the caller supplies one (`spec.md` §7, and
+        // the `clock`/`now`/`with_clock` doc contract above).
+        let opts = VerifyOptions::default();
+        assert_eq!(opts.now(), 0);
     }
 }
