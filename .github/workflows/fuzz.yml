@@ -1,6 +1,8 @@
 name: Fuzz
 
 on:
+  push:
+    branches: [master]
   pull_request:
   schedule:
     # Nightly; the timed run below only executes on this event.
