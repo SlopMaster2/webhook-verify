@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consistent with each type's `PartialEq` — verified by new tests, including a
   pinning test that the hand-written `CustomScheme::hash` stays in lockstep
   with its declarative `PartialEq` (`signed_string` excluded from both).
+- [`HeaderMap`](crate::HeaderMap) is now implemented for borrowed-key maps
+  (`BTreeMap<&str, &str>`, and `HashMap<&str, &str>` behind the `std`
+  feature), so static header tables built from `&'static str` pairs verify
+  directly without allocating owned keys — the map counterpart of the
+  existing `Vec<(&str, &str)>`/slice impls. Same case-insensitive lookup and
+  same first-match semantics as the owned-key forms, with the same
+  inherent-`get` shadowing caveat (call `HeaderMap::get(&map, name)`).
+  Spec.md §2's blanket-impl list updated.
 - The Standard Webhooks provider's test module now covers the §5.5
   garbage-value case for the opaque `webhook-id` header: a non-id-shaped
   value is pinned as well-formed (verified against a signature made over it)

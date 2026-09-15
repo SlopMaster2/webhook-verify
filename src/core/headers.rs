@@ -11,10 +11,11 @@ use std::collections::HashMap;
 ///
 /// Returns the value of the *first* header matching `name` (ASCII
 /// case-insensitively), or `None` if absent. For ordered collections
-/// (`Vec`, arrays, slices) "first" means insertion order. For `BTreeMap`
-/// the winner among case-variant keys (e.g. `X-Sig` vs `x-sig`) is the
-/// lexicographically smallest; for `HashMap` it is hash-seed-dependent
-/// and nondeterministic across Rust versions. **Callers must not supply
+/// (`Vec`, arrays, slices) "first" means insertion order. For the map
+/// impls (`BTreeMap`/`HashMap`, owned or borrowed-key) the winner among
+/// case-variant keys (e.g. `X-Sig` vs `x-sig`) is the lexicographically
+/// smallest for `BTreeMap`, and hash-seed-dependent/nondeterministic
+/// across Rust versions for `HashMap`. **Callers must not supply
 /// case-variant keys** when using map-backed `HeaderMap` impls — the
 /// value returned in that scenario is unspecified for those types.
 ///
@@ -128,12 +129,34 @@ impl HeaderMap for BTreeMap<String, String> {
     }
 }
 
+/// Borrowed-key counterpart of [`BTreeMap<String, String>`], for header tables
+/// built from `&'static str` pairs without allocating owned keys (handlers,
+/// test fixtures, config constants). Unconditional like the owned form —
+/// `BTreeMap` lives in `alloc`, so this adds nothing beyond the crate's
+/// existing `alloc` dependency.
+impl HeaderMap for BTreeMap<&str, &str> {
+    fn get(&self, name: &str) -> Option<&str> {
+        self.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| *v)
+    }
+}
+
 #[cfg(feature = "std")]
 impl HeaderMap for HashMap<String, String> {
     fn get(&self, name: &str) -> Option<&str> {
         self.iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.as_str())
+    }
+}
+
+#[cfg(feature = "std")]
+impl HeaderMap for HashMap<&str, &str> {
+    fn get(&self, name: &str) -> Option<&str> {
+        self.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| *v)
     }
 }
 
@@ -189,6 +212,18 @@ mod tests {
         assert_eq!(HeaderMap::get(&headers, "missing"), None);
     }
 
+    #[cfg(feature = "std")]
+    #[test]
+    fn borrowed_key_hash_map_is_case_insensitive() {
+        // The zero-copy counterpart of the owned form: static-string keys and
+        // values, no allocation. Same lookup semantics, same shadowing caveat.
+        let mut headers = HashMap::new();
+        headers.insert("Webhook-Signature", "v1,aa");
+        assert_eq!(HeaderMap::get(&headers, "webhook-signature"), Some("v1,aa"));
+        assert_eq!(HeaderMap::get(&headers, "WEBHOOK-SIGNATURE"), Some("v1,aa"));
+        assert_eq!(HeaderMap::get(&headers, "missing"), None);
+    }
+
     #[test]
     fn btree_map_is_case_insensitive() {
         let mut headers = BTreeMap::new();
@@ -197,6 +232,18 @@ mod tests {
         // lookup, which shadows the trait method in method-call position; go
         // through the trait explicitly.
         assert_eq!(HeaderMap::get(&headers, "webhook-signature"), Some("v1,aa"));
+    }
+
+    #[test]
+    fn borrowed_key_btree_map_is_case_insensitive() {
+        // Zero-copy counterpart of the owned form: `&'static str` keys/values,
+        // built without allocating. Same case-insensitive lookup and the same
+        // inherent-`get` shadowing caveat.
+        let mut headers = BTreeMap::new();
+        headers.insert("Webhook-Signature", "v1,aa");
+        assert_eq!(HeaderMap::get(&headers, "webhook-signature"), Some("v1,aa"));
+        assert_eq!(HeaderMap::get(&headers, "WEBHOOK-SIGNATURE"), Some("v1,aa"));
+        assert_eq!(HeaderMap::get(&headers, "missing"), None);
     }
 
     #[test]
@@ -269,6 +316,39 @@ mod tests {
             HeaderMap::get(window, "x-slack-request-timestamp"),
             Some("1531420618")
         );
+    }
+
+    #[test]
+    fn borrowed_key_btree_map_verifies_github_end_to_end() {
+        // The same GitHub vector passed as a borrowed-key BTreeMap reaches the
+        // same result as through the Vec/array forms — proving the impl is
+        // wired into the crate's actual lookup path, not just self-equality.
+        use crate::{Provider, Secret, verify};
+
+        let mut headers = BTreeMap::new();
+        headers.insert(
+            "X-Hub-Signature-256",
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17",
+        );
+
+        let result = verify(
+            Provider::GitHub,
+            &headers,
+            b"Hello, World!",
+            &Secret::new("It's a Secret to Everybody"),
+            Default::default(),
+        );
+        assert_eq!(result, Ok(()));
+
+        // A tampered delivery fails closed through the same path.
+        let result = verify(
+            Provider::GitHub,
+            &headers,
+            b"Hello, World?",
+            &Secret::new("It's a Secret to Everybody"),
+            Default::default(),
+        );
+        assert_eq!(result, Err(crate::VerifyError::SignatureMismatch));
     }
 
     #[cfg(feature = "http")]
