@@ -931,10 +931,15 @@ A provider implementation is not mergeable until it has:
   `.github/workflows/ci.yml`.)
 - `cargo fuzz build` (build-only in normal CI; timed fuzz runs in a
   scheduled nightly job).
-- A grep-based CI check that fails the build if any of `println!`,
-  `dbg!`, `log::`, or `tracing::` macros appear inside a `Secret`'s scope in
-  a way that could print its inner value (supplemented by the `Secret`
-  type's own redacted `Debug`/`Display` impls as the primary defense).
+- A grep-based CI backstop (`secret-leak-grep`) that fails the build if any
+  of `println!`, `print!`, `eprintln!`, `eprint!`, `dbg!`, `log::`, or
+  `tracing::` appears anywhere in `src/` — not just inside a `Secret`'s
+  scope — so no code path, release or test, can print secret material into a
+  log, error message, or panic message (supplemented by the `Secret` type's
+  own redacted `Debug`/`Display` impls as the primary defense). Because the
+  grep covers all of `src/`, a macro used inside `#[cfg(test)]` is still a
+  build failure; there is no allowlist — the acceptable releases are the
+  `Secret`/`VerifyError`/`VerifyOptions` redaction impls themselves.
 - `cargo semver-checks` against the last published version to catch
   accidental breaking changes to the public API. Until the first version
   publishes there is no baseline to compare against, so this check is
