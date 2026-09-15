@@ -40,11 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --features http`) is now correctly framed: it exercises the crate's own
   `http::HeaderMap` impl with the crate's own `std` feature off (a behavioral
   catch for the crate's own code), but cannot prove a std-less build because
-  the `http` crate ships `std` regardless. The wasm32 `http` feature gate
-  (issue #25) is designed to build-check both `sendgrid,paypal` and `http`
-  feature sets for `--target wasm32-unknown-unknown` (parity with the
-  `test-nostd` matrix); the `.github/workflows/ci.yml` hunk is staged in
-  issue #25 and awaits a maintainer apply with `workflows` permission.
+  the `http` crate ships `std` regardless. The wasm32 build gate (issue #25)
+  now build-checks both `sendgrid,paypal` and `http` feature sets for
+  `--target wasm32-unknown-unknown` (parity with the `test-nostd` matrix);
+  the `.github/workflows/ci.yml` hunk shipped in PR #26.
 - The `test-nostd` and `doc` CI jobs ship in `.github/workflows/ci.yml`,
   retiring the earlier "CI wiring pending — blocked on the runner token's
   missing `workflows` permission" notes (issues #18/#22): the `no_std`
