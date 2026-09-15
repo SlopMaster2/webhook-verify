@@ -1069,7 +1069,12 @@ A provider implementation is not mergeable until it has:
   host `test-nostd` run verifies the crate's own code with the crate's `std`
   feature off — the real std-less proof is the `sendgrid`+core-only
   `riscv32imac-unknown-none-elf` build (see the Cargo.toml feature comments
-  and the §3 paypal row). The
+  and the §3 paypal row). That build is CI-gated by the `no-std-riscv` job
+  (`.github/workflows/ci.yml`): `cargo build --no-default-features
+  --target riscv32imac-unknown-none-elf` (pure core) and `cargo build
+  --no-default-features --features sendgrid --target
+  riscv32imac-unknown-none-elf` both run on every PR, so a dependency or
+  code change that leaks `std` into the `no_std + alloc` scope fails CI. The
   `no_std + alloc` scope covers the core
   verification path + `sendgrid` only: the `tower` and `actix` adapters are
   std-only framework glue and therefore imply the `std` feature when enabled —

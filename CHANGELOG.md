@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same first-match semantics as the owned-key forms, with the same
   inherent-`get` shadowing caveat (call `HeaderMap::get(&map, name)`).
   Spec.md §2's blanket-impl list updated.
+- CI now build-checks the `no_std + alloc` guarantee against a genuinely
+  std-less target: the `no-std-riscv` job builds `cargo build --no-default-features
+  --target riscv32imac-unknown-none-elf` (pure core) and `cargo build
+  --no-default-features --features sendgrid --target
+  riscv32imac-unknown-none-elf` (core + the one genuinely no_std-compatible
+  feature). The previous wasm32 gate ships std and could not prove a std-less
+  build; `riscv32imac-unknown-none-elf` is a bare-metal target with no
+  standard library, closing the gap between the spec.md §7 claim and CI
+  enforcement.
 - The Standard Webhooks provider's test module now covers the §5.5
   garbage-value case for the opaque `webhook-id` header: a non-id-shaped
   value is pinned as well-formed (verified against a signature made over it)

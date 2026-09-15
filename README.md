@@ -240,9 +240,11 @@ ships `std`. The companion wasm32 job build-checks
   http --target wasm32-unknown-unknown` on the same matrix (issue #25,
   shipped with the `test-nostd` wasm32 gate); it cannot catch a
   std-less-target failure either
-(wasm32 ships std), which is why `sendgrid` — the one genuinely
-`no_std`-compatible feature beyond the core — is additionally verified
-behaviorally on the host.
+(wasm32 ships std). The std-less *build* is instead proven by the
+`no-std-riscv` job, which builds for `riscv32imac-unknown-none-elf` — a
+bare-metal target with no standard library — with no features (pure core)
+and with `--features sendgrid`: `cargo build --no-default-features
+[--features sendgrid] --target riscv32imac-unknown-none-elf`.
 
 ## Framework adapters
 
