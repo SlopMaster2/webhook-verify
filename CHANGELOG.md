@@ -114,6 +114,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Removed the `probe_ci_write_test.yml` debris file left at the repository root
+  by a CI permission-probe commit. It was tracked on `master`, not excluded from
+  the package, and would have shipped verbatim in the crates.io tarball.
 - Discord: a configured public key that decodes to 32 bytes but is not a valid
   Ed25519 compressed point now fails closed with
   [`VerifyError::InvalidSecret`](crate::VerifyError), matching the module's
