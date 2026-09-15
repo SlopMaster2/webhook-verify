@@ -137,10 +137,13 @@ pub trait HeaderMap {
 }
 // Blanket impls provided for the built-in collections (Vec<(String,String)>,
 // Vec<(&str,&str)>, fixed-size arrays of (String,String) and (&str,&str),
-// borrowed slices of both, BTreeMap<String,String>, HashMap<String,String>),
-// unconditionally — the HashMap impl requires the "std" feature, since
-// std::collections::HashMap is itself std-only (BTreeMap lives in alloc); the
-// http::HeaderMap impl is provided behind the "http" feature flag.
+// borrowed slices of both, BTreeMap<String,String>, BTreeMap<&str,&str>,
+// HashMap<String,String>, HashMap<&str,&str>), unconditionally — the HashMap
+// impls require the "std" feature, since std::collections::HashMap is itself
+// std-only (BTreeMap lives in alloc); the http::HeaderMap impl is provided
+// behind the "http" feature flag. The borrowed-key map impls
+// (BTreeMap<&str,&str>, HashMap<&str,&str>) exist so static header tables
+// built from `&'static str` pairs verify without allocating owned keys.
 
 pub fn verify(
     provider: Provider,
