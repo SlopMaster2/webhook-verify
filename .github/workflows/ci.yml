@@ -157,3 +157,20 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --no-default-features --features ${{ matrix.features }} --target wasm32-unknown-unknown
+
+  no-std-riscv:
+    name: no_std + riscv build (genuinely std-less)
+    runs-on: ubuntu-latest
+    # wasm32-unknown-unknown ships std, so the no-std-wasm job cannot prove a
+    # std-less build. riscv32imac-unknown-none-elf is a bare-metal target with
+    # no standard library — the "real std-less proof" described in spec.md §7.
+    # Two builds: pure core (no features) catches regressions in the core
+    # verification path; core + sendgrid is the documented no_std scope.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imac-unknown-none-elf
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --no-default-features --target riscv32imac-unknown-none-elf
+      - run: cargo build --no-default-features --features sendgrid --target riscv32imac-unknown-none-elf
