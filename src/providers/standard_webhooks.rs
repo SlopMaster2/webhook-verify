@@ -282,6 +282,15 @@ mod tests {
     /// `MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSwBr` form (same official test,
     /// "needs two padding" case).
     const UNPADDED_SECRET_25B_SIGNATURE: &str = "yK2tMbA6BHPrMEJ1lLv7UlJJbgFoqGenJkiajZ29evg=";
+    /// A deliberately non-id-shaped value: the spec treats the message id as
+    /// opaque, so any non-empty value is well-formed and rides verbatim into
+    /// the signed string (module docs / the reference `webhooks.py`).
+    const GARBAGE_ID: &str = "garbage-id!!@#$%^&*()";
+    /// Locally constructed over `{GARBAGE_ID}.{TIMESTAMP}.{BODY}` with the
+    /// decoded `SECRET` (HMAC-SHA256, base64), cross-checked against the
+    /// reference Python library — the same signed-string construction the
+    /// official [`SIGNATURE`] vector above reproduces byte-for-byte.
+    const GARBAGE_ID_SIGNATURE: &str = "gIYgsiRpEbIZ0NGTq3TmZYd1wAWmYuopRkyO9z9YZ+E=";
 
     fn verify_with(
         body: &[u8],
@@ -756,6 +765,38 @@ mod tests {
             );
             assert_eq!(result, Err(expected), "input: {value:?}");
         }
+    }
+
+    #[test]
+    fn garbage_value_id_is_opaque_and_signed_verbatim() {
+        // §5.5's garbage-value case for the id: unlike the signature/timestamp
+        // headers, the id has no defined format to parse — any non-empty value
+        // is well-formed. So a garbage value must (a) NOT be rejected as
+        // MalformedHeader, and (b) verify only against a signature made over
+        // that exact id (it feeds the signed string verbatim), never against
+        // a signature over the real id.
+        let signed_over_garbage = verify_with(
+            BODY,
+            GARBAGE_ID,
+            &format!("v1,{GARBAGE_ID_SIGNATURE}"),
+            &TIMESTAMP.to_string(),
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(signed_over_garbage, Ok(()));
+
+        let real_signature_with_garbage_id = verify_with(
+            BODY,
+            GARBAGE_ID,
+            &format!("v1,{SIGNATURE}"),
+            &TIMESTAMP.to_string(),
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(
+            real_signature_with_garbage_id,
+            Err(VerifyError::SignatureMismatch)
+        );
     }
 
     #[test]

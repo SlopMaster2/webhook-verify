@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Standard Webhooks provider's test module now covers the §5.5
+  garbage-value case for the opaque `webhook-id` header: a non-id-shaped
+  value is pinned as well-formed (verified against a signature made over it)
+  rather than a malformed header, and a signature over the real id cannot be
+  swapped in (the id feeds the signed string verbatim).
 - The combined `key=value` signature headers (Stripe, Paddle, Coinbase,
   Cloudflare) now tolerate whitespace after the element separator: keys are
   compared after trimming, so the comma-space/semicolon-space spelling real
