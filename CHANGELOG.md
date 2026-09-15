@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `VerifyError`, `ProviderParseError`, and `VerifyingKeyMaterial` now derive
+  `Hash`, completing the `Eq` contract those types already expose. Callers can
+  now derive `Hash` on their own types containing them and use them in
+  `HashSet`/`HashMap` contexts (e.g. deduplicating logged failures). `Hash` is
+  consistent with each type's `PartialEq` — verified by new tests, including a
+  pinning test that the hand-written `CustomScheme::hash` stays in lockstep
+  with its declarative `PartialEq` (`signed_string` excluded from both).
 - The Standard Webhooks provider's test module now covers the §5.5
   garbage-value case for the opaque `webhook-id` header: a non-id-shaped
   value is pinned as well-formed (verified against a signature made over it)

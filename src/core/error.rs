@@ -16,7 +16,7 @@ use core::time::Duration;
 /// outcomes. Never treat a malformed header as "skip verification".
 #[must_use]
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VerifyError {
     /// A required signature-related header was absent.
     MissingHeader {
@@ -247,5 +247,34 @@ mod tests {
         // other formatting artifacts.
         let e = VerifyError::BadEncoding { reason: "" };
         assert_eq!(e.to_string(), "bad encoding: ");
+    }
+
+    #[test]
+    fn hash_is_consistent_with_equality() {
+        // `Eq` and `Hash` are one contract: values that compare equal must
+        // hash equal, or lookups in maps/sets and derived `Hash` impls
+        // downstream (a struct containing a `VerifyError`) silently misbehave.
+        // This pins the now-derived impl against future manual weakening.
+        use crate::test_helpers::hash_of;
+
+        let a = VerifyError::MalformedHeader {
+            header: "X-Slack-Signature",
+            reason: "missing v0= prefix",
+        };
+        let b = VerifyError::MalformedHeader {
+            header: "X-Slack-Signature",
+            reason: "missing v0= prefix",
+        };
+        assert_eq!(a, b);
+        assert_eq!(hash_of(&a), hash_of(&b));
+
+        // A different variant with a shared header name hashes differently:
+        // the discriminants plus distinct payloads cannot collide under the
+        // test's summing hasher.
+        let c = VerifyError::MissingHeader {
+            header: "X-Slack-Signature",
+        };
+        assert_ne!(a, c);
+        assert_ne!(hash_of(&a), hash_of(&c));
     }
 }

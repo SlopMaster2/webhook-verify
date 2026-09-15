@@ -51,7 +51,7 @@ impl Clock for SystemClock {
 /// already vetted (allow-listed certificate URL, checked key, etc.).
 #[must_use]
 #[non_exhaustive]
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum VerifyingKeyMaterial {
     /// DER- or PEM-encoded X.509 certificate (PayPal scheme). Only the embedded
     /// public key is used; this crate performs no chain validation, so callers
