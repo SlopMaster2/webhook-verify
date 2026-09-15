@@ -664,10 +664,10 @@ mod tests {
 
     #[test]
     fn verify_any_rotation_succeeds_with_one_garbled_key() {
-        // Issue #64: a rotation slice whose *first* key is undecodable must
-        // still verify against the valid key instead of aborting on the
-        // first InvalidSecret. This is exactly the previously-broken
-        // scenario from the issue:
+        // A rotation slice whose *first* key is undecodable must still
+        // verify against the valid key instead of aborting on the first
+        // InvalidSecret. This regression test pins the previously-broken
+        // scenario:
         // `[Secret::new("not base64!!"), Secret::new("...base64 key")]`.
         let secrets = [
             Secret::new("whsec_this is not base64!!"),
