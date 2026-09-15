@@ -1152,4 +1152,42 @@ mod tests {
         );
         assert_eq!(result, Ok(()));
     }
+
+    #[test]
+    fn hash_agrees_with_partial_eq_fields() {
+        // `CustomScheme`'s `Hash` is hand-written and must stay in lockstep
+        // with the declarative `PartialEq` (spec.md §2.2: the declarative
+        // fields participate in `PartialEq`/`Hash`; `signed_string` is
+        // excluded). If a field ever joins one impl but not the other,
+        // equal-but-differently-hashed (or unequal-but-hash-equal) schemes
+        // silently break callers that store them in sets or maps. The
+        // `signed_string` fns below behave differently (`ts_signed_string`
+        // emits `{ts}.{body}`, `noop` emits nothing) yet are equal — and
+        // must hash equal too. The test's summing hasher cannot collide on
+        // the differing discriminants/payloads, so the negative assertion is
+        // also deterministic.
+        use crate::test_helpers::hash_of;
+
+        fn noop_signed_string(_headers: &dyn crate::HeaderMap, _raw_body: &[u8]) -> Vec<u8> {
+            Vec::new()
+        }
+
+        let a = ts_scheme_config();
+        let b = CustomScheme {
+            signed_string: noop_signed_string,
+            ..a
+        };
+        assert_eq!(a, b, "signed_string is excluded from equality");
+        assert_eq!(hash_of(&a), hash_of(&b), "Hash must agree with PartialEq");
+
+        // A declarative-field difference is equality difference — and must be
+        // a hash difference too (neither impl may ignore a field the other
+        // compares).
+        let c = CustomScheme {
+            prefix: None,
+            ..a
+        };
+        assert_ne!(a, c, "prefix participates in equality");
+        assert_ne!(hash_of(&a), hash_of(&c), "prefix participates in Hash");
+    }
 }

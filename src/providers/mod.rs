@@ -226,7 +226,7 @@ impl core::str::FromStr for Provider {
 
 /// The error type for [`Provider`]'s [`core::str::FromStr`] implementation.
 #[must_use]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ProviderParseError;
 
 impl fmt::Display for ProviderParseError {
