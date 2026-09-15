@@ -1049,11 +1049,9 @@ A provider implementation is not mergeable until it has:
   checks. The wasm32 regression job ships in CI
   (`.github/workflows/ci.yml`); it build-checks `cargo build
   --no-default-features --features sendgrid,paypal --target
-  wasm32-unknown-unknown`, and per issue #25 is designed to build-check the
-  `http` feature set the same way (`--no-default-features --features http
-  --target wasm32-unknown-unknown`, parity with the `test-nostd` matrix) —
-  the `.github/workflows/ci.yml` hunk awaits a maintainer apply with
-  `workflows` permission. The full test suite runs against the
+  wasm32-unknown-unknown` and `cargo build --no-default-features --features
+  http --target wasm32-unknown-unknown` on the same matrix (issue #25,
+  parity with the `test-nostd` runs). The full test suite runs against the
   `--no-default-features`
   build on the host (`cargo test --no-default-features --features
   sendgrid,paypal` and — for the crate's own `http`-path code —
