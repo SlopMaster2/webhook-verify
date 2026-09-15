@@ -73,9 +73,9 @@ hand-copied signing-string logic to get wrong.
    Actix Web, Tower) is optional sugar behind feature flags, not the point
    of the crate.
 4. **Fail closed, explain why.** Errors are structured
-   (`VerifyError::{MissingHeader, BadEncoding, SignatureMismatch,
-   TimestampOutOfTolerance, UnsupportedProvider, ...}`) so callers can log
-   and alert meaningfully instead of getting a bare `false`.
+   (`VerifyError::{MissingHeader, BadEncoding, SignatureMismatch, TimestampOutOfTolerance, UnsupportedProvider, ...}`)
+   so callers can log and alert meaningfully instead of getting a bare
+   `false`.
 5. **No unbounded scope creep.** This crate verifies signatures. It does not
    deserialize event payloads, manage retries, store idempotency keys, or
    proxy webhooks. Those are separate, composable concerns (and separate
@@ -235,16 +235,14 @@ feature, so the iterator-based impl cannot silently regress into a `std` leak
 of its own. Neither run can prove a std-less *build* — `paypal` and `http`
 pull `std` in via their enabling crates, and the run happens on a host that
 ships `std`. The companion wasm32 job build-checks
-  `cargo build --no-default-features --features sendgrid,paypal --target
-  wasm32-unknown-unknown` and `cargo build --no-default-features --features
-  http --target wasm32-unknown-unknown` on the same matrix (issue #25,
-  shipped with the `test-nostd` wasm32 gate); it cannot catch a
-  std-less-target failure either
-(wasm32 ships std). The std-less *build* is instead proven by the
-`no-std-riscv` job, which builds for `riscv32imac-unknown-none-elf` — a
-bare-metal target with no standard library — with no features (pure core)
-and with `--features sendgrid`: `cargo build --no-default-features
-[--features sendgrid] --target riscv32imac-unknown-none-elf`.
+`cargo build --no-default-features --features sendgrid,paypal --target wasm32-unknown-unknown`
+and `cargo build --no-default-features --features http --target wasm32-unknown-unknown`
+on the same matrix (issue #25, shipped with the `test-nostd` wasm32 gate),
+but it cannot catch a std-less-target failure either (wasm32 ships std). The
+std-less *build* is instead proven by the `no-std-riscv` job, which builds
+for `riscv32imac-unknown-none-elf` — a bare-metal target with no standard
+library — with no features (pure core) and with `--features sendgrid`:
+`cargo build --no-default-features [--features sendgrid] --target riscv32imac-unknown-none-elf`.
 
 ## Framework adapters
 
@@ -372,8 +370,7 @@ before the body is read, but verification requires those bytes.
 - All signature comparisons use constant-time equality (`subtle::ConstantTimeEq`).
 - A dudect-style statistical timing assertion on the comparison step is
   provided (spec §5.7) but `#[ignore]`d due to runner noise; run it locally
-  with `cargo test --release --all-features -- constant_time_comparison
-  --ignored`.
+  with `cargo test --release --all-features -- constant_time_comparison --ignored`.
 - Timestamp-based replay protection is enabled by default wherever the
   provider supports it (`VerifyOptions::max_age`, default 5 minutes).
 - This crate does not log secrets, request bodies, or computed signatures
