@@ -8,7 +8,12 @@
 
 use libfuzzer_sys::fuzz_target;
 use webhook_verify::{CustomScheme, Encoding, HashAlg, Provider, Secret, VerifyOptions};
-#[cfg(feature = "sendgrid")]
+// `VerifyingKeyMaterial` is used by both the `sendgrid` and `paypal` cfg
+// blocks below. The crate re-exports it unconditionally, so gate the import
+// on either feature — gating it on `sendgrid` alone made the `paypal`-only
+// feature combination (which the `not(feature = "sendgrid")` fallback arms below
+// exist to build) fail to compile with an unresolved import.
+#[cfg(any(feature = "sendgrid", feature = "paypal"))]
 use webhook_verify::VerifyingKeyMaterial;
 
 /// Upper bound on parsed header lines so a pathological input cannot spin the
