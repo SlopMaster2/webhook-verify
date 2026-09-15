@@ -117,6 +117,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `WebhookConfig` for DoS hardening.
 - Fuzz target covering Discord's Ed25519 signature-decode path
   (spec §5.6).
+- The shared fuzz target (`fuzz/fuzz_targets/parse_and_verify.rs`) now also
+  drives the cross-secret rotation path
+  [`verify_any`](crate::verify_any) (spec §5.6): per-provider invocation with
+  an empty secret slice (immediate `SignatureMismatch`), a garbage-then-
+  well-formed slice (error aggregation must keep trying past `InvalidSecret`
+  and reach the well-formed key), and an all-garbage slice (aggregation
+  across every unusable key). The multi-secret loop gets the same "no panic,
+  no timeout" guarantee the single-secret `verify` path already had.
 - `CustomScheme::new()` convenience constructor plus the
   `with_timestamp_header` / `with_prefix` builders, so declarative schemes
   can be configured without a struct literal (spec §2.2).
