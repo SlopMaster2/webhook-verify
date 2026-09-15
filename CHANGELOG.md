@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing `workflows` permission" notes (issues #18/#22): the `no_std`
   behavioral test runs and the `RUSTDOCFLAGS="-D warnings"` doc build are now
   enforced by CI itself, not just the local contributor gates.
+- The `cargo-audit` dependency-vulnerability scan ships in
+  `.github/workflows/ci.yml` as an informational (non-blocking) job against
+  the RustSec advisory database (PR #30). The fuzz target build is now
+  covered by the `Fuzz` workflow on every PR and master push (build-only;
+  timed runs stay nightly), so the duplicate `fuzz-build` job is retired from
+  `ci.yml`.
 - HubSpot webhook provider (v3 scheme) — HMAC-SHA256 over
   `{method}{uri}{raw_body}{timestamp}`, base64-encoded,
   `X-HubSpot-Signature-V3` with the `X-HubSpot-Request-Timestamp` header
