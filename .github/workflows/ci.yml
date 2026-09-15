@@ -103,6 +103,29 @@ jobs:
           tool: cargo-fuzz
       - run: cargo fuzz build --target x86_64-unknown-linux-gnu
 
+  cargo-audit:
+    name: cargo audit (dependency vulnerabilities)
+    runs-on: ubuntu-latest
+    # Informational: cargo-audit flags known-vulnerable transitive deps from
+    # the RustSec advisory database. Runs non-blocking today because the tree
+    # currently carries (a) rsa 0.9.x, whose only advisory (#RUSTSEC-2023-0071,
+    # Marvin key-recovery via timing) has NO patched release and does not apply
+    # to this crate's public-key verification usage — `verify()` never performs
+    # a private-key (decryption) operation — and (b) time via x509-parser,
+    # whose fix (>=0.3.47) requires Rust 1.88, above this crate's MSRV. See
+    # issue #30 for the tracking of these and the gate's promotion to blocking.
+    # Cargo.lock is gitignored (library crate pattern), so it is generated on
+    # the fly before auditing rather than committed.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo generate-lockfile
+      - run: cargo audit
+
   semver-checks:
     name: semver-checks
     runs-on: ubuntu-latest
