@@ -134,12 +134,16 @@ jobs:
       - run: cargo test --release --all-features -- constant_time_comparison --ignored
 
   no-std-wasm:
-    name: no_std + wasm32 build (spec §7)
+    name: no_std + wasm32 build (${{ matrix.features }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: ["sendgrid,paypal", "http"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --no-default-features --features sendgrid,paypal --target wasm32-unknown-unknown
+      - run: cargo build --no-default-features --features ${{ matrix.features }} --target wasm32-unknown-unknown
