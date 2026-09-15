@@ -143,6 +143,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cargo fuzz build` now also compiles the `paypal`-only feature combination
+  (without `sendgrid`): the fuzz target imported `VerifyingKeyMaterial` under
+  `#[cfg(feature = "sendgrid")]` alone, so the `not(feature = "sendgrid")`
+  fallback arms the target ships for the paypal-only build failed with an
+  unresolved import. The import is now gated on `any(sendgrid, paypal)`,
+  matching the cfg blocks that use it.
+- README `no_std` and security notes: multi-line inline code spans with stray
+  two-space indentation rendered mangled — commands gained spurious spaces
+  (e.g. `--target  wasm32-unknown-unknown`) and a parenthetical dangled
+  mid-sentence. Each span now sits on a single line; the narrative flows as
+  one paragraph. Content is unchanged.
 - Removed the `probe_ci_write_test.yml` debris file left at the repository root
   by a CI permission-probe commit. It was tracked on `master`, not excluded from
   the package, and would have shipped verbatim in the crates.io tarball.
