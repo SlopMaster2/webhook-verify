@@ -1183,10 +1183,7 @@ mod tests {
         // A declarative-field difference is equality difference — and must be
         // a hash difference too (neither impl may ignore a field the other
         // compares).
-        let c = CustomScheme {
-            prefix: None,
-            ..a
-        };
+        let c = CustomScheme { prefix: None, ..a };
         assert_ne!(a, c, "prefix participates in equality");
         assert_ne!(hash_of(&a), hash_of(&c), "prefix participates in Hash");
     }
