@@ -1,0 +1,3 @@
+X-Hook0-Signature:t=1728394718,v0=ce754a5c0e4951fdf76eb69bff339294f5dc97d118d2a3ba24d7d7eacca025ba
+
+{"id":"evt_1a2b3c4d5e6f","type":"onchain.activity.detected","createdAt":"2025-10-08T13:58:38.681893Z","data":{"subscriptionId":"sub_abc123","networkId":"base-mainnet","blockNumber":12345678,"blockHash":"0xabc123...","transactionHash":"0xdef456...","logIndex":42,"contractAddress":"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","eventName":"Transfer","from":"0xf20d2e37514195ebedb0bc735ba6090ce103d38c","to":"0x1234567890123456789012345678901234567890","value":"1000000"}}
