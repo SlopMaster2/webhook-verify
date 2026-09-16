@@ -170,6 +170,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `parse_and_verify` fuzz target's seed-corpus comment described Paddle's
+  signed string as `{ts}.{body}` — the `ts`/`h1` entries are joined with a
+  colon, Paddle's documented `hmac(secret, "{ts}:{body}")`. The comment now
+  matches `src/providers/paddle.rs` and `spec.md` §3's Paddle row. Comment-only
+  change; no behavior, seed bytes, or crate code affected.
 - `cargo fuzz build` now also compiles the `paypal`-only feature combination
   (without `sendgrid`): the fuzz target imported `VerifyingKeyMaterial` under
   `#[cfg(feature = "sendgrid")]` alone, so the `not(feature = "sendgrid")`

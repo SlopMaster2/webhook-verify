@@ -39,7 +39,9 @@
 //!   `x-zm-request-timestamp` two-header shape, reaching timestamp parse and the
 //!   `v0:{ts}:{body}` HMAC comparison.
 //! - `paddle-ts-h1-signature` — Paddle's combined `ts=...;h1=...` header,
-//!   exercising the `;`-splitting parser and the `{ts}.{body}` signed string.
+//!   exercising the `;`-splitting parser and the `{ts}:{raw_body}` signed
+//!   string (Paddle's documented `hmac(secret, "{ts}:{body}")`, matching
+//!   `src/providers/paddle.rs`).
 //! - `cloudflare-time-sig1-delivery` — Cloudflare's combined `time=...,sig1=...`
 //!   header, reaching the comma-split and HMAC comparison.
 //! - `coinbase-t-v0-delivery` — Coinbase's combined `t=...,v0=...` header (the
