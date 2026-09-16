@@ -1,4 +1,5 @@
-//! Standard Webhooks signature verification (covers Svix, Clerk, Resend, ...).
+//! Standard Webhooks signature verification (covers Svix, Clerk, Resend,
+//! GitLab 19.0+ signing tokens, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
