@@ -3,7 +3,6 @@
 //! Scheme, per Sentry's official Integration Platform webhook documentation
 //! (<https://docs.sentry.io/integrations/integration-platform/webhooks>,
 //! "Verifying the Signature"):
-//! "Verifying the Signature"):
 //!
 //! - Header: `Sentry-Hook-Signature: <hex_hmac>`
 //! - Signed string: the raw request body bytes, unmodified — the docs'
