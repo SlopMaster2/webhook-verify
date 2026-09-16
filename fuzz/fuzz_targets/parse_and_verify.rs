@@ -28,6 +28,10 @@
 //!   the `t.{body}` signed-string construction.
 //! - `discord-ed25519-shape` — Discord's two-header shape with a 128-hex-char
 //!   signature, reaching Ed25519 signature decode and verification.
+//! - `dropbox-hex-signature` — Dropbox's `X-Dropbox-Signature` bare-hex HMAC
+//!   shape over the raw body, reaching hex decode, the 32-byte gate, and HMAC
+//!   comparison (parser-well-formed, no space after the colon, matching the
+//!   other bare-hex/bare-base64 HMAC seeds).
 //! - `standard-webhooks-shape` — the official test-suite delivery (three
 //!   `webhook-*` headers), reaching the `v1,<base64>` split, base64 decode,
 //!   and multi-element comparison.

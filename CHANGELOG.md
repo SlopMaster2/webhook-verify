@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A seed corpus for the `parse_and_verify` fuzz target
   (`fuzz/corpus/parse_and_verify/`): the CI nightly run now starts from the
-  crate's own published test vectors (GitHub, Slack, Stripe, Discord,
+  crate's own published test vectors (GitHub, Slack, Stripe, Discord, Dropbox,
   Standard Webhooks, HubSpot, Zoom, Paddle, Cloudflare, Coinbase, Notion,
   Square, Xero, Linear, Shopify, LemonSqueezy, Typeform) plus an adversarial malformed input, so
   libFuzzer spends
