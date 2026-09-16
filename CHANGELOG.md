@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- [`Secret`](crate::Secret) now derives `PartialEq`, `Eq`, and `Hash`. This
+  is the one remaining caller-facing key-material type lacking the equality
+  contract that `VerifyError`/`ProviderParseError`/`VerifyingKeyMaterial`
+  already expose ("complete the `Eq` contract", see the entry below), so
+  rotated secrets can now be compared and deduplicated in
+  `HashSet`/`HashMap` bookkeeping without the inner value becoming readable —
+  the redacted `Debug`/`Display` behavior, `Default`, and all constructors
+  are unchanged. Equality hashes/compares the wrapped key bytes directly and
+  is verified by tests to stay in lockstep with `Hash`.
 - `VerifyError`, `ProviderParseError`, and `VerifyingKeyMaterial` now derive
   `Hash`, completing the `Eq` contract those types already expose. Callers can
   now derive `Hash` on their own types containing them and use them in
