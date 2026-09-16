@@ -53,6 +53,8 @@
 //!   over the signed message containing the `request_url`.
 //! - `xero-base64-signature` — Xero's raw base64 HMAC-SHA256 signature (no
 //!   prefix, no timestamp).
+//! - `lemonsqueezy-hex-signature` — Lemon Squeezy's bare hex HMAC-SHA256
+//!   signature (no prefix, no timestamp).
 //! - `linear-hex-signature` — Linear's raw hex HMAC-SHA256 signature (no
 //!   prefix, no timestamp).
 //! - `shopify-base64-signature` — Shopify's base64 HMAC-SHA256 signature (no
@@ -90,6 +92,10 @@ const IMPLEMENTED: &[Provider] = &[
     Provider::Slack,
     Provider::Linear,
     Provider::Dropbox,
+    // LemonSqueezy is a single-header raw-body HMAC (bare hex, no prefix);
+    // arbitrary header bytes exercise its hex-decode and 32-byte gate, and
+    // a well-formed-shaped attempt below reaches HMAC comparison.
+    Provider::LemonSqueezy,
     // Notion is a single-header raw-body HMAC (`sha256=` prefixed hex); the
     // loop below exercises its prefix-strip and hex-decode paths, and a
     // well-formed-shaped attempt below reaches its 32-byte gate and HMAC

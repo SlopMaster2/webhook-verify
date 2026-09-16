@@ -13,12 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`fuzz/corpus/parse_and_verify/`): the CI nightly run now starts from the
   crate's own published test vectors (GitHub, Slack, Stripe, Discord,
   Standard Webhooks, HubSpot, Zoom, Paddle, Cloudflare, Coinbase, Notion,
-  Square, Xero, Linear, Shopify) plus an adversarial malformed input, so
+  Square, Xero, Linear, Shopify, LemonSqueezy) plus an adversarial malformed input, so
   libFuzzer spends
   its 600s budget mutating around known-good delivery shapes instead of
   rediscovering the header/body input layout from an empty input. Seeds are
   repo-local only — the `/fuzz` package is excluded from the crates.io
   tarball.
+- **New provider: Lemon Squeezy** (`Provider::LemonSqueezy`): HMAC-SHA256 over
+  the raw body, bare hex-encoded, delivered in the `X-Signature` header with
+  no timestamp or replay window. Source:
+  <https://docs.lemonsqueezy.com/help/webhooks/signing-requests>.
 - [`Secret`](crate::Secret) now derives `PartialEq`, `Eq`, and `Hash`. This
   is the one remaining caller-facing key-material type lacking the equality
   contract that `VerifyError`/`ProviderParseError`/`VerifyingKeyMaterial`

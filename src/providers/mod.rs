@@ -12,6 +12,7 @@ mod discord;
 mod dropbox;
 mod github;
 mod hubspot;
+mod lemonsqueezy;
 mod linear;
 mod notion;
 mod paddle;
@@ -129,6 +130,9 @@ pub enum Provider {
     Coinbase,
     /// Dropbox (`X-Dropbox-Signature`, HMAC-SHA256 over the raw body).
     Dropbox,
+    /// Lemon Squeezy (`X-Signature`, HMAC-SHA256 over the raw body, bare hex —
+    /// no `sha256=` prefix, no timestamp).
+    LemonSqueezy,
     /// Xero (`x-xero-signature`, base64-encoded HMAC-SHA256 over the raw body).
     Xero,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
@@ -169,6 +173,7 @@ impl fmt::Display for Provider {
             Provider::Cloudflare => f.write_str("Cloudflare"),
             Provider::Coinbase => f.write_str("Coinbase"),
             Provider::Dropbox => f.write_str("Dropbox"),
+            Provider::LemonSqueezy => f.write_str("LemonSqueezy"),
             Provider::Xero => f.write_str("Xero"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
@@ -217,6 +222,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
             n if n.eq_ignore_ascii_case("coinbase") => Ok(Provider::Coinbase),
             n if n.eq_ignore_ascii_case("dropbox") => Ok(Provider::Dropbox),
+            n if n.eq_ignore_ascii_case("lemonsqueezy") => Ok(Provider::LemonSqueezy),
             n if n.eq_ignore_ascii_case("xero") => Ok(Provider::Xero),
             n if n.eq_ignore_ascii_case("standardwebhooks") => Ok(Provider::StandardWebhooks),
             _ => Err(ProviderParseError),
@@ -234,7 +240,7 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `hubspot`, `shopify`, \
              `slack`, `square`, `twilio`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
-             `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `xero`, or `standardwebhooks` \
+             `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `lemonsqueezy`, `xero`, or `standardwebhooks` \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -274,6 +280,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
         Provider::Coinbase => vec![coinbase::SIGNATURE_HEADER],
         Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
+        Provider::LemonSqueezy => vec![lemonsqueezy::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
@@ -365,6 +372,7 @@ pub fn verify(
         Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, &options),
         Provider::Coinbase => coinbase::verify(headers, raw_body, secret, &options),
         Provider::Dropbox => dropbox::verify(headers, raw_body, secret, &options),
+        Provider::LemonSqueezy => lemonsqueezy::verify(headers, raw_body, secret, &options),
         Provider::Xero => xero::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
@@ -935,6 +943,7 @@ mod tests {
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
         assert_eq!(Provider::Coinbase.to_string(), "Coinbase");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
+        assert_eq!(Provider::LemonSqueezy.to_string(), "LemonSqueezy");
         assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
@@ -987,6 +996,7 @@ mod tests {
             ("cloudflare", Provider::Cloudflare),
             ("coinbase", Provider::Coinbase),
             ("dropbox", Provider::Dropbox),
+            ("lemonsqueezy", Provider::LemonSqueezy),
             ("xero", Provider::Xero),
             ("standardwebhooks", Provider::StandardWebhooks),
         ];
@@ -1023,6 +1033,7 @@ mod tests {
             Provider::Cloudflare,
             Provider::Coinbase,
             Provider::Dropbox,
+            Provider::LemonSqueezy,
             Provider::Xero,
             Provider::StandardWebhooks,
         ];
@@ -1079,7 +1090,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 19] {
+    fn provider_list() -> [Provider; 20] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1098,6 +1109,7 @@ mod tests {
             Provider::Cloudflare,
             Provider::Coinbase,
             Provider::Dropbox,
+            Provider::LemonSqueezy,
             Provider::Xero,
             Provider::StandardWebhooks,
         ]

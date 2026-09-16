@@ -54,6 +54,7 @@ pub enum Provider {
     Cloudflare,
     Coinbase,
     Dropbox,
+    LemonSqueezy,
     Xero,
     StandardWebhooks,
     Custom(CustomScheme),
@@ -389,6 +390,31 @@ documentation, signature verification guidance and Python example code).
   implementation is validated against locally constructed, deterministic
   vectors over exactly the documented construction. Replace them if Dropbox
   ever publishes fixed vectors.
+
+### Lemon Squeezy
+
+Source: <https://docs.lemonsqueezy.com/help/webhooks/signing-requests> (Lemon
+Squeezy's webhook signing documentation) and
+<https://docs.lemonsqueezy.com/help/webhooks/webhook-requests> (webhook
+requests header reference).
+
+- Header: `X-Signature: <hex_hmac>` — a bare hex digest, no `sha256=` prefix
+  (unlike GitHub/Notion); same shape as Dropbox and Linear
+- Signed string: raw body bytes, unmodified — Lemon Squeezy's own docs stress
+  that the exact received bytes matter (their delivery JSON escapes `/` as
+  `\/` in opaquely-checked fields; re-serializing before hashing changes the
+  bytes and fails verification)
+- Algorithm: HMAC-SHA256, hex-encoded. Key: the webhook's signing secret as
+  its UTF-8 bytes, matching the docs' reference implementations
+  (`crypto.createHmac('sha256', secret).update(rawBody).digest('hex')`)
+- No timestamp in the signature scheme (`max_age` has no effect); Lemon Squeezy
+  recommends deduping from the payload's own `id` field, which is outside this
+  crate's scope (payload parsing is a non-goal, §1)
+- Test-vector provenance: Lemon Squeezy's docs describe the construction and
+  ship reference code but publish no byte-exact example signature, so the
+  implementation is validated against locally constructed, deterministic
+  vectors over exactly the documented construction. Replace them if Lemon
+  Squeezy ever publishes fixed vectors.
 
 ### Linear
 
