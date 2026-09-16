@@ -178,6 +178,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `parse_and_verify` fuzz target now drives constant-time-shape attempts
+  for the five raw-body single-header providers that previously only ran with
+  arbitrary fuzz-input headers — Dropbox, LemonSqueezy, Linear, Shopify, and
+  Xero. Each gets a well-formed signature-header value (bare hex or bare
+  base64 of the 32-byte gate) so arbitrary body bytes reach the 32-byte
+  length gate and HMAC comparison instead of failing earlier on
+  malformed/missing headers, matching the coverage Cloudflare/Notion/
+  Typeform/Coinbase/Paddle/HubSpot already had (spec §5.6). The
+  `IMPLEMENTED`-list comments claimed "a well-formed-shaped attempt below"
+  for LemonSqueezy when none existed, and the other four said nothing where
+  one now does; the comments now match the code.
 - The `parse_and_verify` fuzz target's seed-corpus comment described Paddle's
   signed string as `{ts}.{body}` — the `ts`/`h1` entries are joined with a
   colon, Paddle's documented `hmac(secret, "{ts}:{body}")`. The comment now

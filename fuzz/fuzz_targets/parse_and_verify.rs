@@ -91,9 +91,18 @@ const IMPLEMENTED: &[Provider] = &[
     // exercise its header splitting and MissingContext fail-closed paths, and
     // a well-formed-shaped attempt below reaches base64 decode + HMAC paths.
     Provider::HubSpot,
+    // Shopify is a single-header raw-body HMAC (base64, no prefix); arbitrary
+    // header bytes exercise its base64-decode and 32-byte gate, and a
+    // well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Shopify,
     Provider::Slack,
+    // Linear is a single-header raw-body HMAC (hex, no prefix); arbitrary
+    // header bytes exercise its hex-decode and 32-byte gate, and a
+    // well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Linear,
+    // Dropbox is a single-header raw-body HMAC (hex, no prefix); arbitrary
+    // header bytes exercise its hex-decode and 32-byte gate, and a
+    // well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Dropbox,
     // LemonSqueezy is a single-header raw-body HMAC (bare hex, no prefix);
     // arbitrary header bytes exercise its hex-decode and 32-byte gate, and
@@ -114,8 +123,9 @@ const IMPLEMENTED: &[Provider] = &[
     // and empty-header rejection, and a well-formed-shaped attempt below
     // reaches its hex-decode/comparison paths too.
     Provider::Coinbase,
-    // Xero is a single-header raw-body HMAC (base64); arbitrary header bytes
-    // exercise its base64 parsing path and empty-header rejection.
+    // Xero is a single-header raw-body HMAC (base64, no prefix); arbitrary
+    // header bytes exercise its base64-decode and 32-byte gate, and a
+    // well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Xero,
     // Typeform is a single-header raw-body HMAC (`sha256=` prefixed base64);
     // the loop below exercises its prefix-strip and base64-decode paths, and a
@@ -455,6 +465,76 @@ fuzz_target!(|data: &[u8]| {
         body,
         WELL_FORMED_SECRET,
         &hubspot_options,
+    );
+
+    // Dropbox: a well-formed-shaped `X-Dropbox-Signature` (valid hex sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::Dropbox,
+        &[(
+            "X-Dropbox-Signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Shopify: a well-formed-shaped `X-Shopify-Hmac-Sha256` (valid base64 sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::Shopify,
+        &[(
+            "X-Shopify-Hmac-Sha256".to_string(),
+            "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Linear: a well-formed-shaped `linear-signature` (valid hex sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::Linear,
+        &[(
+            "linear-signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // LemonSqueezy: a well-formed-shaped `X-Signature` (valid hex sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::LemonSqueezy,
+        &[(
+            "X-Signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Xero: a well-formed-shaped `x-xero-signature` (valid base64 sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::Xero,
+        &[(
+            "x-xero-signature".to_string(),
+            "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
     );
 
     for &provider in IMPLEMENTED {
