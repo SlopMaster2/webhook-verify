@@ -62,6 +62,7 @@ pub enum Provider {
     LemonSqueezy,
     Xero,
     Sentry,
+    Adyen,
     StandardWebhooks,
     Custom(CustomScheme),
 }
@@ -835,6 +836,58 @@ official Go SDK's reference implementation
   (`v1=7020c8a7...8bcaf5`). Additional vectors cover the empty and UTF-8 body
   boundary cases, the multi-`v1=` rotation list, and non-`v1=` elements,
   constructed locally over exactly the documented construction.
+
+### Adyen
+
+Source: <https://docs.adyen.com/development-resources/webhooks/secure-webhooks/verify-hmac-signatures>
+("Verify HMAC signatures" — the header-based scheme:
+`hmacsignature: <base64_hmac>` and the `protocol: HmacSHA256` companion
+header) and
+<https://docs.adyen.com/classic-platforms/configure-notifications/signing-notifications-with-hmac>
+(the classic-platform worked example, including a byte-exact payload,
+signature, and key). Construction corroborated by Adyen's official libraries:
+Java `HMACValidator.calculateHMAC` (`Hex.decodeHex(key)`,
+<https://github.com/Adyen/adyen-java-api-library/blob/master/src/main/java/com/adyen/util/HMACValidator.java>)
+and Go `hmacvalidator` (`hex.DecodeString(secret)`,
+<https://github.com/Adyen/adyen-go-api-library/blob/main/src/hmacvalidator/hmacvalidator.go>).
+
+- Header: `HmacSignature: <base64_hmac>` — bare base64 (standard alphabet with
+  padding), no prefix and no timestamp; same shape as Xero/Shopify. Header
+  lookup is case-insensitive, so the lowercase `hmacsignature` spelling in
+  current docs also resolves. The companion `protocol` header
+  (`HmacSHA256`) is **not** covered by the HMAC and is not parsed: Adyen only
+  ever sends `HmacSHA256`, and an algorithm downgrade would fail closed as a
+  signature mismatch rather than being silently accepted.
+- Signed string: raw body bytes, unmodified. Adyen's docs are explicit: "Make
+  sure that the request body is as it is—do not deserialize it". This is the
+  header-based scheme Adyen uses for its non-payment webhooks (Adyen for
+  Platforms / Banking, the Management API, Recurring token lifecycle
+  notifications, and classic-platform notifications). Adyen's **Standard
+  payments** webhooks place the signature inside the JSON body at
+  `notificationItems[].NotificationRequestItem.additionalData.hmacSignature`
+  and sign a colon-joined field subset; a body-embedded signature over a
+  parsed-field string is outside this crate's raw-body model and is **not**
+  covered by `Provider::Adyen`.
+- Algorithm: HMAC-SHA256, base64-encoded. Key: the Customer Area HMAC key,
+  which Adyen issues as a **hex string**, **hex-decoded to raw key bytes**
+  before use — matching Adyen's official Java/Go libraries. Keying the HMAC
+  with the ASCII hex characters instead of the decoded bytes is the classic
+  Adyen integration bug; a key that is not valid (even-length) hexadecimal, or
+  that decodes to nothing, fails closed as `InvalidSecret` rather than being
+  used as-is.
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Shopify/Dropbox/Linear. Adyen delivers duplicates by design and
+  recommends identifying them from the payload's own
+  `eventCode`/`pspReference` fields, which is outside this crate's scope
+  (payload parsing is a non-goal, §1).
+- Test-vector provenance: the primary vector is Adyen's own byte-exact worked
+  example from the classic-platform page — key
+  `79A3EAF309C43708726A8C284C0D72618696A12E840DFA1DF3A158AFA3B577DA`, the
+  complete account-holder JSON payload, and expected signature
+  `A2bHr0WPlKg1fJLVEDReVAdUDWt3znmsuYvp2KdihXY=`. Additional vectors cover the
+  empty and UTF-8 body boundary cases, the case-insensitive header spelling,
+  an uppercase/lowercase hex key pair, and the ASCII-hex-key failure mode,
+  constructed locally with `openssl` over exactly the documented construction.
 
 ### Razorpay
 

@@ -41,6 +41,12 @@
 //! - `sentry-hex-signature` — Sentry's `Sentry-Hook-Signature` bare-hex HMAC
 //!   shape over the raw body (no prefix, no timestamp), reaching hex decode,
 //!   the 32-byte gate, and HMAC comparison.
+//! - `adyen-base64-signature` — Adyen's `HmacSignature` base64 HMAC shape over
+//!   the official worked-example body (no prefix, no timestamp). The provider
+//!   hex-decodes the Customer Area key, so the fixed seed secret (base64-shaped)
+//!   reaches the `InvalidSecret` key-decode gate; the shaped attempt below pairs
+//!   the same header shape with a hex key to reach base64 decode, the 32-byte
+//!   gate, and HMAC comparison.
 //! - `pagerduty-v1-signature` — the official `go-pagerduty` SDK test vector
 //!   (`X-PagerDuty-Signature` with a `v1=` hex HMAC over the raw body, no
 //!   timestamp), reaching the `v1=` prefix strip, comma-split rotation-list
@@ -138,6 +144,13 @@ const IMPLEMENTED: &[Provider] = &[
     // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
     // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Sentry,
+    // Adyen is a single-header raw-body HMAC (bare base64, no prefix, no
+    // timestamp) whose key is a hex string hex-decoded to raw bytes; arbitrary
+    // header bytes exercise its base64-decode and 32-byte gate, and a
+    // well-formed-shaped attempt below (with a hex key) reaches HMAC
+    // comparison. The fixed base64-shaped secret exercises the InvalidSecret
+    // key-decode gate.
+    Provider::Adyen,
     // LemonSqueezy is a single-header raw-body HMAC (bare hex, no prefix);
     // arbitrary header bytes exercise its hex-decode and 32-byte gate, and
     // a well-formed-shaped attempt below reaches HMAC comparison.
@@ -223,6 +236,15 @@ const WELL_FORMED_SECRET: &str =
 /// provider's own test vectors use (`src/providers/discord.rs` `VECTOR_SEED`).
 const DISCORD_PUBLIC_KEY_HEX: &str =
     "b85b5508c0fc30a8d6702e2177ffe835ff3466b9a3abf9adb3dbf43b754ecdd8";
+
+/// A well-formed hex secret for Adyen, whose Customer Area HMAC key is a hex
+/// string hex-decoded to raw key bytes. [`WELL_FORMED_SECRET`] is base64-shaped
+/// and therefore stops Adyen at its `InvalidSecret` key-decode gate before the
+/// signature path; this value lets the shaped attempt below reach base64
+/// decode, the 32-byte gate, and HMAC comparison. It is the key from Adyen's
+/// own worked example (`src/providers/adyen.rs`).
+const ADYEN_HEX_SECRET: &str =
+    "79a3eaf309c43708726a8c284c0d72618696a12e840dfa1df3a158afa3b577da";
 
 fn attempt(
     provider: Provider,
@@ -590,6 +612,22 @@ fuzz_target!(|data: &[u8]| {
         )],
         body,
         WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Adyen: a well-formed-shaped `HmacSignature` (valid base64 sig, no prefix,
+    // no timestamp) paired with a hex Customer Area key lets arbitrary body
+    // bytes reach the 32-byte length gate and HMAC comparison. The key *must*
+    // be hex (Adyen's key is hex-decoded), so this attempt uses a hex secret
+    // rather than the base64-shaped `WELL_FORMED_SECRET`.
+    attempt(
+        Provider::Adyen,
+        &[(
+            "HmacSignature".to_string(),
+            "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+        )],
+        body,
+        ADYEN_HEX_SECRET,
         &url_scoped_options,
     );
 

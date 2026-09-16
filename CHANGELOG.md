@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Adyen** (`Provider::Adyen`): HMAC-SHA256 over the raw body,
+  base64-encoded, delivered in the `HmacSignature` header (header lookup is
+  case-insensitive, so the docs' lowercase `hmacsignature` also resolves) with
+  no timestamp or replay window. The Customer Area HMAC key is a hex string and
+  is hex-decoded to raw key bytes, matching Adyen's official Java/Go libraries;
+  a non-hex or empty key fails closed. Covers Adyen's header-based scheme
+  (Adyen for Platforms / Banking, Management API, classic-platform
+  notifications); Standard payments webhooks, whose signature lives inside the
+  JSON body, are intentionally not covered. Sources:
+  <https://docs.adyen.com/development-resources/webhooks/secure-webhooks/verify-hmac-signatures>
+  and
+  <https://docs.adyen.com/classic-platforms/configure-notifications/signing-notifications-with-hmac>
+  (whose worked example is reproduced byte-for-byte as the test vector).
 - **New provider: PagerDuty v3 webhooks** (`Provider::PagerDuty`): HMAC-SHA256
   over the raw body, hex-encoded, delivered in the `X-PagerDuty-Signature`
   header as one or more comma-separated `v1=<hex_hmac>` values (matching
@@ -49,7 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crate's own published test vectors (GitHub, Slack, Stripe, Discord, Dropbox,
   Razorpay, Sentry,
   Standard Webhooks, HubSpot, Zoom, Paddle, Cloudflare, Coinbase, Notion,
-  Square, Xero, Linear, Shopify, LemonSqueezy, Typeform, Twitch, PagerDuty) plus an adversarial malformed input, so
+  Square, Xero, Linear, Shopify, LemonSqueezy, Typeform, Twitch, PagerDuty,
+  Adyen) plus an adversarial malformed input, so
   libFuzzer spends
   its 600s budget mutating around known-good delivery shapes instead of
   rediscovering the header/body input layout from an empty input. Seeds are
