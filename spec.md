@@ -984,8 +984,10 @@ ambiguity).
   `InvalidSecret`.
 - Replay protection required: reject when `|now - webhook-timestamp| >
   max_age` (default 300s, matching the reference libraries' tolerance)
-- Used by Svix, Clerk, Resend, and a growing list of adopters — implementing
-  this once covers all of them.
+- Used by Svix, Clerk, Resend, GitLab (webhook "signing token", GitLab 19.0+ —
+  GitLab states its webhook delivery "follows the Standard Webhooks
+  specification"; source: <https://docs.gitlab.com/user/project/integrations/webhooks>),
+  and a growing list of adopters — implementing this once covers all of them.
 
 ---
 

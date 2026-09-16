@@ -186,6 +186,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: GitLab discoverability** — GitLab's webhook "signing token" (GitLab
+  19.0+) implements the Standard Webhooks specification, so
+  `Provider::StandardWebhooks` verifies it with no new code. Documented in the
+  README provider table, `spec.md` §3, and the module docs. Source:
+  <https://docs.gitlab.com/user/project/integrations/webhooks>.
 - The crate-level `missing_docs` lint is `deny` instead of `warn`: an
   undocumented public item is now a hard compile error in every configuration
   (stable/MSRV/beta, clippy, and the `no_std` feature matrix) instead of a
