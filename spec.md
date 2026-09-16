@@ -45,6 +45,7 @@ pub enum Provider {
     Slack,
     Square,
     Twilio,
+    Twitch,
     Typeform,
     Discord,
     PayPal,
@@ -559,6 +560,46 @@ worked example) and the reference implementations in Twilio's official SDKs
   An explicitly empty parameter list is meaningful (the JSON-body variant
   carries a `bodySHA256` query parameter and signs the URL alone).
 - No timestamp in the signature scheme (`max_age` has no effect).
+
+### Twitch
+
+Source: <https://dev.twitch.tv/docs/eventsub/handling-webhook-events/>
+("Verifying the signature": the three `Twitch-Eventsub-Message-*` headers,
+the message-id + message-timestamp + message-body concatenation, the
+HMAC-SHA256 algorithm, and the nanosecond RFC 3339 timestamp format).
+Twitch publishes no worked HMAC example in that page, so the vector below
+is locally constructed over exactly the documented construction.
+
+- Headers: `Twitch-Eventsub-Message-Id` (opaque per-delivery id),
+  `Twitch-Eventsub-Message-Timestamp` (RFC 3339 with fractional seconds,
+  e.g. `2022-08-14T16:59:32.618908427Z`), and
+  `Twitch-Eventsub-Message-Signature: sha256=<hex_hmac>`.
+- Signed string: `"{message_id}{message_timestamp}{raw_body}"` — the message
+  id and the message timestamp **verbatim as received** concatenated with the
+  raw body bytes, with no separators or field labels. The timestamp must
+  never be re-serialized/re-encoded before signing: its numeric grammar is
+  signed byte-for-byte as sent.
+- Algorithm: HMAC-SHA256, hex-encoded. Key: the webhook subscription's
+  configured secret as its UTF-8 bytes.
+- The `sha256=` prefix is matched case-sensitively, exactly like GitHub and
+  Bitbucket; an unknown scheme fails closed as `MalformedHeader`.
+- Message id has no grammar to validate here: it is opaque, and its only
+  contract is that the verifying side re-signs the exact bytes it received.
+- Replay protection: the timestamp header is parsed through the shared RFC
+  3339 parser (sub-second precision truncated) and checked against the shared
+  symmetric `|now - t| <= max_age` window (default 300s), as with Zoom and
+  Paddle. Twitch's docs demonstrate only the checksum comparison; applying
+  the window is strictly stronger and cannot reject a fresh delivery.
+- Malformed `Twitch-Eventsub-Message-Timestamp` values (empty, non-RFC-3339,
+  out-of-range calendar fields, or pre-epoch) fail closed as
+  `MalformedHeader`, independent of whether a signature over the raw string
+  would verify — the same fail-closed timestamp policy as `spec.md` §4.4.
+- Test-vector provenance: no official worked vector is published; the main
+  vector is constructed over the exactly documented concatenation and
+  cross-checked with `openssl dgst`, with the command recorded in the module
+  tests. Boundary vectors (empty body, unicode body) follow the same recipe,
+  plus a re-signing under a second message id proving the id binds into the
+  signed string.
 
 ### Typeform
 
