@@ -201,7 +201,10 @@ impl fmt::Display for Provider {
 ///
 /// Parsing is case-insensitive and accepts exactly the canonical
 /// [`fmt::Display`] spelling of each provider (e.g. `"github"`, `"GitHub"`,
-/// `"GITHUB"`).
+/// `"GITHUB"`), plus the space-separated human-readable forms for the two
+/// providers whose Display name runs words together (`"lemon squeezy"` ↔
+/// `Provider::LemonSqueezy`, `"standard webhooks"` ↔
+/// `Provider::StandardWebhooks`).
 /// [`Provider::Custom`] cannot be parsed from a bare name — constructing one
 /// requires a [`CustomScheme`] — so `"custom"` is rejected like any unknown
 /// name.
@@ -228,9 +231,17 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
             n if n.eq_ignore_ascii_case("coinbase") => Ok(Provider::Coinbase),
             n if n.eq_ignore_ascii_case("dropbox") => Ok(Provider::Dropbox),
-            n if n.eq_ignore_ascii_case("lemonsqueezy") => Ok(Provider::LemonSqueezy),
+            n if n.eq_ignore_ascii_case("lemonsqueezy")
+                || n.eq_ignore_ascii_case("lemon squeezy") =>
+            {
+                Ok(Provider::LemonSqueezy)
+            }
             n if n.eq_ignore_ascii_case("xero") => Ok(Provider::Xero),
-            n if n.eq_ignore_ascii_case("standardwebhooks") => Ok(Provider::StandardWebhooks),
+            n if n.eq_ignore_ascii_case("standardwebhooks")
+                || n.eq_ignore_ascii_case("standard webhooks") =>
+            {
+                Ok(Provider::StandardWebhooks)
+            }
             _ => Err(ProviderParseError),
         }
     }
@@ -246,7 +257,8 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `hubspot`, `shopify`, \
              `slack`, `square`, `twilio`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
-             `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `lemonsqueezy`, `xero`, or `standardwebhooks` \
+             `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `lemonsqueezy` (or `lemon squeezy`), \
+             `xero`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -1007,8 +1019,10 @@ mod tests {
             ("coinbase", Provider::Coinbase),
             ("dropbox", Provider::Dropbox),
             ("lemonsqueezy", Provider::LemonSqueezy),
+            ("lemon squeezy", Provider::LemonSqueezy),
             ("xero", Provider::Xero),
             ("standardwebhooks", Provider::StandardWebhooks),
+            ("standard webhooks", Provider::StandardWebhooks),
         ];
         for (name, expected) in cases {
             assert_eq!(Provider::from_str(name), Ok(expected), "lowercase `{name}`");

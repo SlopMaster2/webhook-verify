@@ -129,7 +129,10 @@ impl Default for VerifyOptions {
 impl core::str::FromStr for Provider {
     type Err = ProviderParseError;
     // Case-insensitive match on the canonical Display name of each variant
-    // ("github", "GitHub", "GITHUB", ...). `custom` is rejected: a
+    // ("github", "GitHub", "GITHUB", ...), plus the space-separated
+    // human-readable forms for the multi-word-name variants
+    // ("lemon squeezy" → LemonSqueezy, "standard webhooks" →
+    // StandardWebhooks). `custom` is rejected: a
     // CustomScheme requires configuration and must be built directly.
 }
 
