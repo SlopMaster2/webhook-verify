@@ -51,6 +51,10 @@
 //! - `zoom-timestamped-delivery` — Zoom's documented `v0=` +
 //!   `x-zm-request-timestamp` two-header shape, reaching timestamp parse and the
 //!   `v0:{ts}:{body}` HMAC comparison.
+//! - `twitch-eventsub-delivery` — Twitch EventSub's three-header
+//!   `Twitch-Eventsub-Message-*` shape (opaque id, nanosecond RFC 3339
+//!   timestamp, `sha256=` hex signature), reaching the RFC 3339 timestamp
+//!   parse and the `{id}{ts}{body}` concatenation HMAC comparison.
 //! - `paddle-ts-h1-signature` — Paddle's combined `ts=...;h1=...` header,
 //!   exercising the `;`-splitting parser and the `{ts}:{raw_body}` signed
 //!   string (Paddle's documented `hmac(secret, "{ts}:{body}")`, matching
@@ -172,6 +176,10 @@ const IMPLEMENTED: &[Provider] = &[
     // Zoom needs two headers (signature + timestamp) to reach its signature
     // path; timestamp-based replay is exercised via arbitrary body bytes.
     Provider::Zoom,
+    // Twitch needs three headers (signature + RFC 3339 timestamp + message id)
+    // to reach its signature path; a well-formed-shaped attempt below reaches
+    // its timestamp parse and HMAC comparison.
+    Provider::Twitch,
     // SendGrid needs `verifying_material` to get past its context check and
     // into the ECDSA/SPKI parsing path; it is additionally exercised with a
     // constant valid SPKI below.
@@ -481,6 +489,32 @@ fuzz_target!(|data: &[u8]| {
             "Paddle-Signature".to_string(),
             "ts=1700000000;h1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Twitch: a well-formed-shaped three-header delivery (opaque message id,
+    // valid RFC 3339 timestamp, `sha256=` hex sig) lets arbitrary body bytes
+    // reach the RFC 3339 timestamp parse, the 32-byte length gate, and the
+    // `{id}{ts}{body}` concatenation HMAC comparison; without it the loop
+    // above mostly fails earlier on malformed/missing header fields.
+    attempt(
+        Provider::Twitch,
+        &[
+            (
+                "Twitch-Eventsub-Message-Id".to_string(),
+                "b2f45e9d-85a3-4b8c-91c1-7c03b6b6e4f2".to_string(),
+            ),
+            (
+                "Twitch-Eventsub-Message-Timestamp".to_string(),
+                "2026-01-01T00:00:00.000000000Z".to_string(),
+            ),
+            (
+                "Twitch-Eventsub-Message-Signature".to_string(),
+                "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            ),
+        ],
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,

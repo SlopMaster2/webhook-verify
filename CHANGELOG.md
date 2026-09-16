@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Twitch EventSub** (`Provider::Twitch`): HMAC-SHA256 over
+  the concatenation of the `Twitch-Eventsub-Message-Id` header, the
+  `Twitch-Eventsub-Message-Timestamp` header (RFC 3339, used verbatim), and
+  the raw body, hex-encoded, delivered in the
+  `Twitch-Eventsub-Message-Signature` header as `sha256=<hex_hmac>`. The
+  signed timestamp also enables the shared symmetric `max_age` replay window.
+  Source:
+  <https://dev.twitch.tv/docs/eventsub/handling-webhook-events/>.
 - **New provider: Bitbucket Cloud** (`Provider::Bitbucket`): HMAC-SHA256 over
   the raw body, hex-encoded, delivered in the `X-Hub-Signature` header as
   `sha256=<hex_hmac>` (the WebSub `method=signature` format) with no timestamp
@@ -31,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crate's own published test vectors (GitHub, Slack, Stripe, Discord, Dropbox,
   Razorpay, Sentry,
   Standard Webhooks, HubSpot, Zoom, Paddle, Cloudflare, Coinbase, Notion,
-  Square, Xero, Linear, Shopify, LemonSqueezy, Typeform) plus an adversarial malformed input, so
+  Square, Xero, Linear, Shopify, LemonSqueezy, Typeform, Twitch) plus an adversarial malformed input, so
   libFuzzer spends
   its 600s budget mutating around known-good delivery shapes instead of
   rediscovering the header/body input layout from an empty input. Seeds are

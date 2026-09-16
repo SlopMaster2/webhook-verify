@@ -1,0 +1,5 @@
+Twitch-Eventsub-Message-Id:b2f45e9d-85a3-4b8c-91c1-7c03b6b6e4f2
+Twitch-Eventsub-Message-Timestamp:2026-01-01T00:00:00.000000000Z
+Twitch-Eventsub-Message-Signature:sha256=2d32ac8112f5dac0c544d6f50241d69b0629635728f57ae69c92cb679e9083af
+
+{"subscription":{"id":"0f246fad-1356-49ee-b0a9-6a1c103fr0d1","type":"channel.follow","version":"1","status":"enabled","cost":0,"condition":{"broadcaster_user_id":"1337"},"transport":{"method":"webhook","callback":"https://example.com/webhooks/callback"}},"event":{"user_id":"666","user_login":"cool_user","user_name":"Cool_User","broadcaster_user_id":"1337","broadcaster_user_login":"cool_guy","broadcaster_user_name":"Cool_Guy","followed_at":"2020-07-15T18:16:11.17106713Z"}}

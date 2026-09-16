@@ -93,6 +93,7 @@ hand-copied signing-string logic to get wrong.
 | Slack | HMAC-SHA256 `v0=` scheme, `X-Slack-Signature` + timestamp + replay window | ✅ |
 | Square | HMAC-SHA256 over notification URL + body, base64, `x-square-hmacsha256-signature` (needs `VerifyOptions::request_url`) | ✅ |
 | Twilio | HMAC-SHA1 over URL + sorted form params, `X-Twilio-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
+| Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp replay window | ✅ |
 | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` | ✅ |
 | Discord | Ed25519 (public-key), no shared secret | ✅ |
 | PayPal | RSASSA-PKCS1-v1_5 SHA-256 over `transmission_id|time|webhook_id|crc32(body)`, X.509 cert + webhook ID via `VerifyOptions::verifying_material` + `webhook_id` (needs `paypal` feature) | ✅ |

@@ -75,11 +75,12 @@ fn parse_unsigned_decimal(
 
 /// Parses an RFC 3339 / ISO 8601 `<date>T<time>` timestamp into unix seconds.
 ///
-/// Accepts the exact shape PayPal's `PayPal-Transmission-Time` header uses
-/// (`spec.md` §3): `YYYY-MM-DDTHH:MM:SS`, an optional fractional-seconds
-/// component, and either a `Z` suffix or a numeric `±HH:MM` UTC offset. The
-/// fractional part (if any) is truncated — sub-second precision is below the
-/// resolution of the shared replay check.
+/// Accepts the exact shapes the RFC 3339 timestamp headers use (`spec.md`
+/// §3): PayPal's `PayPal-Transmission-Time` and Twitch's
+/// `Twitch-Eventsub-Message-Timestamp` — `YYYY-MM-DDTHH:MM:SS`, an optional
+/// fractional-seconds component, and either a `Z` suffix or a numeric
+/// `±HH:MM` UTC offset. The fractional part (if any) is truncated —
+/// sub-second precision is below the resolution of the shared replay check.
 ///
 /// The conversion is a dependency-free reimplementation of Howard Hinnant's
 /// `days_from_civil` algorithm (C++ `<chrono>`), which maps a
@@ -87,7 +88,6 @@ fn parse_unsigned_decimal(
 ///
 /// Returns a structured [`VerifyError::MalformedHeader`] for values that do
 /// not match that shape or that map to a pre-epoch instant.
-#[cfg(feature = "paypal")]
 pub(crate) fn parse_rfc3339_timestamp(
     header: &'static str,
     value: &str,
@@ -213,7 +213,6 @@ pub(crate) fn parse_rfc3339_timestamp(
 
 /// Maps a proleptic-Gregorian civil date to the number of days since
 /// 1970-01-01 (Howard Hinnant's `days_from_civil`, public domain).
-#[cfg(feature = "paypal")]
 fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -259,12 +258,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    // --- parse_rfc3339_timestamp (PayPal's `PayPal-Transmission-Time`) ---------
-    //
-    // Only compiled when the `paypal` feature is on; see the crate-wide
-    // dead_code policy (feature-gated helpers stay feature-gated).
+    // --- parse_rfc3339_timestamp (PayPal's `PayPal-Transmission-Time` and
+    //     Twitch's `Twitch-Eventsub-Message-Timestamp`) -------------------------
 
-    #[cfg(feature = "paypal")]
     mod rfc3339 {
         use super::super::parse_rfc3339_timestamp;
         use crate::VerifyError;

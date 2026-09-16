@@ -29,6 +29,7 @@ mod square;
 mod standard_webhooks;
 mod stripe;
 mod twilio;
+mod twitch;
 mod typeform;
 mod xero;
 mod zoom;
@@ -82,6 +83,15 @@ pub enum Provider {
     /// Twilio (HMAC-SHA1 over full URL + sorted form params; needs
     /// `VerifyOptions::request_url` and `VerifyOptions::form_params`).
     Twilio,
+    /// Twitch EventSub (`Twitch-Eventsub-Message-Signature`, HMAC-SHA256 over
+    /// `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix).
+    ///
+    /// Three headers participate (`Twitch-Eventsub-Message-Id`,
+    /// `Twitch-Eventsub-Message-Timestamp` in RFC 3339, and the signature
+    /// itself); the signed string concatenates the message id, the timestamp
+    /// *exactly as sent*, and the raw body — no separators. The timestamp is
+    /// HMAC-covered, so the shared `max_age` replay window applies.
+    Twitch,
     /// Typeform (`Typeform-Signature`, HMAC-SHA256 over the raw body, base64,
     /// `sha256=` prefix).
     Typeform,
@@ -181,6 +191,7 @@ impl fmt::Display for Provider {
             Provider::Slack => f.write_str("Slack"),
             Provider::Square => f.write_str("Square"),
             Provider::Twilio => f.write_str("Twilio"),
+            Provider::Twitch => f.write_str("Twitch"),
             Provider::Typeform => f.write_str("Typeform"),
             Provider::Discord => f.write_str("Discord"),
             Provider::PayPal => f.write_str("PayPal"),
@@ -237,6 +248,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("slack") => Ok(Provider::Slack),
             n if n.eq_ignore_ascii_case("square") => Ok(Provider::Square),
             n if n.eq_ignore_ascii_case("twilio") => Ok(Provider::Twilio),
+            n if n.eq_ignore_ascii_case("twitch") => Ok(Provider::Twitch),
             n if n.eq_ignore_ascii_case("typeform") => Ok(Provider::Typeform),
             n if n.eq_ignore_ascii_case("discord") => Ok(Provider::Discord),
             n if n.eq_ignore_ascii_case("paypal") => Ok(Provider::PayPal),
@@ -274,8 +286,8 @@ pub struct ProviderParseError;
 impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
-            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `shopify`, \
-             `slack`, `square`, `twilio`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
+        "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `shopify`, \
+             `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
@@ -310,6 +322,11 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Slack => vec![slack::SIGNATURE_HEADER, slack::TIMESTAMP_HEADER],
         Provider::Square => vec![square::SIGNATURE_HEADER],
         Provider::Twilio => vec![twilio::SIGNATURE_HEADER],
+        Provider::Twitch => vec![
+            twitch::MESSAGE_ID_HEADER,
+            twitch::TIMESTAMP_HEADER,
+            twitch::SIGNATURE_HEADER,
+        ],
         Provider::Typeform => vec![typeform::SIGNATURE_HEADER],
         Provider::Discord => {
             vec![discord::SIGNATURE_HEADER, discord::TIMESTAMP_HEADER]
@@ -411,6 +428,7 @@ pub fn verify(
             standard_webhooks::verify(headers, raw_body, secret, &options)
         }
         Provider::Twilio => twilio::verify(headers, raw_body, secret, &options),
+        Provider::Twitch => twitch::verify(headers, raw_body, secret, &options),
         Provider::Typeform => typeform::verify(headers, raw_body, secret, &options),
         Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, &options),
         Provider::Coinbase => coinbase::verify(headers, raw_body, secret, &options),
@@ -979,6 +997,7 @@ mod tests {
         assert_eq!(Provider::Slack.to_string(), "Slack");
         assert_eq!(Provider::Square.to_string(), "Square");
         assert_eq!(Provider::Twilio.to_string(), "Twilio");
+        assert_eq!(Provider::Twitch.to_string(), "Twitch");
         assert_eq!(Provider::Typeform.to_string(), "Typeform");
         assert_eq!(Provider::Discord.to_string(), "Discord");
         assert_eq!(Provider::PayPal.to_string(), "PayPal");
@@ -1036,6 +1055,7 @@ mod tests {
             ("slack", Provider::Slack),
             ("square", Provider::Square),
             ("twilio", Provider::Twilio),
+            ("twitch", Provider::Twitch),
             ("typeform", Provider::Typeform),
             ("discord", Provider::Discord),
             ("paypal", Provider::PayPal),
@@ -1079,6 +1099,7 @@ mod tests {
             Provider::Slack,
             Provider::Square,
             Provider::Twilio,
+            Provider::Twitch,
             Provider::Typeform,
             Provider::Discord,
             Provider::PayPal,
@@ -1149,7 +1170,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 24] {
+    fn provider_list() -> [Provider; 25] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1159,6 +1180,7 @@ mod tests {
             Provider::Slack,
             Provider::Square,
             Provider::Twilio,
+            Provider::Twitch,
             Provider::Typeform,
             Provider::Discord,
             Provider::PayPal,
