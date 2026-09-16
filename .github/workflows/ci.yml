@@ -93,17 +93,16 @@ jobs:
   cargo-audit:
     name: cargo audit (dependency vulnerabilities)
     runs-on: ubuntu-latest
-    # Informational: cargo-audit flags known-vulnerable transitive deps from
-    # the RustSec advisory database. Runs non-blocking today because the tree
-    # currently carries (a) rsa 0.9.x, whose only advisory (#RUSTSEC-2023-0071,
-    # Marvin key-recovery via timing) has NO patched release and does not apply
-    # to this crate's public-key verification usage — `verify()` never performs
-    # a private-key (decryption) operation — and (b) time via x509-parser,
-    # whose fix (>=0.3.47) requires Rust 1.88, above this crate's MSRV. See
-    # issue #30 for the tracking of these and the gate's promotion to blocking.
-    # Cargo.lock is committed (library crate pattern, issue #40) so this job
+    # Blocking (issue #41): scans the committed Cargo.lock (library crate
+    # pattern, issue #40) against the RustSec advisory database. The three
+    # current advisories — RUSTSEC-2023-0071 (rsa, no patched release, does
+    # not apply to this crate's public-key-only PayPal path), RUSTSEC-2026-0009
+    # (time, fix needs Rust 1.88 > MSRV 1.85, actix stack only), and
+    # RUSTSEC-2026-0258 (h2, fix is the >=0.4.16 major bump, actix stack only)
+    # — are deliberately ignored in .cargo/audit.toml with per-entry
+    # justifications and re-evaluation triggers. Any *new* advisory still
+    # fails this job and must be triaged. Cargo.lock is committed so this job
     # audits the same tree CI builds; no generate-lockfile step is needed.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
