@@ -892,7 +892,11 @@ A provider implementation is not mergeable until it has:
    (`fuzz/fuzz_targets/parse_and_verify.rs`), which feeds arbitrary bytes as
    headers/body and asserts only "no panic, no timeout" — correctness is
    covered by the vector tests above, fuzzing exists purely to catch
-   panics/hangs on adversarial input.
+   panics/hangs on adversarial input. The multi-secret `verify_any` rotation
+   path is fuzzed through the same target with empty, garbage-then-well-formed,
+   and all-garbage secret slices so its error-aggregation loop (per-secret
+   `InvalidSecret` tracking, `SignatureMismatch` aggregation, structural-error
+   short-circuit) gets the same guarantee.
 7. **Constant-time assertion** where feasible: a `dudect`-style statistical
    timing test on the comparison step, run in CI as a non-blocking
    (informational) job. *Implemented (2026-09): `constant_time_comparison` in

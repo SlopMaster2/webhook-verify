@@ -1,5 +1,6 @@
 //! Shared fuzz target: feeds arbitrary bytes as headers + raw body into every
-//! implemented provider's verification path (`spec.md` §5.6).
+//! implemented provider's verification path, including the multi-secret
+//! `verify_any` rotation path (`spec.md` §5.6).
 //!
 //! Correctness is covered by the per-provider vector tests; this target exists
 //! purely to assert **no panic and no timeout** on adversarial input.
@@ -115,6 +116,19 @@ fn attempt(
         &Secret::new(secret),
         options.clone(),
     );
+}
+
+/// [`webhook_verify::verify_any`] counterpart of [`attempt`]: drives the
+/// cross-secret rotation path (`spec.md` §2.1) with a caller-supplied secret
+/// slice, asserting only that it never panics or hangs on adversarial input.
+fn attempt_any(
+    provider: Provider,
+    headers: &dyn webhook_verify::HeaderMap,
+    body: &[u8],
+    secrets: &[Secret],
+    options: &VerifyOptions,
+) {
+    let _ = webhook_verify::verify_any(provider, headers, body, secrets, options.clone());
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -365,5 +379,31 @@ fuzz_target!(|data: &[u8]| {
         // (e.g. Standard Webhooks' lenient base64) without panicking.
         let arbitrary_secret = String::from_utf8_lossy(body);
         attempt(provider, &headers, body, &arbitrary_secret, &url_scoped_options);
+    }
+
+    // `verify_any` (cross-secret rotation) is public API wrapping the same
+    // `verify()` calls fuzzed above, with error-aggregation logic of its own:
+    // per-secret `InvalidSecret` tracking, `SignatureMismatch` aggregation,
+    // structural-error short-circuit, and empty-slice handling. Fuzz the
+    // slice-shape variations so that loop gets the same "no panic, no hang"
+    // guarantee as the single-secret path: an empty slice (immediate
+    // `SignatureMismatch`), a garbage-then-well-formed slice (aggregation must
+    // keep trying past the `InvalidSecret` and reach the well-formed key), and
+    // an all-garbage slice (aggregation across every unusable key).
+    let arbitrary_secret = String::from_utf8_lossy(body);
+    let mixed_secrets = [
+        Secret::new(arbitrary_secret.as_ref()),
+        Secret::new(WELL_FORMED_SECRET),
+    ];
+    let all_garbage_secrets = [
+        Secret::new("not-hex-!"),
+        Secret::new("deadbeef"),
+        Secret::new(arbitrary_secret.as_ref()),
+    ];
+
+    for &provider in IMPLEMENTED {
+        attempt_any(provider, &headers, body, &[], &url_scoped_options);
+        attempt_any(provider, &headers, body, &mixed_secrets, &url_scoped_options);
+        attempt_any(provider, &headers, body, &all_garbage_secrets, &url_scoped_options);
     }
 });
