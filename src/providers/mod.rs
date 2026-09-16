@@ -5,6 +5,7 @@
 //! vectors. Feature-disabled providers fail closed with
 //! [`VerifyError::UnsupportedProvider`].
 
+mod adyen;
 mod bitbucket;
 mod cloudflare;
 mod coinbase;
@@ -171,6 +172,19 @@ pub enum Provider {
     /// HMAC-SHA256 over the raw body, bare hex — no `sha256=` prefix, no
     /// timestamp). The signing key is the integration's Client Secret.
     Sentry,
+    /// Adyen (`HmacSignature`, HMAC-SHA256 over the raw body, base64; no
+    /// timestamp).
+    ///
+    /// Covers Adyen's **header-based** HMAC scheme (Adyen for Platforms /
+    /// Banking, Management API, Recurring token lifecycle, classic-platform
+    /// notifications). The Customer Area HMAC key is a hex string and is
+    /// hex-decoded to raw key bytes, matching Adyen's official libraries; a
+    /// non-hex key fails closed with [`VerifyError::InvalidSecret`]. Adyen's
+    /// Standard payments webhooks carry the signature *inside* the JSON body
+    /// (`additionalData.hmacSignature`) and sign a colon-joined field subset
+    /// rather than the raw body, so they are not covered by this variant —
+    /// see the provider module for the exact scheme.
+    Adyen,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -217,6 +231,7 @@ impl fmt::Display for Provider {
             Provider::LemonSqueezy => f.write_str("LemonSqueezy"),
             Provider::Xero => f.write_str("Xero"),
             Provider::Sentry => f.write_str("Sentry"),
+            Provider::Adyen => f.write_str("Adyen"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -279,6 +294,7 @@ impl core::str::FromStr for Provider {
             }
             n if n.eq_ignore_ascii_case("xero") => Ok(Provider::Xero),
             n if n.eq_ignore_ascii_case("sentry") => Ok(Provider::Sentry),
+            n if n.eq_ignore_ascii_case("adyen") => Ok(Provider::Adyen),
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks") =>
             {
@@ -300,7 +316,7 @@ impl fmt::Display for ProviderParseError {
         "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, or `standardwebhooks` (or `standard webhooks`) \
+             `xero`, `sentry`, `adyen`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -351,6 +367,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::LemonSqueezy => vec![lemonsqueezy::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Sentry => vec![sentry::SIGNATURE_HEADER],
+        Provider::Adyen => vec![adyen::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -449,6 +466,7 @@ pub fn verify(
         Provider::LemonSqueezy => lemonsqueezy::verify(headers, raw_body, secret, &options),
         Provider::Xero => xero::verify(headers, raw_body, secret, &options),
         Provider::Sentry => sentry::verify(headers, raw_body, secret, &options),
+        Provider::Adyen => adyen::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
         #[cfg(not(feature = "paypal"))]
@@ -1027,6 +1045,7 @@ mod tests {
         assert_eq!(Provider::LemonSqueezy.to_string(), "LemonSqueezy");
         assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::Sentry.to_string(), "Sentry");
+        assert_eq!(Provider::Adyen.to_string(), "Adyen");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1087,6 +1106,7 @@ mod tests {
             ("lemon squeezy", Provider::LemonSqueezy),
             ("xero", Provider::Xero),
             ("sentry", Provider::Sentry),
+            ("adyen", Provider::Adyen),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1131,6 +1151,7 @@ mod tests {
             Provider::LemonSqueezy,
             Provider::Xero,
             Provider::Sentry,
+            Provider::Adyen,
             Provider::StandardWebhooks,
         ];
         for provider in providers {
@@ -1186,7 +1207,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 26] {
+    fn provider_list() -> [Provider; 27] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1213,6 +1234,7 @@ mod tests {
             Provider::LemonSqueezy,
             Provider::Xero,
             Provider::Sentry,
+            Provider::Adyen,
             Provider::StandardWebhooks,
         ]
     }
