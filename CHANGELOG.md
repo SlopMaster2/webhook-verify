@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Sentry** (`Provider::Sentry`): HMAC-SHA256 over the raw
+  body, bare hex-encoded, delivered in the `Sentry-Hook-Signature` header,
+  keyed by the integration's Client Secret, with no timestamp or replay
+  window. Covers Sentry's Integration Platform webhooks. Source:
+  <https://docs.sentry.io/integrations/integration-platform/webhooks>.
 - **New provider: Razorpay** (`Provider::Razorpay`): HMAC-SHA256 over the raw
   body, bare hex-encoded, delivered in the `X-Razorpay-Signature` header with
   no timestamp or replay window. Source:
@@ -17,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A seed corpus for the `parse_and_verify` fuzz target
   (`fuzz/corpus/parse_and_verify/`): the CI nightly run now starts from the
   crate's own published test vectors (GitHub, Slack, Stripe, Discord, Dropbox,
-  Razorpay,
+  Razorpay, Sentry,
   Standard Webhooks, HubSpot, Zoom, Paddle, Cloudflare, Coinbase, Notion,
   Square, Xero, Linear, Shopify, LemonSqueezy, Typeform) plus an adversarial malformed input, so
   libFuzzer spends

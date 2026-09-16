@@ -55,8 +55,10 @@ pub enum Provider {
     Cloudflare,
     Coinbase,
     Dropbox,
+    Razorpay,
     LemonSqueezy,
     Xero,
+    Sentry,
     StandardWebhooks,
     Custom(CustomScheme),
 }
@@ -775,6 +777,36 @@ events") and Zoom's official sample app
   against locally constructed, deterministic vectors over exactly the
   documented construction (the vector's timestamp mirrors the docs' example
   headers). Replace them if Zoom ever publishes fixed vectors.
+
+### Sentry
+
+Source: <https://docs.sentry.io/integrations/integration-platform/webhooks>
+(Sentry's official Integration Platform webhook documentation, "Verifying the
+Signature"), corroborated by the reference implementation in Sentry's official
+example repository referenced from that page
+(<https://github.com/getsentry/integration-platform-example>).
+
+- Header: `Sentry-Hook-Signature: <hex_hmac>` — a bare lowercase hex digest,
+  no `sha256=` prefix and no timestamp; same shape as Dropbox, Razorpay, and
+  Lemon Squeezy.
+- Signed string: raw body bytes, unmodified. Sentry's docs sign the exact
+  received payload (the reference snippet HMACs the raw JSON request body;
+  re-serializing it would change the bytes and fail verification).
+- Algorithm: HMAC-SHA256, hex-encoded. Key: the integration's **Client
+  Secret** as its UTF-8 bytes (the secret shown on the
+  `sentry.io/settings/<org>/apps/<app>/` page, **not** an organization auth
+  token), matching the docs' construction `createHmac("sha256", secret) ...
+  digest("hex")`.
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Shopify/Dropbox/Linear. Sentry delivers an unsigned
+  `Sentry-Hook-Timestamp` header, which is not part of the signature and so
+  provides no tamper-resistant replay protection.
+- Test-vector provenance: Sentry's docs describe the construction and ship
+  reference code but publish no byte-exact example signature, so the
+  implementation is validated against locally constructed, deterministic
+  vectors over exactly the documented construction (cross-checked across
+  OpenSSL and Python's `hashlib`). Replace them if Sentry ever publishes fixed
+  vectors.
 
 ### Xero
 
