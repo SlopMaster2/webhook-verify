@@ -59,6 +59,7 @@
 //! | Slack | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Square | HMAC-SHA256 over notification URL + body, base64 |
 //! | Twilio | HMAC-SHA1 over URL + sorted form params |
+//! | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` |
 //! | Discord | Ed25519 public-key signatures (no shared secret) |
 //! | PayPal | RSASSA-PKCS1-v1_5 SHA-256, X.509 cert + webhook ID |
 //! | SendGrid | ECDSA P-256 over `{timestamp}{raw_body}` (no separator) |
