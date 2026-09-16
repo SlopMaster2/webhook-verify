@@ -26,6 +26,7 @@ categories = ["web-programming", "cryptography", "authentication"]
 exclude = [
     "/fuzz",
     "/.github",
+    "/.cargo",
     "/.opencode",
     "/opencode.jsonc",
     "/AGENTS.md",

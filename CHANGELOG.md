@@ -338,6 +338,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   form HubSpot signed. Previously only the provider module docs and the spec
   carried the caveat, and a proxied percent-encoded URI failed with an opaque
   `SignatureMismatch`.
+- The `cargo audit` CI job was failing on three RustSec advisories that cannot
+  be removed from the lockfile today (issue #41): `rsa` 0.9.10 (RUSTSEC-2023-0071,
+  Marvin private-key timing attack — upstream has no patched release, and this
+  crate only ever runs `RsaPublicKey::verify`, never a private-key operation),
+  `time` 0.3.45 (RUSTSEC-2026-0009, fix >=0.3.47 requires Rust 1.88 > MSRV
+  1.85; actix adapter stack only), and `h2` 0.3.27 (RUSTSEC-2026-0258, fix is
+  the >=0.4.16 major bump for which actix-http has no 0.3-line patch; actix
+  adapter stack only). The three are now documented and individually justified
+  in `.cargo/audit.toml`, and the job is **blocking** again — a new advisory
+  will fail CI and be triaged, while the three accepted ones carry an audit
+  trail and re-evaluation triggers instead of failing every run.
 
 ## [0.1.0] - Unreleased
 

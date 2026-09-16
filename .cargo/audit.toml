@@ -1,0 +1,53 @@
+# https://docs.rs/cargo-audit/latest/cargo_audit/config/index.html
+#
+# `cargo audit` config. This file is the inventory of *accepted, documented*
+# deviations from the RustSec advisory database, kept next to the committed
+# Cargo.lock (issue #40) so CI audits the exact tree it builds (issue #30).
+#
+# The rule (spec.md §4): an advisory may be ignored only when the affected
+# code path is (a) genuinely not reachable from this crate's verification
+# logic, or (b) unfixable within the crate's MSRV/feature commitments. Each
+# entry below states which of those applies; if the situation changes
+# (upstream patch, MSRV bump, dependency swap), remove the entry — this file
+# is meant to shrink, never to grow silently.
+#
+# Reverting the `continue-on-error` gate to blocking (issue #41) is only safe
+# because every advisory in this list is ignored with an audit trail here.
+# New, unrelated advisories will still fail the job and must be triaged.
+#
+# See issue #41 for the tracking issue and the failed run that motivated it.
+
+[advisories]
+ignore = [
+    # rsa 0.9.10 — "Marvin Attack: potential key recovery through timing
+    # sidechannels" (CVE-2023-49092). Patched = [] upstream: the advisory-db
+    # still lists no fixed release for the 0.9 line (as of 2026-09).
+    #
+    # Non-applicable by construction: the attack recovers a *private* key via
+    # timing of decryption/private-key operations, and this crate's only use of
+    # rsa is `rsa::RsaPublicKey::verify()` in the PayPal provider
+    # (src/providers/paypal.rs) — public-key verification over a provider
+    # certificate. `verify()` never performs a private-key (decryption)
+    # operation, so there is no secret to leak through timing. Tracked in
+    # spec.md §7 (PayPal open question). Re-evaluate if a patched release
+    # lands or if a private-key path is ever added.
+    "RUSTSEC-2023-0071",
+
+    # time 0.3.45 — stack-exhaustion DoS via malformed RFC 2822 input
+    # (CVE-2026-25727). The fix (>=0.3.47) requires Rust 1.88, above this
+    # crate's MSRV 1.85 (spec.md §6, AGENTS.md §6), and time is only pulled
+    # in transitively by the actix-web adapter stack (dev-dependency and the
+    # optional `actix` feature) — the core verification path never parses
+    # dates. Revist on the next MSRV bump or actix release where h2/time can
+    # both move.
+    "RUSTSEC-2026-0009",
+
+    # h2 0.3.27 — unbounded empty DATA frames DoS (GHSA-q83h-524g-xf6h).
+    # The only patch is the >=0.4.16 major bump; the 0.3 line has no fix, and
+    # actix-http 3.x (h2 0.3's sole consumer here) has not bumped to h2 0.4.
+    # h2 is reachable only through the optional actix-web adapter (HTTP/2
+    # server transport) — never the verification path — and cannot be updated
+    # without upstream changes. Revisit when actix-http ships an h2 0.4
+    # dependency.
+    "RUSTSEC-2026-0258",
+]
