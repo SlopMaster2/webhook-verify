@@ -89,7 +89,7 @@ hand-copied signing-string logic to get wrong.
 | GitHub | HMAC-SHA256, `X-Hub-Signature-256` | ✅ |
 | HubSpot | HMAC-SHA256 over `{method}{uri}{body}{timestamp}` (epoch ms), base64, `X-HubSpot-Signature-V3` + replay window (needs `VerifyOptions::request_method` + `request_url`; pass the URI in the same decoded form HubSpot signed — it URL-decodes certain characters, `spec.md` §3) | ✅ |
 | Shopify | HMAC-SHA256, base64, `X-Shopify-Hmac-Sha256` | ✅ |
-| Slack | HMAC-SHA256 `v0=` scheme, `X-Slack-Signature` + timestamp | ✅ |
+| Slack | HMAC-SHA256 `v0=` scheme, `X-Slack-Signature` + timestamp + replay window | ✅ |
 | Square | HMAC-SHA256 over notification URL + body, base64, `x-square-hmacsha256-signature` (needs `VerifyOptions::request_url`) | ✅ |
 | Twilio | HMAC-SHA1 over URL + sorted form params, `X-Twilio-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
 | Discord | Ed25519 (public-key), no shared secret | ✅ |
@@ -98,7 +98,7 @@ hand-copied signing-string logic to get wrong.
 | Paddle | HMAC-SHA256, hex, `Paddle-Signature` (`ts=;h1=` list, rotation-safe) + replay window | ✅ |
 | Linear | HMAC-SHA256, `linear-signature` | ✅ |
 | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` (verification-token key) | ✅ |
-| Zoom | HMAC-SHA256, `v0=` scheme, `x-zm-signature` + timestamp | ✅ |
+| Zoom | HMAC-SHA256, `v0=` scheme, `x-zm-signature` + timestamp + replay window | ✅ |
 | Cloudflare (Stream webhooks) | HMAC-SHA256 over `time.body`, hex, in a combined `Webhook-Signature` header + timestamp tolerance | ✅ |
 | Coinbase (CDP webhooks) | HMAC-SHA256 over `t.body`, hex, `v0` scheme in a combined `X-Hook0-Signature` header + timestamp tolerance | ✅ |
 | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` | ✅ |
@@ -195,8 +195,7 @@ hyper requests) implements `HeaderMap` and can be passed to `verify()` directly.
 
 ### `no_std` support
 
-The core verification path is `no_std + alloc` compatible (validated against
-`wasm32-unknown-unknown`). The `std` feature (on by default) provides the wall
+The core verification path is `no_std + alloc` compatible. The `std` feature (on by default) provides the wall
 clock used for replay protection and the `std::error::Error` impl. Disable it
 for constrained targets:
 
