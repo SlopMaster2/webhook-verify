@@ -1,0 +1,5 @@
+X-Signature: edeccf8b03afe11114be9fab7259703348bbe36d8964510cdbaff609c5771a1e
+Content-Type: application/json
+X-Event-Name: order_created
+
+{"meta":{"event_name":"order_created","custom_data":{"user_id":"1"}},"data":{"id":"1","type":"orders","attributes":{"store_id":1,"order_number":1234,"subtotal":1100,"total":1100,"status":"paid"}}}

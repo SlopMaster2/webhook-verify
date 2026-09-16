@@ -69,6 +69,7 @@
 //! | Cloudflare (Stream) | HMAC-SHA256 over `time.body`, hex, `Webhook-Signature` |
 //! | Coinbase (CDP) | HMAC-SHA256 over `t.body`, hex, `X-Hook0-Signature` + tolerance window |
 //! | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` |
+//! | Lemon Squeezy | HMAC-SHA256, `X-Signature` (bare hex, no timestamp) |
 //! | Xero | HMAC-SHA256, base64, `x-xero-signature` |
 //! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, ...) |
 //! | Custom | User-supplied HMAC scheme via [`Provider::Custom`] |
