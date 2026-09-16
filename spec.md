@@ -722,6 +722,38 @@ Source: <https://developer.paddle.com/webhooks/about/signature-verification>
   UTF-8 body boundary cases, constructed locally with `openssl` over exactly
   the documented construction.
 
+### Razorpay
+
+Source: <https://razorpay.com/docs/webhooks/validate-test/> ("Validate and Test
+Webhooks": header reference, HMAC construction, and the explicit "do not parse
+or cast the webhook request body" rule), and
+<https://razorpay.com/docs/webhooks/faqs/> (FAQ confirming only the raw request
+body may be hashed).
+
+- Header: `X-Razorpay-Signature: <hex_hmac>` — a bare lowercase hex digest, no
+  `sha256=` prefix and no timestamp; same shape as Dropbox, Lemon Squeezy, and
+  Linear.
+- Signed string: raw body bytes, unmodified. Razorpay's docs are explicit on
+  this point: "ensure that the webhook body passed as an argument is the raw
+  webhook request body. Do not parse or cast the webhook request body" —
+  re-serializing JSON would change the bytes and the signature would not match.
+- Algorithm: HMAC-SHA256, hex-encoded. Key: the webhook secret configured in
+  the dashboard as its UTF-8 bytes (deliberately **not** the API Key
+  Secret), matching the docs' construction `hmac('sha256', message,
+  key)` and the official SDK helper
+  `validateWebhookSignature(body, signature, secret)`.
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Shopify/Dropbox/Linear. Razorpay's docs recommend replay/dedup
+  handling from the event payload's own fields, which is outside this crate's
+  scope (payload parsing is a non-goal, §1).
+- Test-vector provenance: the primary vectors are the worked examples posted by
+  a Razorpay maintainer in the official SDK's issue tracker
+  (<https://github.com/razorpay/razorpay-node/issues/29>): secret `123456`,
+  body `{a:1, b:2}` → `ee0a3edebeb4be41bafa3bc0a39069d7845a5c37760b863405049de80b5fe92d`,
+  and body `{c:1, d:2}` → `58fd9fac909b57d776606e9313e83a26a9e67a3488b9ca7259134e09f4badfb1`.
+  Additional vectors cover the empty and UTF-8 body boundary cases, constructed
+  locally with `openssl` over exactly the documented construction.
+
 ### Zoom
 
 Source: <https://developers.zoom.us/docs/api/webhooks/> ("Verify webhook

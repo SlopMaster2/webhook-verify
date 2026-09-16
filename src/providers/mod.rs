@@ -18,6 +18,7 @@ mod notion;
 mod paddle;
 #[cfg(feature = "paypal")]
 mod paypal;
+mod razorpay;
 #[cfg(feature = "sendgrid")]
 mod sendgrid;
 mod shopify;
@@ -134,6 +135,9 @@ pub enum Provider {
     Coinbase,
     /// Dropbox (`X-Dropbox-Signature`, HMAC-SHA256 over the raw body).
     Dropbox,
+    /// Razorpay (`X-Razorpay-Signature`, HMAC-SHA256 over the raw body, bare
+    /// hex — no `sha256=` prefix, no timestamp).
+    Razorpay,
     /// Lemon Squeezy (`X-Signature`, HMAC-SHA256 over the raw body, bare hex —
     /// no `sha256=` prefix, no timestamp).
     LemonSqueezy,
@@ -178,6 +182,7 @@ impl fmt::Display for Provider {
             Provider::Cloudflare => f.write_str("Cloudflare"),
             Provider::Coinbase => f.write_str("Coinbase"),
             Provider::Dropbox => f.write_str("Dropbox"),
+            Provider::Razorpay => f.write_str("Razorpay"),
             Provider::LemonSqueezy => f.write_str("LemonSqueezy"),
             Provider::Xero => f.write_str("Xero"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
@@ -231,6 +236,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
             n if n.eq_ignore_ascii_case("coinbase") => Ok(Provider::Coinbase),
             n if n.eq_ignore_ascii_case("dropbox") => Ok(Provider::Dropbox),
+            n if n.eq_ignore_ascii_case("razorpay") => Ok(Provider::Razorpay),
             n if n.eq_ignore_ascii_case("lemonsqueezy")
                 || n.eq_ignore_ascii_case("lemon squeezy") =>
             {
@@ -257,7 +263,7 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `hubspot`, `shopify`, \
              `slack`, `square`, `twilio`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
-             `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `lemonsqueezy` (or `lemon squeezy`), \
+             `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
@@ -299,6 +305,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
         Provider::Coinbase => vec![coinbase::SIGNATURE_HEADER],
         Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
+        Provider::Razorpay => vec![razorpay::SIGNATURE_HEADER],
         Provider::LemonSqueezy => vec![lemonsqueezy::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
@@ -392,6 +399,7 @@ pub fn verify(
         Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, &options),
         Provider::Coinbase => coinbase::verify(headers, raw_body, secret, &options),
         Provider::Dropbox => dropbox::verify(headers, raw_body, secret, &options),
+        Provider::Razorpay => razorpay::verify(headers, raw_body, secret, &options),
         Provider::LemonSqueezy => lemonsqueezy::verify(headers, raw_body, secret, &options),
         Provider::Xero => xero::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
@@ -964,6 +972,7 @@ mod tests {
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
         assert_eq!(Provider::Coinbase.to_string(), "Coinbase");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
+        assert_eq!(Provider::Razorpay.to_string(), "Razorpay");
         assert_eq!(Provider::LemonSqueezy.to_string(), "LemonSqueezy");
         assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
@@ -1018,6 +1027,7 @@ mod tests {
             ("cloudflare", Provider::Cloudflare),
             ("coinbase", Provider::Coinbase),
             ("dropbox", Provider::Dropbox),
+            ("razorpay", Provider::Razorpay),
             ("lemonsqueezy", Provider::LemonSqueezy),
             ("lemon squeezy", Provider::LemonSqueezy),
             ("xero", Provider::Xero),
@@ -1058,6 +1068,7 @@ mod tests {
             Provider::Cloudflare,
             Provider::Coinbase,
             Provider::Dropbox,
+            Provider::Razorpay,
             Provider::LemonSqueezy,
             Provider::Xero,
             Provider::StandardWebhooks,
@@ -1115,7 +1126,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 21] {
+    fn provider_list() -> [Provider; 22] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1135,6 +1146,7 @@ mod tests {
             Provider::Cloudflare,
             Provider::Coinbase,
             Provider::Dropbox,
+            Provider::Razorpay,
             Provider::LemonSqueezy,
             Provider::Xero,
             Provider::StandardWebhooks,

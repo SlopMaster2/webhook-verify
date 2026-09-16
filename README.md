@@ -103,6 +103,7 @@ hand-copied signing-string logic to get wrong.
 | Cloudflare (Stream webhooks) | HMAC-SHA256 over `time.body`, hex, in a combined `Webhook-Signature` header + timestamp tolerance | ✅ |
 | Coinbase (CDP webhooks) | HMAC-SHA256 over `t.body`, hex, `v0` scheme in a combined `X-Hook0-Signature` header + timestamp tolerance | ✅ |
 | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` | ✅ |
+| Razorpay | HMAC-SHA256 over raw body, hex, `X-Razorpay-Signature` (no timestamp) | ✅ |
 | Lemon Squeezy | HMAC-SHA256, `X-Signature` (bare hex, no prefix, no timestamp) | ✅ |
 | Xero | HMAC-SHA256, base64, `x-xero-signature` | ✅ |
 | Standard Webhooks spec (Svix, Clerk, Resend, ...) | HMAC-SHA256, `webhook-signature` (`v1,` base64, rotation list) + replay window | ✅ |
