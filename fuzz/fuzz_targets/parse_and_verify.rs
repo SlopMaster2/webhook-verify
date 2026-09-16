@@ -32,6 +32,9 @@
 //!   shape over the raw body, reaching hex decode, the 32-byte gate, and HMAC
 //!   comparison (parser-well-formed, no space after the colon, matching the
 //!   other bare-hex/bare-base64 HMAC seeds).
+//! - `razorpay-hex-signature` — Razorpay's `X-Razorpay-Signature` bare-hex HMAC
+//!   shape over the raw body (no prefix, no timestamp), reaching hex decode,
+//!   the 32-byte gate, and HMAC comparison.
 //! - `standard-webhooks-shape` — the official test-suite delivery (three
 //!   `webhook-*` headers), reaching the `v1,<base64>` split, base64 decode,
 //!   and multi-element comparison.
@@ -108,6 +111,10 @@ const IMPLEMENTED: &[Provider] = &[
     // header bytes exercise its hex-decode and 32-byte gate, and a
     // well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Dropbox,
+    // Razorpay is a single-header raw-body HMAC (bare hex, no prefix, no
+    // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
+    // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
+    Provider::Razorpay,
     // LemonSqueezy is a single-header raw-body HMAC (bare hex, no prefix);
     // arbitrary header bytes exercise its hex-decode and 32-byte gate, and
     // a well-formed-shaped attempt below reaches HMAC comparison.
@@ -478,6 +485,20 @@ fuzz_target!(|data: &[u8]| {
         Provider::Dropbox,
         &[(
             "X-Dropbox-Signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Razorpay: a well-formed-shaped `X-Razorpay-Signature` (valid hex sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::Razorpay,
+        &[(
+            "X-Razorpay-Signature".to_string(),
             "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,

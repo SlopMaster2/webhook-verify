@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Razorpay** (`Provider::Razorpay`): HMAC-SHA256 over the raw
+  body, bare hex-encoded, delivered in the `X-Razorpay-Signature` header with
+  no timestamp or replay window. Source:
+  <https://razorpay.com/docs/webhooks/validate-test/> and maintainer-published
+  worked examples in <https://github.com/razorpay/razorpay-node/issues/29>.
 - A seed corpus for the `parse_and_verify` fuzz target
   (`fuzz/corpus/parse_and_verify/`): the CI nightly run now starts from the
   crate's own published test vectors (GitHub, Slack, Stripe, Discord, Dropbox,
+  Razorpay,
   Standard Webhooks, HubSpot, Zoom, Paddle, Cloudflare, Coinbase, Notion,
   Square, Xero, Linear, Shopify, LemonSqueezy, Typeform) plus an adversarial malformed input, so
   libFuzzer spends
