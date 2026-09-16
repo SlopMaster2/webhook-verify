@@ -21,6 +21,7 @@ mod paypal;
 mod razorpay;
 #[cfg(feature = "sendgrid")]
 mod sendgrid;
+mod sentry;
 mod shopify;
 mod slack;
 mod square;
@@ -143,6 +144,10 @@ pub enum Provider {
     LemonSqueezy,
     /// Xero (`x-xero-signature`, base64-encoded HMAC-SHA256 over the raw body).
     Xero,
+    /// Sentry (Integration Platform webhooks; `Sentry-Hook-Signature`,
+    /// HMAC-SHA256 over the raw body, bare hex — no `sha256=` prefix, no
+    /// timestamp). The signing key is the integration's Client Secret.
+    Sentry,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -185,6 +190,7 @@ impl fmt::Display for Provider {
             Provider::Razorpay => f.write_str("Razorpay"),
             Provider::LemonSqueezy => f.write_str("LemonSqueezy"),
             Provider::Xero => f.write_str("Xero"),
+            Provider::Sentry => f.write_str("Sentry"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -243,6 +249,7 @@ impl core::str::FromStr for Provider {
                 Ok(Provider::LemonSqueezy)
             }
             n if n.eq_ignore_ascii_case("xero") => Ok(Provider::Xero),
+            n if n.eq_ignore_ascii_case("sentry") => Ok(Provider::Sentry),
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks") =>
             {
@@ -264,7 +271,7 @@ impl fmt::Display for ProviderParseError {
             "unknown provider name: expected one of `stripe`, `github`, `hubspot`, `shopify`, \
              `slack`, `square`, `twilio`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, or `standardwebhooks` (or `standard webhooks`) \
+             `xero`, `sentry`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -308,6 +315,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Razorpay => vec![razorpay::SIGNATURE_HEADER],
         Provider::LemonSqueezy => vec![lemonsqueezy::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
+        Provider::Sentry => vec![sentry::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -402,6 +410,7 @@ pub fn verify(
         Provider::Razorpay => razorpay::verify(headers, raw_body, secret, &options),
         Provider::LemonSqueezy => lemonsqueezy::verify(headers, raw_body, secret, &options),
         Provider::Xero => xero::verify(headers, raw_body, secret, &options),
+        Provider::Sentry => sentry::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
         #[cfg(not(feature = "paypal"))]
@@ -975,6 +984,7 @@ mod tests {
         assert_eq!(Provider::Razorpay.to_string(), "Razorpay");
         assert_eq!(Provider::LemonSqueezy.to_string(), "LemonSqueezy");
         assert_eq!(Provider::Xero.to_string(), "Xero");
+        assert_eq!(Provider::Sentry.to_string(), "Sentry");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1031,6 +1041,7 @@ mod tests {
             ("lemonsqueezy", Provider::LemonSqueezy),
             ("lemon squeezy", Provider::LemonSqueezy),
             ("xero", Provider::Xero),
+            ("sentry", Provider::Sentry),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1071,6 +1082,7 @@ mod tests {
             Provider::Razorpay,
             Provider::LemonSqueezy,
             Provider::Xero,
+            Provider::Sentry,
             Provider::StandardWebhooks,
         ];
         for provider in providers {
@@ -1126,7 +1138,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 22] {
+    fn provider_list() -> [Provider; 23] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1149,6 +1161,7 @@ mod tests {
             Provider::Razorpay,
             Provider::LemonSqueezy,
             Provider::Xero,
+            Provider::Sentry,
             Provider::StandardWebhooks,
         ]
     }

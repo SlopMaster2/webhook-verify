@@ -73,6 +73,7 @@
 //! | Razorpay | HMAC-SHA256 over raw body, hex, `X-Razorpay-Signature` (no timestamp) |
 //! | Lemon Squeezy | HMAC-SHA256, `X-Signature` (bare hex, no timestamp) |
 //! | Xero | HMAC-SHA256, base64, `x-xero-signature` |
+//! | Sentry | HMAC-SHA256 over raw body, hex, `Sentry-Hook-Signature` (no timestamp) |
 //! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, ...) |
 //! | Custom | User-supplied HMAC scheme via [`Provider::Custom`] |
 //!

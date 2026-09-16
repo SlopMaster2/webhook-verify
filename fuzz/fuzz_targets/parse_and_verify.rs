@@ -35,6 +35,9 @@
 //! - `razorpay-hex-signature` — Razorpay's `X-Razorpay-Signature` bare-hex HMAC
 //!   shape over the raw body (no prefix, no timestamp), reaching hex decode,
 //!   the 32-byte gate, and HMAC comparison.
+//! - `sentry-hex-signature` — Sentry's `Sentry-Hook-Signature` bare-hex HMAC
+//!   shape over the raw body (no prefix, no timestamp), reaching hex decode,
+//!   the 32-byte gate, and HMAC comparison.
 //! - `standard-webhooks-shape` — the official test-suite delivery (three
 //!   `webhook-*` headers), reaching the `v1,<base64>` split, base64 decode,
 //!   and multi-element comparison.
@@ -115,6 +118,10 @@ const IMPLEMENTED: &[Provider] = &[
     // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
     // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Razorpay,
+    // Sentry is a single-header raw-body HMAC (bare hex, no prefix, no
+    // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
+    // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
+    Provider::Sentry,
     // LemonSqueezy is a single-header raw-body HMAC (bare hex, no prefix);
     // arbitrary header bytes exercise its hex-decode and 32-byte gate, and
     // a well-formed-shaped attempt below reaches HMAC comparison.
@@ -499,6 +506,20 @@ fuzz_target!(|data: &[u8]| {
         Provider::Razorpay,
         &[(
             "X-Razorpay-Signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Sentry: a well-formed-shaped `Sentry-Hook-Signature` (valid hex sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::Sentry,
+        &[(
+            "Sentry-Hook-Signature".to_string(),
             "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,

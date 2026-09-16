@@ -106,6 +106,7 @@ hand-copied signing-string logic to get wrong.
 | Razorpay | HMAC-SHA256 over raw body, hex, `X-Razorpay-Signature` (no timestamp) | ✅ |
 | Lemon Squeezy | HMAC-SHA256, `X-Signature` (bare hex, no prefix, no timestamp) | ✅ |
 | Xero | HMAC-SHA256, base64, `x-xero-signature` | ✅ |
+| Sentry (Integration Platform webhooks) | HMAC-SHA256 over raw body, hex, `Sentry-Hook-Signature` (Client Secret key, no timestamp) | ✅ |
 | Standard Webhooks spec (Svix, Clerk, Resend, ...) | HMAC-SHA256, `webhook-signature` (`v1,` base64, rotation list) + replay window | ✅ |
 | Custom | User-supplied HMAC scheme via `Provider::Custom(..)` (SHA-256/SHA-1/SHA-512, hex/base64, optional prefix + timestamp replay window) | ✅ |
 
