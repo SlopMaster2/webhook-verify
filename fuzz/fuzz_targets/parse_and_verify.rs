@@ -31,6 +31,30 @@
 //! - `standard-webhooks-shape` — the official test-suite delivery (three
 //!   `webhook-*` headers), reaching the `v1,<base64>` split, base64 decode,
 //!   and multi-element comparison.
+//! - `hubspot-v3-delivery` — HubSpot's V3 two-header shape (base64
+//!   `X-HubSpot-Signature-V3` + millisecond `X-HubSpot-Request-Timestamp`),
+//!   reaching base64 decode and the HMAC comparison over
+//!   `{method}{uri}{body}{timestamp}`.
+//! - `zoom-timestamped-delivery` — Zoom's documented `v0=` +
+//!   `x-zm-request-timestamp` two-header shape, reaching timestamp parse and the
+//!   `v0:{ts}:{body}` HMAC comparison.
+//! - `paddle-ts-h1-signature` — Paddle's combined `ts=...;h1=...` header,
+//!   exercising the `;`-splitting parser and the `{ts}.{body}` signed string.
+//! - `cloudflare-time-sig1-delivery` — Cloudflare's combined `time=...,sig1=...`
+//!   header, reaching the comma-split and HMAC comparison.
+//! - `coinbase-t-v0-delivery` — Coinbase's combined `t=...,v0=...` header (the
+//!   shape also carries optional `h=`/`v1=` fields), reaching timestamp and
+//!   `v0` comparison parsing.
+//! - `notion-sha256-prefix-delivery` — Notion's official `sha256=` sample value,
+//!   reaching prefix match, hex decode, and the 32-byte gate.
+//! - `square-base64-signature` — Square's documented base64 HMAC-SHA256 signature
+//!   over the signed message containing the `request_url`.
+//! - `xero-base64-signature` — Xero's raw base64 HMAC-SHA256 signature (no
+//!   prefix, no timestamp).
+//! - `linear-hex-signature` — Linear's raw hex HMAC-SHA256 signature (no
+//!   prefix, no timestamp).
+//! - `shopify-base64-signature` — Shopify's base64 HMAC-SHA256 signature (no
+//!   prefix, no timestamp).
 //! - `header-garbage-without-body-separator` — an adversarial malformed input
 //!   with no `\n\n` separator, anchoring the parser's fail-closed paths.
 
