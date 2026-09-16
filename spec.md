@@ -51,6 +51,7 @@ pub enum Provider {
     PayPal,
     SendGrid,
     Paddle,
+    PagerDuty,
     Linear,
     Notion,
     Zoom,
@@ -797,6 +798,43 @@ Source: <https://developer.paddle.com/webhooks/about/signature-verification>
   signature reproduced verbatim. Additional vectors cover the empty and
   UTF-8 body boundary cases, constructed locally with `openssl` over exactly
   the documented construction.
+
+### PagerDuty
+
+Source: <https://developer.pagerduty.com/docs/verifying-signatures>
+(PagerDuty's "Verifying signatures" documentation for v3 webhooks) and the
+official Go SDK's reference implementation
+(<https://github.com/PagerDuty/go-pagerduty/blob/main/webhookv3/webhookv3.go>).
+
+- Header: `X-PagerDuty-Signature: v1=<hex_hmac>[,v1=<hex_hmac>...]` — one or
+  more comma-separated `v1=` elements. During zero-downtime secret rotation
+  PagerDuty sends multiple `v1=` signatures (one per active secret); a match
+  on *any* is accepted. Elements without the literal lowercase `v1=` prefix
+  are ignored per the SDK's downgrade protection ("Ignore any signatures
+  that are not the initial v1 version"); if that leaves no signatures at
+  all, the header fails closed as `MalformedHeader`.
+- Signed string: the raw request body bytes, unmodified — PagerDuty signs the
+  payload exactly as delivered, so re-serializing or reformatting the body
+  changes the signature.
+- Algorithm: HMAC-SHA256, hex-encoded.
+- Key: the webhook subscription's signing secret (its
+  `delivery_method.secret`) as a plain UTF-8 string (not decoded), matching
+  the SDK (`hmac.New(sha256.New, []byte(secret))`).
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Bitbucket/Sentry.
+- Empty `v1=` elements, non-hex `v1=` values, and `v1=` values that do not
+  decode to 32 bytes fail closed as `MalformedHeader`/`BadEncoding` (never
+  silently dropped): the SDK quietly swallows hex-decode failures, but this
+  crate keeps that ambiguity visible via the crate-wide error granularity
+  (`spec.md` §2.1).
+- Test-vector provenance: the primary vector is PagerDuty's own published
+  test in the official `go-pagerduty` SDK (`webhookv3/webhookv3_test.go`):
+  secret `lDQHScfUeXUKaQRNF+8XIiDKZ7XX3itBAYzwU0TARw8lJqRnkKl2iB1anSb0Z+IK`,
+  payload, and expected `v1=0c0b9495...5476cd` signature reproduced
+  byte-for-byte, plus the same SDK's "mismatch" vector
+  (`v1=7020c8a7...8bcaf5`). Additional vectors cover the empty and UTF-8 body
+  boundary cases, the multi-`v1=` rotation list, and non-`v1=` elements,
+  constructed locally over exactly the documented construction.
 
 ### Razorpay
 

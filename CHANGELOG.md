@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: PagerDuty v3 webhooks** (`Provider::PagerDuty`): HMAC-SHA256
+  over the raw body, hex-encoded, delivered in the `X-PagerDuty-Signature`
+  header as one or more comma-separated `v1=<hex_hmac>` values (matching
+  PagerDuty's key-rotation list format) with no timestamp or replay window.
+  Non-`v1` elements are discarded per the official SDK's downgrade protection;
+  an empty `v1=` value, non-hex, or wrong-length signature fails closed. Source:
+  <https://developer.pagerduty.com/docs/verifying-signatures> and the official
+  Go SDK's `webhookv3` package, whose published test vectors
+  (<https://github.com/PagerDuty/go-pagerduty/blob/main/webhookv3/webhookv3_test.go>)
+  are reproduced byte-for-byte.
 - **New provider: Twitch EventSub** (`Provider::Twitch`): HMAC-SHA256 over
   the concatenation of the `Twitch-Eventsub-Message-Id` header, the
   `Twitch-Eventsub-Message-Timestamp` header (RFC 3339, used verbatim), and
@@ -39,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crate's own published test vectors (GitHub, Slack, Stripe, Discord, Dropbox,
   Razorpay, Sentry,
   Standard Webhooks, HubSpot, Zoom, Paddle, Cloudflare, Coinbase, Notion,
-  Square, Xero, Linear, Shopify, LemonSqueezy, Typeform, Twitch) plus an adversarial malformed input, so
+  Square, Xero, Linear, Shopify, LemonSqueezy, Typeform, Twitch, PagerDuty) plus an adversarial malformed input, so
   libFuzzer spends
   its 600s budget mutating around known-good delivery shapes instead of
   rediscovering the header/body input layout from an empty input. Seeds are
