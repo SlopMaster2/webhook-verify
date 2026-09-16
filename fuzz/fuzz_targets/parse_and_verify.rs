@@ -49,6 +49,9 @@
 //!   `v0` comparison parsing.
 //! - `notion-sha256-prefix-delivery` — Notion's official `sha256=` sample value,
 //!   reaching prefix match, hex decode, and the 32-byte gate.
+//! - `typeform-sha256-prefix-signature` — Typeform's documented `sha256=` +
+//!   base64 header shape, reaching prefix match, base64 decode, and the 32-byte
+//!   gate.
 //! - `square-base64-signature` — Square's documented base64 HMAC-SHA256 signature
 //!   over the signed message containing the `request_url`.
 //! - `xero-base64-signature` — Xero's raw base64 HMAC-SHA256 signature (no
@@ -114,6 +117,11 @@ const IMPLEMENTED: &[Provider] = &[
     // Xero is a single-header raw-body HMAC (base64); arbitrary header bytes
     // exercise its base64 parsing path and empty-header rejection.
     Provider::Xero,
+    // Typeform is a single-header raw-body HMAC (`sha256=` prefixed base64);
+    // the loop below exercises its prefix-strip and base64-decode paths, and a
+    // well-formed-shaped attempt below reaches its 32-byte gate and HMAC
+    // comparison.
+    Provider::Typeform,
     // Square needs VerifyOptions::request_url to get past its context check
     // and into the signature path.
     Provider::Square,
@@ -376,6 +384,21 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "X-Notion-Signature".to_string(),
             "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Typeform: a well-formed-shaped `Typeform-Signature` (valid `sha256=`
+    // base64 of 32 bytes) lets arbitrary body bytes reach the 32-byte length
+    // gate and HMAC comparison; without it the loop above mostly fails earlier
+    // on malformed/missing prefix or base64.
+    attempt(
+        Provider::Typeform,
+        &[(
+            "Typeform-Signature".to_string(),
+            "sha256=hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

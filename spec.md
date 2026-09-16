@@ -44,6 +44,7 @@ pub enum Provider {
     Slack,
     Square,
     Twilio,
+    Typeform,
     Discord,
     PayPal,
     SendGrid,
@@ -520,6 +521,33 @@ worked example) and the reference implementations in Twilio's official SDKs
   An explicitly empty parameter list is meaningful (the JSON-body variant
   carries a `bodySHA256` query parameter and signs the URL alone).
 - No timestamp in the signature scheme (`max_age` has no effect).
+
+### Typeform
+
+Source: <https://developers.typeform.com/developers/webhooks/secure-your-webhooks/>
+("Secure your webhooks" — signature verification guidance and reference code
+in Ruby, Node.js, Python, Swift, and PHP).
+
+- Header: `Typeform-Signature: sha256=<base64_hmac>`
+- Signed string: the raw request body bytes, unmodified
+- Algorithm: HMAC-SHA256 keyed with the webhook secret's UTF-8 bytes,
+  **base64**-encoded (standard alphabet, padded), with a literal `sha256=`
+  prefix. The prefix is matched case-sensitively, exactly like GitHub
+  (`spec.md` §3): Typeform's docs and reference code emit only the literal
+  lowercase form.
+- Key: the webhook secret configured via the Typeform Webhooks REST API
+  (the "secret" field on the webhook), used as its UTF-8 bytes verbatim.
+- No timestamp in the signature scheme (`max_age` has no effect); Typeform
+  recommends deduping from the event payload's `event_id` field, which is
+  outside this crate's scope (payload parsing is a non-goal, §1).
+- Test-vector provenance: Typeform's docs describe the scheme and ship
+  reference code (`crypto.createHmac('sha256', secret).update(payload)`
+  `.digest('base64')`, prefixed `sha256=`) but publish no byte-exact
+  example signature, so the implementation is validated against locally
+  constructed, deterministic vectors over exactly the documented construction
+  (the vector's body mirrors the shape of Typeform's documented
+  `form_response` example payload). Replace them if Typeform ever publishes
+  fixed vectors.
 
 ### Discord
 

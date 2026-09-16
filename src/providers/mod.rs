@@ -26,6 +26,7 @@ mod square;
 mod standard_webhooks;
 mod stripe;
 mod twilio;
+mod typeform;
 mod xero;
 mod zoom;
 
@@ -75,6 +76,9 @@ pub enum Provider {
     /// Twilio (HMAC-SHA1 over full URL + sorted form params; needs
     /// `VerifyOptions::request_url` and `VerifyOptions::form_params`).
     Twilio,
+    /// Typeform (`Typeform-Signature`, HMAC-SHA256 over the raw body, base64,
+    /// `sha256=` prefix).
+    Typeform,
     /// Discord (Ed25519 public-key signatures; `Secret` holds a public key).
     ///
     /// Unlike the shared-secret schemes, verification here proves the payload
@@ -163,6 +167,7 @@ impl fmt::Display for Provider {
             Provider::Slack => f.write_str("Slack"),
             Provider::Square => f.write_str("Square"),
             Provider::Twilio => f.write_str("Twilio"),
+            Provider::Typeform => f.write_str("Typeform"),
             Provider::Discord => f.write_str("Discord"),
             Provider::PayPal => f.write_str("PayPal"),
             Provider::SendGrid => f.write_str("SendGrid"),
@@ -212,6 +217,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("slack") => Ok(Provider::Slack),
             n if n.eq_ignore_ascii_case("square") => Ok(Provider::Square),
             n if n.eq_ignore_ascii_case("twilio") => Ok(Provider::Twilio),
+            n if n.eq_ignore_ascii_case("typeform") => Ok(Provider::Typeform),
             n if n.eq_ignore_ascii_case("discord") => Ok(Provider::Discord),
             n if n.eq_ignore_ascii_case("paypal") => Ok(Provider::PayPal),
             n if n.eq_ignore_ascii_case("sendgrid") => Ok(Provider::SendGrid),
@@ -239,7 +245,7 @@ impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `hubspot`, `shopify`, \
-             `slack`, `square`, `twilio`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
+             `slack`, `square`, `twilio`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `lemonsqueezy`, `xero`, or `standardwebhooks` \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
@@ -272,6 +278,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Slack => vec![slack::SIGNATURE_HEADER, slack::TIMESTAMP_HEADER],
         Provider::Square => vec![square::SIGNATURE_HEADER],
         Provider::Twilio => vec![twilio::SIGNATURE_HEADER],
+        Provider::Typeform => vec![typeform::SIGNATURE_HEADER],
         Provider::Discord => {
             vec![discord::SIGNATURE_HEADER, discord::TIMESTAMP_HEADER]
         }
@@ -369,6 +376,7 @@ pub fn verify(
             standard_webhooks::verify(headers, raw_body, secret, &options)
         }
         Provider::Twilio => twilio::verify(headers, raw_body, secret, &options),
+        Provider::Typeform => typeform::verify(headers, raw_body, secret, &options),
         Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, &options),
         Provider::Coinbase => coinbase::verify(headers, raw_body, secret, &options),
         Provider::Dropbox => dropbox::verify(headers, raw_body, secret, &options),
@@ -933,6 +941,7 @@ mod tests {
         assert_eq!(Provider::Slack.to_string(), "Slack");
         assert_eq!(Provider::Square.to_string(), "Square");
         assert_eq!(Provider::Twilio.to_string(), "Twilio");
+        assert_eq!(Provider::Typeform.to_string(), "Typeform");
         assert_eq!(Provider::Discord.to_string(), "Discord");
         assert_eq!(Provider::PayPal.to_string(), "PayPal");
         assert_eq!(Provider::SendGrid.to_string(), "SendGrid");
@@ -986,6 +995,7 @@ mod tests {
             ("slack", Provider::Slack),
             ("square", Provider::Square),
             ("twilio", Provider::Twilio),
+            ("typeform", Provider::Typeform),
             ("discord", Provider::Discord),
             ("paypal", Provider::PayPal),
             ("sendgrid", Provider::SendGrid),
@@ -1023,6 +1033,7 @@ mod tests {
             Provider::Slack,
             Provider::Square,
             Provider::Twilio,
+            Provider::Typeform,
             Provider::Discord,
             Provider::PayPal,
             Provider::SendGrid,
@@ -1090,7 +1101,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 20] {
+    fn provider_list() -> [Provider; 21] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1099,6 +1110,7 @@ mod tests {
             Provider::Slack,
             Provider::Square,
             Provider::Twilio,
+            Provider::Typeform,
             Provider::Discord,
             Provider::PayPal,
             Provider::SendGrid,

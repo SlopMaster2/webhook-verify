@@ -13,12 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`fuzz/corpus/parse_and_verify/`): the CI nightly run now starts from the
   crate's own published test vectors (GitHub, Slack, Stripe, Discord,
   Standard Webhooks, HubSpot, Zoom, Paddle, Cloudflare, Coinbase, Notion,
-  Square, Xero, Linear, Shopify, LemonSqueezy) plus an adversarial malformed input, so
+  Square, Xero, Linear, Shopify, LemonSqueezy, Typeform) plus an adversarial malformed input, so
   libFuzzer spends
   its 600s budget mutating around known-good delivery shapes instead of
   rediscovering the header/body input layout from an empty input. Seeds are
   repo-local only — the `/fuzz` package is excluded from the crates.io
   tarball.
+- **New provider: Typeform** (`Provider::Typeform`): HMAC-SHA256 over the
+  raw body, base64-encoded, delivered in the `Typeform-Signature` header as
+  `sha256=<base64_hmac>` with no timestamp or replay window. Source:
+  <https://developers.typeform.com/developers/webhooks/secure-your-webhooks/>.
 - **New provider: Lemon Squeezy** (`Provider::LemonSqueezy`): HMAC-SHA256 over
   the raw body, bare hex-encoded, delivered in the `X-Signature` header with
   no timestamp or replay window. Source:
