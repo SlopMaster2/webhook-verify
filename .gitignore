@@ -1,2 +1,5 @@
 /target
-Cargo.lock
+# Cargo.lock is committed on purpose (issue #40): the MSRV 1.85 CI job needs a
+# reproducible tree, since fresh resolution can pick transitive deps that
+# require a newer rustc (e.g. yoke-derive 0.8.3). Harmless to downstream
+# consumers of this library crate.

@@ -101,8 +101,8 @@ jobs:
     # a private-key (decryption) operation — and (b) time via x509-parser,
     # whose fix (>=0.3.47) requires Rust 1.88, above this crate's MSRV. See
     # issue #30 for the tracking of these and the gate's promotion to blocking.
-    # Cargo.lock is gitignored (library crate pattern), so it is generated on
-    # the fly before auditing rather than committed.
+    # Cargo.lock is committed (library crate pattern, issue #40) so this job
+    # audits the same tree CI builds; no generate-lockfile step is needed.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -110,7 +110,6 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
-      - run: cargo generate-lockfile
       - run: cargo audit
 
   semver-checks:
