@@ -10,8 +10,12 @@ use core::fmt;
 ///
 /// `Debug` and `Display` print `Secret(**redacted**)` only. The inner value is
 /// deliberately not readable through the public API.
+///
+/// Equality and hashing compare the wrapped key bytes directly, so rotated
+/// secrets can be compared and deduplicated (`HashSet<Secret>`) without the
+/// value ever becoming readable.
 #[must_use]
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
 pub struct Secret(String);
 
 impl Secret {
@@ -64,7 +68,37 @@ mod tests {
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
 
+    #[cfg(feature = "std")]
+    use std::collections::HashSet;
+
+    use core::hash::{Hash, Hasher};
+
     use super::Secret;
+
+    /// Trivial hasher so hash-derived comparisons work without pulling in
+    /// `std`'s `SipHasher` (tests also run under `--no-default-features`).
+    struct DummyHasher(u64);
+
+    impl Hasher for DummyHasher {
+        fn finish(&self) -> u64 {
+            self.0
+        }
+
+        fn write(&mut self, bytes: &[u8]) {
+            for (i, byte) in bytes.iter().enumerate() {
+                self.0 = self
+                    .0
+                    .wrapping_mul(31)
+                    .wrapping_add(*byte as u64 + i as u64);
+            }
+        }
+    }
+
+    fn hash64(secret: &Secret) -> u64 {
+        let mut hasher = DummyHasher(0);
+        secret.hash(&mut hasher);
+        hasher.finish()
+    }
 
     #[test]
     fn debug_and_display_are_redacted() {
@@ -94,5 +128,57 @@ mod tests {
             assert_eq!(format!("{s:?}"), "Secret(**redacted**)");
             assert_eq!(s.as_bytes(), b"shared-secret");
         }
+    }
+
+    #[test]
+    fn equal_secrets_from_any_constructor_compare_equal_and_hash_equal() {
+        let a = Secret::new("rotating-key");
+        let b = Secret::from("rotating-key");
+        let c = Secret::from(String::from("rotating-key"));
+        let d = Secret::from(&String::from("rotating-key"));
+        for pair in [(&a, &b), (&a, &c), (&a, &d), (&b, &c), (&b, &d), (&c, &d)] {
+            assert_eq!(pair.0, pair.1);
+            assert_eq!(hash64(pair.0), hash64(pair.1));
+        }
+    }
+
+    #[test]
+    fn unequal_secrets_compare_unequal() {
+        assert_ne!(Secret::new("key-a"), Secret::new("key-b"));
+    }
+
+    #[test]
+    fn eq_and_hash_stay_in_lockstep() {
+        // Derived `Hash` must agree with derived `PartialEq` exactly.
+        let secrets = [
+            Secret::new(""),
+            Secret::new("a"),
+            Secret::new("ab"),
+            Secret::new("b"),
+            Secret::new("rotating-key"),
+            Secret::new("rotating-keY"),
+        ];
+        for left in &secrets {
+            for right in &secrets {
+                let same = left == right;
+                assert_eq!(
+                    same,
+                    hash64(left) == hash64(right),
+                    "eq and hash disagreed for {:?} vs {:?}",
+                    *left,
+                    *right
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn rotated_secrets_deduplicate_in_a_hash_set() {
+        let mut known = HashSet::new();
+        assert!(known.insert(Secret::new("current-key")));
+        assert!(!known.insert(Secret::new("current-key")));
+        assert!(known.insert(Secret::new("old-key")));
+        assert_eq!(known.len(), 2);
     }
 }
