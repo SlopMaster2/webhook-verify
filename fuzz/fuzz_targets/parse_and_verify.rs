@@ -41,6 +41,10 @@
 //! - `sentry-hex-signature` — Sentry's `Sentry-Hook-Signature` bare-hex HMAC
 //!   shape over the raw body (no prefix, no timestamp), reaching hex decode,
 //!   the 32-byte gate, and HMAC comparison.
+//! - `pagerduty-v1-signature` — the official `go-pagerduty` SDK test vector
+//!   (`X-PagerDuty-Signature` with a `v1=` hex HMAC over the raw body, no
+//!   timestamp), reaching the `v1=` prefix strip, comma-split rotation-list
+//!   parsing, hex decode, the 32-byte gate, and HMAC comparison.
 //! - `standard-webhooks-shape` — the official test-suite delivery (three
 //!   `webhook-*` headers), reaching the `v1,<base64>` split, base64 decode,
 //!   and multi-element comparison.
@@ -188,6 +192,11 @@ const IMPLEMENTED: &[Provider] = &[
     // comparison is built below; arbitrary bytes still exercise the
     // semicolon/key=value splitting, timestamp parsing, and hex-decode paths.
     Provider::Paddle,
+    // PagerDuty is a single-header raw-body HMAC (`v1=` prefixed hex, no
+    // timestamp); arbitrary header bytes exercise its prefix-strip and
+    // hex-decode paths, and a well-formed-shaped attempt below reaches its
+    // 32-byte gate and HMAC comparison.
+    Provider::PagerDuty,
 ];
 
 /// A well-formed secret for each provider's scheme, so the fuzzer reaches the
@@ -578,6 +587,21 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "Sentry-Hook-Signature".to_string(),
             "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // PagerDuty: a well-formed-shaped `X-PagerDuty-Signature` (`v1=` prefix,
+    // valid hex sig, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison, including the comma-split rotation-list
+    // parsing path when a second `v1=` element is appended.
+    attempt(
+        Provider::PagerDuty,
+        &[(
+            "X-PagerDuty-Signature".to_string(),
+            "v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

@@ -66,6 +66,7 @@
 //! | PayPal | RSASSA-PKCS1-v1_5 SHA-256, X.509 cert + webhook ID |
 //! | SendGrid | ECDSA P-256 over `{timestamp}{raw_body}` (no separator) |
 //! | Paddle | HMAC-SHA256 over `{ts}:{raw_body}`, hex, `Paddle-Signature` + tolerance window |
+//! | PagerDuty | HMAC-SHA256 over raw body, hex, `v1=` prefix, `X-PagerDuty-Signature` (`v1=` rotation list) |
 //! | Linear | HMAC-SHA256, `linear-signature` |
 //! | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` |
 //! | Zoom | HMAC-SHA256 `v0=` scheme + timestamp |

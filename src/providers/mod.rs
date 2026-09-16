@@ -17,6 +17,7 @@ mod lemonsqueezy;
 mod linear;
 mod notion;
 mod paddle;
+mod pagerduty;
 #[cfg(feature = "paypal")]
 mod paypal;
 mod razorpay;
@@ -120,6 +121,14 @@ pub enum Provider {
     /// rejected when the included timestamp differs from the verifying
     /// clock's "now" by more than [`VerifyOptions::max_age`] (default 300s).
     Paddle,
+    /// PagerDuty v3 webhooks (`X-PagerDuty-Signature`, HMAC-SHA256 over the
+    /// raw body, hex, `v1=` prefix; no timestamp).
+    ///
+    /// Multiple `v1=` values may be present, comma-separated, during secret
+    /// rotation; a match on *any* is accepted (matching PagerDuty's official
+    /// Go SDK). No timestamp rides in the header, so `max_age` has no effect
+    /// for this provider.
+    PagerDuty,
     /// Linear (`linear-signature`, HMAC-SHA256).
     Linear,
     /// Notion (`X-Notion-Signature`, HMAC-SHA256 over the raw body, hex,
@@ -197,6 +206,7 @@ impl fmt::Display for Provider {
             Provider::PayPal => f.write_str("PayPal"),
             Provider::SendGrid => f.write_str("SendGrid"),
             Provider::Paddle => f.write_str("Paddle"),
+            Provider::PagerDuty => f.write_str("PagerDuty"),
             Provider::Linear => f.write_str("Linear"),
             Provider::Notion => f.write_str("Notion"),
             Provider::Zoom => f.write_str("Zoom"),
@@ -254,6 +264,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("paypal") => Ok(Provider::PayPal),
             n if n.eq_ignore_ascii_case("sendgrid") => Ok(Provider::SendGrid),
             n if n.eq_ignore_ascii_case("paddle") => Ok(Provider::Paddle),
+            n if n.eq_ignore_ascii_case("pagerduty") => Ok(Provider::PagerDuty),
             n if n.eq_ignore_ascii_case("linear") => Ok(Provider::Linear),
             n if n.eq_ignore_ascii_case("notion") => Ok(Provider::Notion),
             n if n.eq_ignore_ascii_case("zoom") => Ok(Provider::Zoom),
@@ -287,7 +298,7 @@ impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
         "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `shopify`, \
-             `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
+             `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
@@ -373,6 +384,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         #[cfg(not(feature = "sendgrid"))]
         Provider::SendGrid => Vec::new(),
         Provider::Paddle => vec![paddle::SIGNATURE_HEADER],
+        Provider::PagerDuty => vec![pagerduty::SIGNATURE_HEADER],
     }
 }
 
@@ -446,6 +458,7 @@ pub fn verify(
         #[cfg(not(feature = "sendgrid"))]
         Provider::SendGrid => Err(VerifyError::UnsupportedProvider),
         Provider::Paddle => paddle::verify(headers, raw_body, secret, &options),
+        Provider::PagerDuty => pagerduty::verify(headers, raw_body, secret, &options),
         Provider::Custom(scheme) => custom::verify(&scheme, headers, raw_body, secret, &options),
     }
 }
@@ -1003,6 +1016,7 @@ mod tests {
         assert_eq!(Provider::PayPal.to_string(), "PayPal");
         assert_eq!(Provider::SendGrid.to_string(), "SendGrid");
         assert_eq!(Provider::Paddle.to_string(), "Paddle");
+        assert_eq!(Provider::PagerDuty.to_string(), "PagerDuty");
         assert_eq!(Provider::Linear.to_string(), "Linear");
         assert_eq!(Provider::Notion.to_string(), "Notion");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
@@ -1061,6 +1075,7 @@ mod tests {
             ("paypal", Provider::PayPal),
             ("sendgrid", Provider::SendGrid),
             ("paddle", Provider::Paddle),
+            ("pagerduty", Provider::PagerDuty),
             ("linear", Provider::Linear),
             ("notion", Provider::Notion),
             ("zoom", Provider::Zoom),
@@ -1105,6 +1120,7 @@ mod tests {
             Provider::PayPal,
             Provider::SendGrid,
             Provider::Paddle,
+            Provider::PagerDuty,
             Provider::Linear,
             Provider::Notion,
             Provider::Zoom,
@@ -1170,7 +1186,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 25] {
+    fn provider_list() -> [Provider; 26] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1186,6 +1202,7 @@ mod tests {
             Provider::PayPal,
             Provider::SendGrid,
             Provider::Paddle,
+            Provider::PagerDuty,
             Provider::Linear,
             Provider::Notion,
             Provider::Zoom,
