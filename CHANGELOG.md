@@ -159,6 +159,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   providers and the `tower`/`actix`/`http` adapters) with the crate feature
   they require, via `doc_auto_cfg` + the `docsrs` rustdoc cfg. Local/stable
   builds are unaffected (the cfg is set only on docs.rs).
+- [`Provider`](crate::Provider) `FromStr` now also accepts the
+  space-separated human-readable spellings used in the docs for the two
+  providers whose `Display` name runs words together: `"lemon squeezy"` and
+  `"standard webhooks"` (both case-insensitive, like every name). These match
+  the product names operators see in `spec.md`/`README.md`, so a
+  config-driven `"Lemon Squeezy".parse::<Provider>()` no longer fails.
 
 ### Changed
 
