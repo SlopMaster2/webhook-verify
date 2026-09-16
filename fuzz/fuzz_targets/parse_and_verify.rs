@@ -4,6 +4,35 @@
 //!
 //! Correctness is covered by the per-provider vector tests; this target exists
 //! purely to assert **no panic and no timeout** on adversarial input.
+//!
+//! # Seed corpus (`fuzz/corpus/parse_and_verify/`)
+//!
+//! The timed nightly run starts its exploration from the committed seeds, so
+//! libFuzzer mutates known-good input *shapes* instead of rediscovering the
+//! `Name: value` / blank-line / body layout from an empty input. Each seed is
+//! a public test vector already committed in `src/providers/*` test modules or
+//! this target's own constants, chosen so the parsed header/body reaches a
+//! distinct provider path:
+//!
+//! - `github-valid-delivery` — GitHub's documented example (docs.github.com),
+//!   parser-well-formed (`Name:value`, no space) so the `sha256=` prefix, hex
+//!   decode, 32-byte gate, and constant-time HMAC comparison all run.
+//! - `github-malformed-prefix` — the same vector in the `Name: value` spelling
+//!   real HTTP uses; the leading space exercises the missing-`sha256=` prefix
+//!   fail-closed branch for every exact-prefix provider (GitHub, Slack, Zoom).
+//! - `slack-timestamped-delivery` — Slack's documented worked example
+//!   (docs.slack.dev), reaching the `v0=` scheme, timestamp parse, and HMAC
+//!   comparison over `v0:{ts}:{body}`.
+//! - `stripe-comma-space-signature` — the combined `Stripe-Signature` header in
+//!   the comma-space spelling real integrations emit, exercising key trim and
+//!   the `t.{body}` signed-string construction.
+//! - `discord-ed25519-shape` — Discord's two-header shape with a 128-hex-char
+//!   signature, reaching Ed25519 signature decode and verification.
+//! - `standard-webhooks-shape` — the official test-suite delivery (three
+//!   `webhook-*` headers), reaching the `v1,<base64>` split, base64 decode,
+//!   and multi-element comparison.
+//! - `header-garbage-without-body-separator` — an adversarial malformed input
+//!   with no `\n\n` separator, anchoring the parser's fail-closed paths.
 
 #![no_main]
 

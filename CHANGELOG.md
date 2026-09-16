@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A seed corpus for the `parse_and_verify` fuzz target
+  (`fuzz/corpus/parse_and_verify/`): the CI nightly run now starts from the
+  crate's own published test vectors (GitHub, Slack, Stripe, Discord,
+  Standard Webhooks) plus an adversarial malformed input, so libFuzzer spends
+  its 600s budget mutating around known-good delivery shapes instead of
+  rediscovering the header/body input layout from an empty input. Seeds are
+  repo-local only — the `/fuzz` package is excluded from the crates.io
+  tarball.
 - [`Secret`](crate::Secret) now derives `PartialEq`, `Eq`, and `Hash`. This
   is the one remaining caller-facing key-material type lacking the equality
   contract that `VerifyError`/`ProviderParseError`/`VerifyingKeyMaterial`
