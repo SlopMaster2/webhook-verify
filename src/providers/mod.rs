@@ -5,6 +5,7 @@
 //! vectors. Feature-disabled providers fail closed with
 //! [`VerifyError::UnsupportedProvider`].
 
+mod bitbucket;
 mod cloudflare;
 mod coinbase;
 mod custom;
@@ -64,6 +65,9 @@ pub enum Provider {
     Stripe,
     /// GitHub (`X-Hub-Signature-256`, HMAC-SHA256 over the raw body).
     GitHub,
+    /// Bitbucket Cloud (`X-Hub-Signature`, HMAC-SHA256 over the raw body,
+    /// `sha256=` prefix; no timestamp).
+    Bitbucket,
     /// HubSpot (`X-HubSpot-Signature-V3`, HMAC-SHA256 over
     /// `{method}{uri}{raw_body}{timestamp}` with `X-HubSpot-Request-Timestamp`
     /// in epoch ms; needs `VerifyOptions::request_method` and
@@ -171,6 +175,7 @@ impl fmt::Display for Provider {
         match self {
             Provider::Stripe => f.write_str("Stripe"),
             Provider::GitHub => f.write_str("GitHub"),
+            Provider::Bitbucket => f.write_str("Bitbucket"),
             Provider::HubSpot => f.write_str("HubSpot"),
             Provider::Shopify => f.write_str("Shopify"),
             Provider::Slack => f.write_str("Slack"),
@@ -226,6 +231,7 @@ impl core::str::FromStr for Provider {
         match name {
             n if n.eq_ignore_ascii_case("stripe") => Ok(Provider::Stripe),
             n if n.eq_ignore_ascii_case("github") => Ok(Provider::GitHub),
+            n if n.eq_ignore_ascii_case("bitbucket") => Ok(Provider::Bitbucket),
             n if n.eq_ignore_ascii_case("hubspot") => Ok(Provider::HubSpot),
             n if n.eq_ignore_ascii_case("shopify") => Ok(Provider::Shopify),
             n if n.eq_ignore_ascii_case("slack") => Ok(Provider::Slack),
@@ -268,7 +274,7 @@ pub struct ProviderParseError;
 impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
-            "unknown provider name: expected one of `stripe`, `github`, `hubspot`, `shopify`, \
+            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `shopify`, \
              `slack`, `square`, `twilio`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `linear`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, or `standardwebhooks` (or `standard webhooks`) \
@@ -296,6 +302,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
     match provider {
         Provider::Stripe => vec![stripe::SIGNATURE_HEADER],
         Provider::GitHub => vec![github::SIGNATURE_HEADER],
+        Provider::Bitbucket => vec![bitbucket::SIGNATURE_HEADER],
         Provider::HubSpot => {
             vec![hubspot::SIGNATURE_HEADER, hubspot::TIMESTAMP_HEADER]
         }
@@ -391,6 +398,7 @@ pub fn verify(
     match provider {
         Provider::Discord => discord::verify(headers, raw_body, secret, &options),
         Provider::GitHub => github::verify(headers, raw_body, secret, &options),
+        Provider::Bitbucket => bitbucket::verify(headers, raw_body, secret, &options),
         Provider::HubSpot => hubspot::verify(headers, raw_body, secret, &options),
         Provider::Linear => linear::verify(headers, raw_body, secret, &options),
         Provider::Notion => notion::verify(headers, raw_body, secret, &options),
@@ -965,6 +973,7 @@ mod tests {
 
         assert_eq!(Provider::Stripe.to_string(), "Stripe");
         assert_eq!(Provider::GitHub.to_string(), "GitHub");
+        assert_eq!(Provider::Bitbucket.to_string(), "Bitbucket");
         assert_eq!(Provider::HubSpot.to_string(), "HubSpot");
         assert_eq!(Provider::Shopify.to_string(), "Shopify");
         assert_eq!(Provider::Slack.to_string(), "Slack");
@@ -1021,6 +1030,7 @@ mod tests {
         let cases = [
             ("stripe", Provider::Stripe),
             ("github", Provider::GitHub),
+            ("bitbucket", Provider::Bitbucket),
             ("hubspot", Provider::HubSpot),
             ("shopify", Provider::Shopify),
             ("slack", Provider::Slack),
@@ -1063,6 +1073,7 @@ mod tests {
         let providers = [
             Provider::Stripe,
             Provider::GitHub,
+            Provider::Bitbucket,
             Provider::HubSpot,
             Provider::Shopify,
             Provider::Slack,
@@ -1138,10 +1149,11 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 23] {
+    fn provider_list() -> [Provider; 24] {
         [
             Provider::Stripe,
             Provider::GitHub,
+            Provider::Bitbucket,
             Provider::HubSpot,
             Provider::Shopify,
             Provider::Slack,

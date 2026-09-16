@@ -20,6 +20,9 @@
 //! - `github-malformed-prefix` — the same vector in the `Name: value` spelling
 //!   real HTTP uses; the leading space exercises the missing-`sha256=` prefix
 //!   fail-closed branch for every exact-prefix provider (GitHub, Slack, Zoom).
+//! - `bitbucket-hub-signature` — Bitbucket Cloud's documented worked example
+//!   (support.atlassian.com), reaching the `X-Hub-Signature` `sha256=` prefix,
+//!   hex decode, 32-byte gate, and constant-time HMAC comparison.
 //! - `slack-timestamped-delivery` — Slack's documented worked example
 //!   (docs.slack.dev), reaching the `v0=` scheme, timestamp parse, and HMAC
 //!   comparison over `v0:{ts}:{body}`.
@@ -96,6 +99,11 @@ const MAX_HEADER_LINES: usize = 64;
 const IMPLEMENTED: &[Provider] = &[
     Provider::Stripe,
     Provider::GitHub,
+    // Bitbucket is a single-header raw-body HMAC (`sha256=` prefixed hex, no
+    // timestamp); arbitrary header bytes exercise its prefix-strip, hex-decode,
+    // and 32-byte gate, and a well-formed-shaped attempt below reaches HMAC
+    // comparison.
+    Provider::Bitbucket,
     // HubSpot needs both a method and a URL in VerifyOptions to get past its
     // context check and into the signature path; arbitrary header bytes
     // exercise its header splitting and MissingContext fail-closed paths, and
@@ -398,6 +406,21 @@ fuzz_target!(|data: &[u8]| {
                 "time=1700000000,sig1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
             ),
         ],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Bitbucket: a well-formed-shaped `X-Hub-Signature` (valid `sha256=`
+    // hex) lets arbitrary body bytes reach the 32-byte length gate and HMAC
+    // comparison; without it the loop above mostly fails earlier on
+    // malformed/missing prefix or hex.
+    attempt(
+        Provider::Bitbucket,
+        &[(
+            "X-Hub-Signature".to_string(),
+            "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,
