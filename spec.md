@@ -39,6 +39,7 @@ and the testing bar every provider implementation must clear before merge.
 pub enum Provider {
     Stripe,
     GitHub,
+    Bitbucket,
     HubSpot,
     Shopify,
     Slack,
@@ -328,6 +329,38 @@ body, multi-value headers, etc.).
   this explicitly rather than silently ignoring the option.
 - Legacy `X-Hub-Signature` (SHA1) supported only via `CustomScheme` — not a
   default path, since GitHub itself deprecated SHA1.
+
+### Bitbucket
+
+Source: <https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/>
+(Bitbucket Cloud's "Manage webhooks" documentation: the `X-Hub-Signature`
+header format, the raw-body signing rule, and the "Testing the webhook payload
+validation" worked example) and the webhooks-security overview
+(<https://www.atlassian.com/blog/bitbucket/enhanced-webhook-security>).
+
+- Header: `X-Hub-Signature: sha256=<hex_hmac>` — formatted as WebSub's
+  `method=signature`, with `sha256` the only method Bitbucket sends today.
+- Signed string: raw body bytes, unmodified — the docs stress that "the
+  payload is passed verbatim into the HMAC generation" and that reformatting
+  the body produces a different signature.
+- Algorithm: HMAC-SHA256, hex-encoded. Key: the webhook's configured secret
+  token as its UTF-8 bytes.
+- The `sha256=` prefix is matched case-sensitively, exactly like GitHub —
+  WebSub method names are lowercase and Bitbucket's docs and examples emit
+  only the literal lowercase form. Bitbucket's docs warn they "might use
+  another hash in the future"; an unknown method then fails closed as
+  `MalformedHeader`, never silently mis-verified.
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub. The `X-Hub-Signature` header exists only when a secret is
+  configured on the webhook (`spec.md` §1); webhooks without a secret send no
+  header and `verify()` reports `MissingHeader`.
+- Test-vector provenance: Bitbucket's docs publish the exact worked-example
+  values for `secret`, `payload`, and expected signature (`It's a Secret to
+  Everybody` / `Hello World!` / `a4771c39...263c9`), reproduced byte-for-byte;
+  the docs' JavaScript sample additionally publishes a JSON payload + expected
+  signature that the implementation reproduces byte-for-byte. Boundary-vector
+  bodies are locally constructed over the same documented recipe, cross-checked
+  with `openssl dgst`.
 
 ### HubSpot
 

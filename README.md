@@ -87,6 +87,7 @@ hand-copied signing-string logic to get wrong.
 |---|---|---|
 | Stripe | HMAC-SHA256 over `timestamp.body`, tolerance window | ✅ |
 | GitHub | HMAC-SHA256, `X-Hub-Signature-256` | ✅ |
+| Bitbucket | HMAC-SHA256, `sha256=` prefix, `X-Hub-Signature` | ✅ |
 | HubSpot | HMAC-SHA256 over `{method}{uri}{body}{timestamp}` (epoch ms), base64, `X-HubSpot-Signature-V3` + replay window (needs `VerifyOptions::request_method` + `request_url`; pass the URI in the same decoded form HubSpot signed — it URL-decodes certain characters, `spec.md` §3) | ✅ |
 | Shopify | HMAC-SHA256, base64, `X-Shopify-Hmac-Sha256` | ✅ |
 | Slack | HMAC-SHA256 `v0=` scheme, `X-Slack-Signature` + timestamp + replay window | ✅ |

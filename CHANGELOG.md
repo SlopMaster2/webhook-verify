@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Bitbucket Cloud** (`Provider::Bitbucket`): HMAC-SHA256 over
+  the raw body, hex-encoded, delivered in the `X-Hub-Signature` header as
+  `sha256=<hex_hmac>` (the WebSub `method=signature` format) with no timestamp
+  or replay window. The exact `sha256=` prefix is matched case-sensitively,
+  mirroring GitHub; an unknown `method` fails closed instead of being
+  mis-verified. Source:
+  <https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/>.
 - **New provider: Sentry** (`Provider::Sentry`): HMAC-SHA256 over the raw
   body, bare hex-encoded, delivered in the `Sentry-Hook-Signature` header,
   keyed by the integration's Client Secret, with no timestamp or replay
