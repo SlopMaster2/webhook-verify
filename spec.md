@@ -63,6 +63,7 @@ pub enum Provider {
     Xero,
     Sentry,
     Adyen,
+    Mux,
     StandardWebhooks,
     Custom(CustomScheme),
 }
