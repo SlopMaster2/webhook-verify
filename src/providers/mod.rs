@@ -7,6 +7,7 @@
 
 mod adyen;
 mod bitbucket;
+mod calendly;
 mod cloudflare;
 mod coinbase;
 mod custom;
@@ -228,6 +229,17 @@ pub enum Provider {
     /// its UTF-8 bytes. No timestamp rides in the header, so `max_age` has no
     /// effect for this provider.
     WooCommerce,
+    /// Calendly (`Calendly-Webhook-Signature`, HMAC-SHA256 over `t.body`, hex,
+    /// `t=...;v1=...` list).
+    ///
+    /// The signed string reuses the `t` value *exactly as sent*, a literal
+    /// dot, then the raw body. The timestamp is HMAC-covered, so the shared
+    /// `max_age` replay window applies. Calendly's docs use a 180-second
+    /// tolerance; callers can match it with
+    /// `VerifyOptions::with_max_age(Some(Duration::from_secs(180)))` (the crate
+    /// default is 300s). Only a single `v1` signature is accepted — Calendly's
+    /// docs define no rotation list.
+    Calendly,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -280,6 +292,7 @@ impl fmt::Display for Provider {
             Provider::Zendesk => f.write_str("Zendesk"),
             Provider::WorkOS => f.write_str("WorkOS"),
             Provider::WooCommerce => f.write_str("WooCommerce"),
+            Provider::Calendly => f.write_str("Calendly"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -348,6 +361,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("zendesk") => Ok(Provider::Zendesk),
             n if n.eq_ignore_ascii_case("workos") => Ok(Provider::WorkOS),
             n if n.eq_ignore_ascii_case("woocommerce") => Ok(Provider::WooCommerce),
+            n if n.eq_ignore_ascii_case("calendly") => Ok(Provider::Calendly),
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks") =>
             {
@@ -370,7 +384,7 @@ impl fmt::Display for ProviderParseError {
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
              `launchdarkly`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, or `standardwebhooks` (or `standard webhooks`) \
+             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -427,6 +441,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Zendesk => vec![zendesk::SIGNATURE_HEADER, zendesk::TIMESTAMP_HEADER],
         Provider::WorkOS => vec![workos::SIGNATURE_HEADER],
         Provider::WooCommerce => vec![woocommerce::SIGNATURE_HEADER],
+        Provider::Calendly => vec![calendly::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -552,6 +567,7 @@ pub(crate) fn verify_ref(
         Provider::Zendesk => zendesk::verify(headers, raw_body, secret, options),
         Provider::WorkOS => workos::verify(headers, raw_body, secret, options),
         Provider::WooCommerce => woocommerce::verify(headers, raw_body, secret, options),
+        Provider::Calendly => calendly::verify(headers, raw_body, secret, options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, options),
         #[cfg(not(feature = "paypal"))]
@@ -1141,6 +1157,7 @@ mod tests {
         assert_eq!(Provider::Zendesk.to_string(), "Zendesk");
         assert_eq!(Provider::WorkOS.to_string(), "WorkOS");
         assert_eq!(Provider::WooCommerce.to_string(), "WooCommerce");
+        assert_eq!(Provider::Calendly.to_string(), "Calendly");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1207,6 +1224,7 @@ mod tests {
             ("zendesk", Provider::Zendesk),
             ("workos", Provider::WorkOS),
             ("woocommerce", Provider::WooCommerce),
+            ("calendly", Provider::Calendly),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1257,6 +1275,7 @@ mod tests {
             Provider::Zendesk,
             Provider::WorkOS,
             Provider::WooCommerce,
+            Provider::Calendly,
             Provider::StandardWebhooks,
         ];
         for provider in providers {
@@ -1312,7 +1331,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 32] {
+    fn provider_list() -> [Provider; 33] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1345,6 +1364,7 @@ mod tests {
             Provider::Zendesk,
             Provider::WorkOS,
             Provider::WooCommerce,
+            Provider::Calendly,
             Provider::StandardWebhooks,
         ]
     }

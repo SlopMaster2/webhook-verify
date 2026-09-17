@@ -68,6 +68,7 @@ pub enum Provider {
     Zendesk,
     WorkOS,
     WooCommerce,
+    Calendly,
     StandardWebhooks,
     Custom(CustomScheme),
 }
@@ -1294,6 +1295,51 @@ that the signature is calculated after the body has already been encoded").
   implementation is validated against locally constructed, deterministic
   vectors over exactly the documented recipe, cross-checked with OpenSSL.
   Replace them if WooCommerce ever publishes fixed vectors.
+
+### Calendly
+
+Source:
+<https://developer.calendly.com/api-docs/overview/webhooks/webhook-signatures>
+("Webhook Signatures": the `Calendly-Webhook-Signature` header format, the
+`t + '.' + request.body` signed-string construction, the HMAC-SHA256 recipe,
+and the 3-minute replay-tolerance example), corroborated by the webhook
+subscription guide
+(<https://developer.calendly.com/docs/api-guides/receive-data-from-scheduled-events-in-real-time-with-webhook-subscriptions>).
+
+- Header: `Calendly-Webhook-Signature: t=<unix_ts>,v1=<hex_hmac>` — a
+  comma-separated `key=value` list. `t` is the integer unix-seconds value set
+  by the server; `v1` is the HMAC-SHA256 signature over `{t}.{raw_body}` and is
+  the only scheme the docs define.
+- Signed string: `"{t}.{raw_body}"` — the `t` value exactly as it appears in
+  the header, a literal dot, then the raw request body bytes, unmodified (the
+  docs' reference implementations concatenate `t + '.' + request.body` and warn
+  that parsing the JSON payload before verification breaks the signature).
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded, carried bare in
+  the header (no `sha256=` prefix).
+- Key: the subscription's webhook signing key as a plain UTF-8 string (never
+  decoded), matching the docs' reference implementations.
+- Timestamp validation routes through the shared pure-ASCII-digit parser:
+  sign-prefixed (`t=+1700000000`), whitespace-padded, empty, or overflowing
+  values fail closed as `MalformedHeader`.
+- Duplicate `t` or `v1` elements are rejected as ambiguous (`spec.md` §4.4) —
+  never last-wins like the docs' reference code. Calendly's docs define exactly
+  one signature element and no rotation window, so a second `v1=` is treated as
+  malformed rather than rotation (matching the WorkOS/Coinbase treatment of
+  their single signature fields). Unknown elements are discarded for forward
+  compatibility.
+- Replay protection: Calendly's docs demonstrate a 180-second tolerance
+  (`three_minutes = 180`), so the shared symmetric `|now - t| > max_age`
+  semantics apply; the crate default is 300s and callers wanting the documented
+  zone set `max_age` to 180s explicitly. The future-dated half of the symmetry
+  is stricter than the docs' examples enforce but cannot reject legitimate
+  deliveries.
+- Test-vector provenance: Calendly publishes the example header
+  (`t=1492774577,v1=5257a869...b8bd`) but no body or signing key, so the
+  implementation is validated against locally constructed, deterministic
+  vectors over exactly the documented construction, cross-checked across
+  OpenSSL and Python. The docs' published example header is replayed as a
+  well-formed-but-mismatching input. Replace them if Calendly ever publishes
+  fixed vectors.
 
 ### Standard Webhooks spec
 
