@@ -67,6 +67,7 @@ pub enum Provider {
     Mux,
     Zendesk,
     WorkOS,
+    WooCommerce,
     StandardWebhooks,
     Custom(CustomScheme),
 }
