@@ -330,6 +330,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Twitch: an empty `Twitch-Eventsub-Message-Id` now fails closed as
+  `MalformedHeader`.** The message id stays opaque — no UUID/format grammar
+  is imposed, and a garbage value is still signed verbatim and verifies only
+  against a signature made over that exact value — but an empty value is
+  never a legitimate Twitch delivery. It previously flowed into the signed
+  string and surfaced as `SignatureMismatch`; it is now rejected as
+  `MalformedHeader` ("header is empty"), matching the fail-closed treatment
+  of Standard Webhooks' opaque `webhook-id` (`spec.md` §3, §4.4). Adds the
+  §5.5 empty-value and garbage-value tests the provider was missing.
 - The `parse_and_verify` fuzz target now drives constant-time-shape attempts
   for the five raw-body single-header providers that previously only ran with
   arbitrary fuzz-input headers — Dropbox, LemonSqueezy, Linear, Shopify, and

@@ -69,6 +69,17 @@ pub(crate) fn verify(
         .ok_or(VerifyError::MissingHeader {
             header: MESSAGE_ID_HEADER,
         })?;
+    // The id is otherwise opaque (no format grammar is imposed), but a
+    // present-but-empty value is never a legitimate Twitch delivery and is
+    // rejected as malformed rather than surfaced as a signature mismatch —
+    // matching the fail-closed treatment of Standard Webhooks' opaque
+    // `webhook-id` (`spec.md` §3).
+    if message_id.is_empty() {
+        return Err(VerifyError::MalformedHeader {
+            header: MESSAGE_ID_HEADER,
+            reason: "header is empty",
+        });
+    }
     let timestamp_raw = headers
         .get(TIMESTAMP_HEADER)
         .ok_or(VerifyError::MissingHeader {
@@ -185,6 +196,14 @@ mod tests {
     /// `printf '%s' "$ID2$TS$BODY..." | openssl dgst -sha256 -hmac "twitch_webhook_secret"`
     const MESSAGE_ID_2_SIGNATURE: &str =
         "7833bbb41cb8aaaec7b3ac81c4a4eb178f33c9cf68021e42af5fde20b727a74f";
+    /// A deliberately non-UUID id: the id is opaque, so any non-empty value is
+    /// well-formed and must ride verbatim into the signed string.
+    const GARBAGE_ID: &str = "garbage-id!!@#$%^&*()";
+    /// Locally constructed over `GARBAGE_ID + TIMESTAMP + BODY` (proving the
+    /// opaque id is signed verbatim):
+    /// `printf '%s' "$GARBAGE$TS$BODY..." | openssl dgst -sha256 -hmac "twitch_webhook_secret"`
+    const GARBAGE_ID_SIGNATURE: &str =
+        "ee93a7009b27e1b493d81ded8f8a6ca9781906cfe036a007eeed62b466a85ff5";
 
     fn twitch_headers(message_id: &str, signature: &str) -> Vec<(String, String)> {
         vec![
@@ -306,6 +325,42 @@ mod tests {
         // id must fail even though the id itself is never parsed.
         assert_eq!(
             verify_fresh(MESSAGE_ID_2, BODY, SIGNATURE),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn malformed_message_id_header_errors_distinctly() {
+        // §5.5's empty-value case for the id. The id has no format grammar
+        // (any non-empty value is opaque), but an empty identifier is never a
+        // legitimate Twitch delivery, so it fails closed as MalformedHeader
+        // rather than surfacing as a signature mismatch.
+        let result = verify_with(
+            "",
+            BODY,
+            &format!("sha256={SIGNATURE}"),
+            TIMESTAMP,
+            clocked_at(1_767_225_600, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(
+            result,
+            Err(VerifyError::MalformedHeader {
+                header: MESSAGE_ID_HEADER,
+                reason: "header is empty",
+            })
+        );
+    }
+
+    #[test]
+    fn garbage_value_message_id_is_opaque_and_signed_verbatim() {
+        // §5.5's garbage-value case for the id: unlike the signature and
+        // timestamp headers, the id has no defined format to parse — any
+        // non-empty value is well-formed. A garbage id must (a) NOT be
+        // rejected as MalformedHeader and (b) verify only against a signature
+        // made over that exact id, never against one made over the real id.
+        assert_eq!(verify_fresh(GARBAGE_ID, BODY, GARBAGE_ID_SIGNATURE), Ok(()));
+        assert_eq!(
+            verify_fresh(GARBAGE_ID, BODY, SIGNATURE),
             Err(VerifyError::SignatureMismatch)
         );
     }

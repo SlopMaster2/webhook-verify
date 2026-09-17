@@ -620,8 +620,14 @@ is locally constructed over exactly the documented construction.
   configured secret as its UTF-8 bytes.
 - The `sha256=` prefix is matched case-sensitively, exactly like GitHub and
   Bitbucket; an unknown scheme fails closed as `MalformedHeader`.
-- Message id has no grammar to validate here: it is opaque, and its only
-  contract is that the verifying side re-signs the exact bytes it received.
+- Message id has no format grammar to validate here: it is opaque, and its
+  only contract is that the verifying side re-signs the exact bytes it
+  received (so a garbage value verifies only against a signature made over
+  that exact value, never against one made over the real id). A
+  present-but-empty value is rejected as `MalformedHeader` ("header is
+  empty") — an empty identifier is never a legitimate Twitch delivery, and
+  this matches the fail-closed treatment of Standard Webhooks' opaque
+  `webhook-id` (`spec.md` §4.4).
 - Replay protection: the timestamp header is parsed through the shared RFC
   3339 parser (sub-second precision truncated) and checked against the shared
   symmetric `|now - t| <= max_age` window (default 300s), as with Zoom and
