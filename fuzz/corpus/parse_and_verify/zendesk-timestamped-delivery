@@ -1,0 +1,4 @@
+X-Zendesk-Webhook-Signature:AIKe20cG9E5XJyLFwhJV65AB0VqYImb600SJaS0Q5kI=
+X-Zendesk-Webhook-Signature-Timestamp:2021-03-25T05:09:27Z
+
+{"zen:event-type":"zen:event-type:ticket.created","webhook_id":"01F1KRFQ6BG29CNWFR60NK5FNY","account_id":"123456","ticket":{"id":61241563692,"subject":"Customer inquiry","status":"new"}}
