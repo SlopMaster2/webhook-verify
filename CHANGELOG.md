@@ -529,6 +529,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `.cargo/audit.toml`, and the job is **blocking** again — a new advisory
   will fail CI and be triaged, while the three accepted ones carry an audit
   trail and re-evaluation triggers instead of failing every run.
+- The `fmt` CI gate now also checks the `fuzz/` crate: it is a separate
+  package (not a workspace member), so the root `cargo fmt --all -- --check`
+  never saw it and the fuzz target had silently drifted out of rustfmt
+  style. The job now runs `cargo fmt --manifest-path fuzz/Cargo.toml -- --check`
+  after the root check (rustfmt needs no nightly/libfuzzer build), and the
+  target is reformatted. No behavior, seed bytes, or crate code affected.
 
 ## [0.1.0] - Unreleased
 

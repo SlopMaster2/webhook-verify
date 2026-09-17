@@ -72,6 +72,12 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+      # fuzz/ is a separate package, not a workspace member, so the root
+      # `cargo fmt --all` above never sees it — its fmt drift was invisible
+      # to this gate. Check it explicitly so the fuzz target is held to the
+      # same formatting bar as the crate itself (spans don't need nightly;
+      # rustfmt runs without building or resolving the libfuzzer dependency).
+      - run: cargo fmt --manifest-path fuzz/Cargo.toml -- --check
 
   secret-leak-grep:
     name: no secret material in logs/panics
