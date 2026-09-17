@@ -1243,42 +1243,7 @@ mod tests {
 
     #[test]
     fn provider_display_round_trips_through_from_str() {
-        let providers = [
-            Provider::Stripe,
-            Provider::GitHub,
-            Provider::Bitbucket,
-            Provider::HubSpot,
-            Provider::Shopify,
-            Provider::Slack,
-            Provider::Square,
-            Provider::Twilio,
-            Provider::Twitch,
-            Provider::Typeform,
-            Provider::Discord,
-            Provider::PayPal,
-            Provider::SendGrid,
-            Provider::Paddle,
-            Provider::PagerDuty,
-            Provider::Linear,
-            Provider::LaunchDarkly,
-            Provider::Notion,
-            Provider::Zoom,
-            Provider::Cloudflare,
-            Provider::Coinbase,
-            Provider::Dropbox,
-            Provider::Razorpay,
-            Provider::LemonSqueezy,
-            Provider::Xero,
-            Provider::Sentry,
-            Provider::Adyen,
-            Provider::Mux,
-            Provider::Zendesk,
-            Provider::WorkOS,
-            Provider::WooCommerce,
-            Provider::Calendly,
-            Provider::StandardWebhooks,
-        ];
-        for provider in providers {
+        for provider in provider_list() {
             assert_eq!(
                 provider.to_string().parse::<Provider>(),
                 Ok(provider),
@@ -1327,10 +1292,16 @@ mod tests {
         }
     }
 
-    /// Every name-constructible [`Provider`] variant. Kept beside the
-    /// parse-error guard it serves; the display/round-trip tests retain their
-    /// own explicit lists so a mismatch between the two is caught, not
-    /// masked by shared state.
+    /// Every name-constructible [`Provider`] variant, in declaration order.
+    ///
+    /// The single source of truth for the provider-bookkeeping tests: both the
+    /// `Display`/`FromStr` round-trip test and the parse-error message guard
+    /// iterate this list, so a newly added provider is covered by both the
+    /// moment it is listed here. Each test used to keep its own copy, which
+    /// let one list drift out of sync unnoticed (a provider once shipped
+    /// missing from the round-trip list while present here). `Provider::Custom`
+    /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
+    /// from a bare name.
     fn provider_list() -> [Provider; 33] {
         [
             Provider::Stripe,
