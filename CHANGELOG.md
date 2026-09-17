@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Zendesk** (`Provider::Zendesk`): HMAC-SHA256 over
+  `{timestamp}{raw_body}` — the `X-Zendesk-Webhook-Signature-Timestamp` header
+  value exactly as sent (RFC 3339) concatenated with the raw body bytes, no
+  separator — base64-encoded and delivered bare (no `sha256=` prefix) in the
+  `X-Zendesk-Webhook-Signature` header. The signing secret is used verbatim as
+  the HMAC key (Zendesk's reference code never decodes it); the signed
+  timestamp enables the shared symmetric `max_age` replay window. Source:
+  <https://developer.zendesk.com/documentation/webhooks/verifying>
+  ("Verifying webhook authenticity"), corroborated by
+  <https://developer.zendesk.com/documentation/webhooks/anatomy-of-a-webhook-request>.
+  Zendesk publishes no byte-exact example signature, so the vectors are locally
+  constructed over exactly the documented construction using Zendesk's own
+  static test-webhook secret, cross-checked across OpenSSL and Python.
 - **New provider: Mux** (`Provider::Mux`): HMAC-SHA256 over `{t}.{raw_body}`,
   hex-encoded, delivered in the `Mux-Signature` header as a comma-separated
   `t=<unix_ts>,v1=<hex_hmac>` list. Multiple `v1=` values are accepted during

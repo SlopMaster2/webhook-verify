@@ -82,6 +82,10 @@
 //! - `typeform-sha256-prefix-signature` — Typeform's documented `sha256=` +
 //!   base64 header shape, reaching prefix match, base64 decode, and the 32-byte
 //!   gate.
+//! - `zendesk-timestamped-delivery` — Zendesk's two-header shape (bare base64
+//!   signature + RFC 3339 `X-Zendesk-Webhook-Signature-Timestamp`), reaching
+//!   the RFC 3339 timestamp parse and the `{timestamp}{body}` concatenation
+//!   base64 HMAC comparison.
 //! - `square-base64-signature` — Square's documented base64 HMAC-SHA256 signature
 //!   over the signed message containing the `request_url`.
 //! - `xero-base64-signature` — Xero's raw base64 HMAC-SHA256 signature (no
@@ -218,6 +222,10 @@ const IMPLEMENTED: &[Provider] = &[
     // hex-decode paths, and a well-formed-shaped attempt below reaches its
     // 32-byte gate and HMAC comparison.
     Provider::PagerDuty,
+    // Zendesk needs two headers (bare-base64 signature + RFC 3339 timestamp) to
+    // reach its signature path; a well-formed-shaped attempt below reaches its
+    // timestamp parse, base64 decode, and `{timestamp}{body}` HMAC comparison.
+    Provider::Zendesk,
 ];
 
 /// A well-formed secret for each provider's scheme, so the fuzzer reaches the
@@ -567,6 +575,28 @@ fuzz_target!(|data: &[u8]| {
             (
                 "Twitch-Eventsub-Message-Signature".to_string(),
                 "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            ),
+        ],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Zendesk: a well-formed-shaped two-header delivery (bare base64 sig of
+    // 32 bytes + valid RFC 3339 timestamp) lets arbitrary body bytes reach the
+    // RFC 3339 timestamp parse, the 32-byte length gate, and the
+    // `{timestamp}{body}` concatenation HMAC comparison; without it the loop
+    // above mostly fails earlier on malformed/missing header fields.
+    attempt(
+        Provider::Zendesk,
+        &[
+            (
+                "X-Zendesk-Webhook-Signature".to_string(),
+                "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+            ),
+            (
+                "X-Zendesk-Webhook-Signature-Timestamp".to_string(),
+                "2021-03-25T05:09:27Z".to_string(),
             ),
         ],
         body,
