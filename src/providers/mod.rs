@@ -14,6 +14,7 @@ mod discord;
 mod dropbox;
 mod github;
 mod hubspot;
+mod launchdarkly;
 mod lemonsqueezy;
 mod linear;
 mod mux;
@@ -134,6 +135,10 @@ pub enum Provider {
     PagerDuty,
     /// Linear (`linear-signature`, HMAC-SHA256).
     Linear,
+    /// LaunchDarkly (`X-LD-Signature`, HMAC-SHA256 over the raw body, bare
+    /// hex — no `sha256=` prefix, no timestamp). The signing key is the
+    /// webhook secret configured on the integration.
+    LaunchDarkly,
     /// Notion (`X-Notion-Signature`, HMAC-SHA256 over the raw body, hex,
     /// `sha256=` prefix). The signing key is the subscription's
     /// `verification_token` from the one-time handshake.
@@ -243,6 +248,7 @@ impl fmt::Display for Provider {
             Provider::Paddle => f.write_str("Paddle"),
             Provider::PagerDuty => f.write_str("PagerDuty"),
             Provider::Linear => f.write_str("Linear"),
+            Provider::LaunchDarkly => f.write_str("LaunchDarkly"),
             Provider::Notion => f.write_str("Notion"),
             Provider::Zoom => f.write_str("Zoom"),
             Provider::Cloudflare => f.write_str("Cloudflare"),
@@ -304,6 +310,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("paddle") => Ok(Provider::Paddle),
             n if n.eq_ignore_ascii_case("pagerduty") => Ok(Provider::PagerDuty),
             n if n.eq_ignore_ascii_case("linear") => Ok(Provider::Linear),
+            n if n.eq_ignore_ascii_case("launchdarkly") => Ok(Provider::LaunchDarkly),
             n if n.eq_ignore_ascii_case("notion") => Ok(Provider::Notion),
             n if n.eq_ignore_ascii_case("zoom") => Ok(Provider::Zoom),
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
@@ -340,6 +347,7 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
         "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
+             `launchdarkly`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
@@ -384,6 +392,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
             vec![discord::SIGNATURE_HEADER, discord::TIMESTAMP_HEADER]
         }
         Provider::Linear => vec![linear::SIGNATURE_HEADER],
+        Provider::LaunchDarkly => vec![launchdarkly::SIGNATURE_HEADER],
         Provider::Notion => vec![notion::SIGNATURE_HEADER],
         Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
         Provider::Coinbase => vec![coinbase::SIGNATURE_HEADER],
@@ -474,6 +483,7 @@ pub fn verify(
         Provider::Bitbucket => bitbucket::verify(headers, raw_body, secret, &options),
         Provider::HubSpot => hubspot::verify(headers, raw_body, secret, &options),
         Provider::Linear => linear::verify(headers, raw_body, secret, &options),
+        Provider::LaunchDarkly => launchdarkly::verify(headers, raw_body, secret, &options),
         Provider::Notion => notion::verify(headers, raw_body, secret, &options),
         Provider::Zoom => zoom::verify(headers, raw_body, secret, &options),
         Provider::Shopify => shopify::verify(headers, raw_body, secret, &options),
@@ -1065,6 +1075,7 @@ mod tests {
         assert_eq!(Provider::Paddle.to_string(), "Paddle");
         assert_eq!(Provider::PagerDuty.to_string(), "PagerDuty");
         assert_eq!(Provider::Linear.to_string(), "Linear");
+        assert_eq!(Provider::LaunchDarkly.to_string(), "LaunchDarkly");
         assert_eq!(Provider::Notion.to_string(), "Notion");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
@@ -1127,6 +1138,7 @@ mod tests {
             ("paddle", Provider::Paddle),
             ("pagerduty", Provider::PagerDuty),
             ("linear", Provider::Linear),
+            ("launchdarkly", Provider::LaunchDarkly),
             ("notion", Provider::Notion),
             ("zoom", Provider::Zoom),
             ("cloudflare", Provider::Cloudflare),
@@ -1242,7 +1254,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 29] {
+    fn provider_list() -> [Provider; 30] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1260,6 +1272,7 @@ mod tests {
             Provider::Paddle,
             Provider::PagerDuty,
             Provider::Linear,
+            Provider::LaunchDarkly,
             Provider::Notion,
             Provider::Zoom,
             Provider::Cloudflare,

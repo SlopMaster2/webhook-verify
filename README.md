@@ -101,6 +101,7 @@ hand-copied signing-string logic to get wrong.
 | Paddle | HMAC-SHA256, hex, `Paddle-Signature` (`ts=;h1=` list, rotation-safe) + replay window | ✅ |
 | PagerDuty (v3 webhooks) | HMAC-SHA256 over raw body, hex, `v1=` prefix, `X-PagerDuty-Signature` (`v1=` rotation list, no timestamp) | ✅ |
 | Linear | HMAC-SHA256, `linear-signature` | ✅ |
+| LaunchDarkly | HMAC-SHA256 over raw body, hex, `X-LD-Signature` (no timestamp) | ✅ |
 | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` (verification-token key) | ✅ |
 | Zoom | HMAC-SHA256, `v0=` scheme, `x-zm-signature` + timestamp + replay window | ✅ |
 | Cloudflare (Stream webhooks) | HMAC-SHA256 over `time.body`, hex, in a combined `Webhook-Signature` header + timestamp tolerance | ✅ |
