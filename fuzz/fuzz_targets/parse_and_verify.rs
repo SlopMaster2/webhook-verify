@@ -270,8 +270,7 @@ const IMPLEMENTED: &[Provider] = &[
 /// and the prefixed form's `whsec_<base64>` spelling matches GitHub's
 /// Stripe-secret pattern and trips secret scanning (issue #13). Dropping the
 /// prefix yields an identical decoded key.
-const WELL_FORMED_SECRET: &str =
-    "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+const WELL_FORMED_SECRET: &str = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 
 /// A valid Discord public key (hex-encoded Ed25519), so Discord's
 /// *signature-decoding* path is exercised by the fuzzer too.
@@ -292,8 +291,7 @@ const DISCORD_PUBLIC_KEY_HEX: &str =
 /// signature path; this value lets the shaped attempt below reach base64
 /// decode, the 32-byte gate, and HMAC comparison. It is the key from Adyen's
 /// own worked example (`src/providers/adyen.rs`).
-const ADYEN_HEX_SECRET: &str =
-    "79a3eaf309c43708726a8c284c0d72618696a12e840dfa1df3a158afa3b577da";
+const ADYEN_HEX_SECRET: &str = "79a3eaf309c43708726a8c284c0d72618696a12e840dfa1df3a158afa3b577da";
 
 fn attempt(
     provider: Provider,
@@ -363,15 +361,57 @@ fuzz_target!(|data: &[u8]| {
     // Fail-closed dispatch for feature-gated providers must also never
     // panic. Square is exercised via IMPLEMENTED below, with and without
     // its required URL context.
-    attempt(Provider::Square, &headers, body, WELL_FORMED_SECRET, &url_scoped_options);
-    attempt(Provider::Square, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
-    attempt(Provider::Twilio, &headers, body, WELL_FORMED_SECRET, &twilio_options);
-    attempt(Provider::Twilio, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
+    attempt(
+        Provider::Square,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+    attempt(
+        Provider::Square,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &VerifyOptions::default(),
+    );
+    attempt(
+        Provider::Twilio,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &twilio_options,
+    );
+    attempt(
+        Provider::Twilio,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &VerifyOptions::default(),
+    );
     // HubSpot: method-only and url-only options exercise the two MissingContext
     // fail-closed paths; the combined options reach the signature path below.
-    attempt(Provider::HubSpot, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default().with_request_method("POST"));
-    attempt(Provider::HubSpot, &headers, body, WELL_FORMED_SECRET, &url_scoped_options);
-    attempt(Provider::HubSpot, &headers, body, WELL_FORMED_SECRET, &hubspot_options);
+    attempt(
+        Provider::HubSpot,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &VerifyOptions::default().with_request_method("POST"),
+    );
+    attempt(
+        Provider::HubSpot,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+    attempt(
+        Provider::HubSpot,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &hubspot_options,
+    );
 
     // Discord's secret must be a *valid hex public key* to get past the key
     // gate and reach its signature header parsing; neither WELL_FORMED_SECRET
@@ -399,7 +439,13 @@ fuzz_target!(|data: &[u8]| {
             .with_verifying_material(VerifyingKeyMaterial::X509Certificate(
                 PAYPAL_CERT_PEM.to_vec(),
             ));
-        attempt(Provider::PayPal, &headers, body, WELL_FORMED_SECRET, &paypal_options);
+        attempt(
+            Provider::PayPal,
+            &headers,
+            body,
+            WELL_FORMED_SECRET,
+            &paypal_options,
+        );
         attempt(
             Provider::PayPal,
             &headers,
@@ -409,7 +455,13 @@ fuzz_target!(|data: &[u8]| {
         );
     }
     #[cfg(not(feature = "paypal"))]
-    attempt(Provider::PayPal, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
+    attempt(
+        Provider::PayPal,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &VerifyOptions::default(),
+    );
 
     // SendGrid reaches its ECDSA path only with caller-supplied key material;
     // a constant valid P-256 SPKI (the provider's own vector key) lets
@@ -430,11 +482,29 @@ fuzz_target!(|data: &[u8]| {
         let sendgrid_options = VerifyOptions::default().with_verifying_material(
             VerifyingKeyMaterial::EcdsaP256PublicKey(SENDGRID_SPKI_DER.to_vec()),
         );
-        attempt(Provider::SendGrid, &headers, body, WELL_FORMED_SECRET, &sendgrid_options);
-        attempt(Provider::SendGrid, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
+        attempt(
+            Provider::SendGrid,
+            &headers,
+            body,
+            WELL_FORMED_SECRET,
+            &sendgrid_options,
+        );
+        attempt(
+            Provider::SendGrid,
+            &headers,
+            body,
+            WELL_FORMED_SECRET,
+            &VerifyOptions::default(),
+        );
     }
     #[cfg(not(feature = "sendgrid"))]
-    attempt(Provider::SendGrid, &headers, body, WELL_FORMED_SECRET, &VerifyOptions::default());
+    attempt(
+        Provider::SendGrid,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &VerifyOptions::default(),
+    );
 
     // CustomScheme (spec §2.2): a Slack-shaped configuration exercises the
     // prefix-strip, hex-decode, timestamp-parse, and user signed-string
@@ -488,12 +558,11 @@ fuzz_target!(|data: &[u8]| {
     // malformed/missing header fields.
     attempt(
         Provider::Cloudflare,
-        &[
-            (
-                "Webhook-Signature".to_string(),
-                "time=1700000000,sig1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
-            ),
-        ],
+        &[(
+            "Webhook-Signature".to_string(),
+            "time=1700000000,sig1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
+                .to_string(),
+        )],
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,
@@ -552,7 +621,8 @@ fuzz_target!(|data: &[u8]| {
         Provider::Coinbase,
         &[(
             "X-Hook0-Signature".to_string(),
-            "t=1700000000,v0=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            "t=1700000000,v0=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
+                .to_string(),
         )],
         body,
         WELL_FORMED_SECRET,
@@ -582,7 +652,8 @@ fuzz_target!(|data: &[u8]| {
         Provider::Paddle,
         &[(
             "Paddle-Signature".to_string(),
-            "ts=1700000000;h1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            "ts=1700000000;h1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
+                .to_string(),
         )],
         body,
         WELL_FORMED_SECRET,
@@ -607,7 +678,8 @@ fuzz_target!(|data: &[u8]| {
             ),
             (
                 "Twitch-Eventsub-Message-Signature".to_string(),
-                "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+                "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
+                    .to_string(),
             ),
         ],
         body,
@@ -825,7 +897,8 @@ fuzz_target!(|data: &[u8]| {
         Provider::WorkOS,
         &[(
             "WorkOS-Signature".to_string(),
-            "t=1720000000554,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            "t=1720000000554,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
+                .to_string(),
         )],
         body,
         WELL_FORMED_SECRET,
@@ -833,11 +906,23 @@ fuzz_target!(|data: &[u8]| {
     );
 
     for &provider in IMPLEMENTED {
-        attempt(provider, &headers, body, WELL_FORMED_SECRET, &url_scoped_options);
+        attempt(
+            provider,
+            &headers,
+            body,
+            WELL_FORMED_SECRET,
+            &url_scoped_options,
+        );
         // Arbitrary secret bytes exercise the key-decoding failure paths
         // (e.g. Standard Webhooks' lenient base64) without panicking.
         let arbitrary_secret = String::from_utf8_lossy(body);
-        attempt(provider, &headers, body, &arbitrary_secret, &url_scoped_options);
+        attempt(
+            provider,
+            &headers,
+            body,
+            &arbitrary_secret,
+            &url_scoped_options,
+        );
     }
 
     // `verify_any` (cross-secret rotation) is public API wrapping the same
@@ -862,7 +947,19 @@ fuzz_target!(|data: &[u8]| {
 
     for &provider in IMPLEMENTED {
         attempt_any(provider, &headers, body, &[], &url_scoped_options);
-        attempt_any(provider, &headers, body, &mixed_secrets, &url_scoped_options);
-        attempt_any(provider, &headers, body, &all_garbage_secrets, &url_scoped_options);
+        attempt_any(
+            provider,
+            &headers,
+            body,
+            &mixed_secrets,
+            &url_scoped_options,
+        );
+        attempt_any(
+            provider,
+            &headers,
+            body,
+            &all_garbage_secrets,
+            &url_scoped_options,
+        );
     }
 });
