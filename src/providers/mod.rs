@@ -1292,6 +1292,168 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[test]
+    fn signature_header_names_cover_every_provider_header() {
+        // `signature_header_names` is the list the tower/actix adapters scan
+        // for conflicting duplicate headers (spec.md §4.4) — the mechanism
+        // that stops a proxy from smuggling a forged value in a duplicate
+        // header the verifier reads while the validator does not. This guard
+        // pins each provider's adapter-visible headers to the exact constants
+        // its implementation reads, so a header dropped from the list — say
+        // `HubSpot` losing its timestamp — is caught instead of silently
+        // weakening the ambiguity check. Keep this table in lockstep with
+        // `signature_header_names` when a provider changes.
+        let cases: &[(Provider, &[&str])] = &[
+            (Provider::Stripe, &[stripe::SIGNATURE_HEADER]),
+            (Provider::GitHub, &[github::SIGNATURE_HEADER]),
+            (Provider::Bitbucket, &[bitbucket::SIGNATURE_HEADER]),
+            (
+                Provider::HubSpot,
+                &[hubspot::SIGNATURE_HEADER, hubspot::TIMESTAMP_HEADER],
+            ),
+            (Provider::Shopify, &[shopify::SIGNATURE_HEADER]),
+            (
+                Provider::Slack,
+                &[slack::SIGNATURE_HEADER, slack::TIMESTAMP_HEADER],
+            ),
+            (Provider::Square, &[square::SIGNATURE_HEADER]),
+            (Provider::Twilio, &[twilio::SIGNATURE_HEADER]),
+            (
+                Provider::Twitch,
+                &[
+                    twitch::MESSAGE_ID_HEADER,
+                    twitch::TIMESTAMP_HEADER,
+                    twitch::SIGNATURE_HEADER,
+                ],
+            ),
+            (Provider::Typeform, &[typeform::SIGNATURE_HEADER]),
+            (
+                Provider::Discord,
+                &[discord::SIGNATURE_HEADER, discord::TIMESTAMP_HEADER],
+            ),
+            (Provider::Linear, &[linear::SIGNATURE_HEADER]),
+            (Provider::LaunchDarkly, &[launchdarkly::SIGNATURE_HEADER]),
+            (Provider::Notion, &[notion::SIGNATURE_HEADER]),
+            (Provider::Cloudflare, &[cloudflare::SIGNATURE_HEADER]),
+            (Provider::Coinbase, &[coinbase::SIGNATURE_HEADER]),
+            (Provider::Dropbox, &[dropbox::SIGNATURE_HEADER]),
+            (Provider::Razorpay, &[razorpay::SIGNATURE_HEADER]),
+            (Provider::LemonSqueezy, &[lemonsqueezy::SIGNATURE_HEADER]),
+            (Provider::Xero, &[xero::SIGNATURE_HEADER]),
+            (Provider::Sentry, &[sentry::SIGNATURE_HEADER]),
+            (Provider::Adyen, &[adyen::SIGNATURE_HEADER]),
+            (Provider::Mux, &[mux::SIGNATURE_HEADER]),
+            (
+                Provider::Zendesk,
+                &[zendesk::SIGNATURE_HEADER, zendesk::TIMESTAMP_HEADER],
+            ),
+            (Provider::WorkOS, &[workos::SIGNATURE_HEADER]),
+            (Provider::WooCommerce, &[woocommerce::SIGNATURE_HEADER]),
+            (Provider::Calendly, &[calendly::SIGNATURE_HEADER]),
+            (
+                Provider::Zoom,
+                &[zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
+            ),
+            (
+                Provider::StandardWebhooks,
+                &[
+                    standard_webhooks::ID_HEADER,
+                    standard_webhooks::TIMESTAMP_HEADER,
+                    standard_webhooks::SIGNATURE_HEADER,
+                ],
+            ),
+            // Custom covers exactly its two declared headers — additional
+            // headers read by `signed_string` are outside the adapters' scan
+            // (documented caveat on `CustomScheme`).
+            (
+                Provider::Custom(CustomScheme {
+                    hash: HashAlg::Sha256,
+                    signature_header: "X-Acme-Signature",
+                    timestamp_header: Some("X-Acme-Timestamp"),
+                    encoding: Encoding::Hex,
+                    prefix: None,
+                    signed_string: |_headers, raw_body| raw_body.to_vec(),
+                }),
+                &["X-Acme-Signature", "X-Acme-Timestamp"],
+            ),
+            (
+                Provider::Custom(CustomScheme {
+                    hash: HashAlg::Sha256,
+                    signature_header: "X-Acme-Signature",
+                    timestamp_header: None,
+                    encoding: Encoding::Hex,
+                    prefix: None,
+                    signed_string: |_headers, raw_body| raw_body.to_vec(),
+                }),
+                &["X-Acme-Signature"],
+            ),
+        ];
+        for &(ref provider, expected) in cases {
+            assert_eq!(
+                signature_header_names(provider),
+                expected,
+                "must cover every header `{provider}` reads"
+            );
+        }
+
+        #[cfg(feature = "sendgrid")]
+        assert_eq!(
+            signature_header_names(&Provider::SendGrid),
+            vec![sendgrid::SIGNATURE_HEADER, sendgrid::TIMESTAMP_HEADER],
+            "must cover every header `SendGrid` reads"
+        );
+        #[cfg(feature = "paypal")]
+        assert_eq!(
+            signature_header_names(&Provider::PayPal),
+            vec![
+                paypal::TRANSMISSION_ID_HEADER,
+                paypal::TRANSMISSION_TIME_HEADER,
+                paypal::TRANSMISSION_SIG_HEADER,
+                paypal::CERT_URL_HEADER,
+                paypal::AUTH_ALGO_HEADER,
+            ],
+            "must cover every header `PayPal` reads"
+        );
+        // Feature-disabled providers report an empty list: verification fails
+        // closed with `UnsupportedProvider`, so the adapters have nothing to
+        // scan for.
+        #[cfg(not(feature = "sendgrid"))]
+        assert!(
+            signature_header_names(&Provider::SendGrid).is_empty(),
+            "feature-disabled `SendGrid` must expose no headers to scan"
+        );
+        #[cfg(not(feature = "paypal"))]
+        assert!(
+            signature_header_names(&Provider::PayPal).is_empty(),
+            "feature-disabled `PayPal` must expose no headers to scan"
+        );
+
+        // Every name-constructible provider must expose a non-empty,
+        // non-duplicated list, so a future provider whose verification reads
+        // headers through a path this table does not cover cannot silently
+        // produce an empty or self-conflicting scan. `PayPal`/`SendGrid` are
+        // covered by the cfg-specific assertions above.
+        for provider in provider_list() {
+            if matches!(provider, Provider::PayPal | Provider::SendGrid) {
+                continue;
+            }
+            let names = signature_header_names(&provider);
+            assert!(
+                !names.is_empty(),
+                "`{provider}` must expose headers to scan"
+            );
+            let mut deduped = names.clone();
+            deduped.sort();
+            deduped.dedup();
+            assert_eq!(
+                names.len(),
+                deduped.len(),
+                "`{provider}` must not list a header more than once"
+            );
+        }
+    }
+
     /// Every name-constructible [`Provider`] variant, in declaration order.
     ///
     /// The single source of truth for the provider-bookkeeping tests: both the
