@@ -1092,6 +1092,62 @@ with [`CustomScheme`] if needed) and is not this provider.
   the docs' example header shape is replayed as a well-formed-but-mismatching
   input). Replace them if Coinbase ever publishes fixed vectors.
 
+### Mux
+
+Source: <https://www.mux.com/docs/core/verify-webhook-signatures> ("Verify
+webhook signatures") and Mux's official server-side SDKs — the Elixir
+verifier
+(<https://github.com/muxinc/mux-elixir/blob/master/lib/mux/webhooks.ex>) and
+the Node verifier
+(<https://github.com/muxinc/mux-node-sdk/blob/main/src/resources/webhooks/webhooks.ts>).
+This entry covers Mux webhook notifications (video assets, live streams,
+direct uploads, etc.), which all share the `Mux-Signature` scheme.
+
+- Header: `Mux-Signature: t=<unix_ts>,v1=<hex_hmac>[,v1=<hex_hmac>...]` — a
+  comma-separated `key=value` list. `t` is the integer unix-seconds value set
+  by the server; `v1` is HMAC-SHA256 over `{t}.{raw_body}` and is the only
+  scheme the docs define ("Currently, the only valid signature scheme is
+  `v1`"). Unknown fields and non-`v1` schemes are discarded for forward
+  compatibility.
+- Multiple `v1=` values are accepted during signing-secret rotation (a match
+  on *any* `v1` element is accepted), matching the official SDKs.
+- Duplicate `t` fields are rejected as ambiguous — never first-wins,
+  following the crate-wide rule that malformed/ambiguous signing material
+  fails closed rather than defaulting to valid (the SDK parsers take the last
+  occurrence; this crate does not).
+- Keys are compared after trimming surrounding whitespace, so the comma-space
+  spelling `t=..., v1=...` (produced by proxy header-folding and hand-pasted
+  values) parses like the canonical `t=...,v1=...`. Values are never trimmed —
+  the timestamp rides verbatim into the signed string.
+- Signed string: `"{t}.{raw_body}"` — the `t` value exactly as it appears in
+  the header, a literal dot, then the raw request body bytes, unmodified (the
+  docs warn to pass "the raw un-parsed request body, not the parsed JSON").
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded
+- Key: the per-webhook `signing_secret` from the Webhooks API as a plain
+  UTF-8 string (not decoded, and distinct from the Mux API token), matching
+  the docs' reference implementations.
+- Timestamp validation routes through the shared pure-ASCII-digit parser:
+  sign-prefixed (`t=+1591664030`), whitespace-padded, empty, or overflowing
+  values fail closed as `MalformedHeader`. Mux's own SDKs use a lenient
+  `parseInt`-style parse; the strict shared parser is intentionally stricter
+  and cannot reject a legitimate delivery.
+- Replay protection: Mux's SDKs apply a 300-second tolerance
+  (`@default_tolerance 300` in the Elixir verifier; `tolerance = 300` in the
+  Node verifier), so the shared symmetric `|now - t| > max_age` (default
+  300s) semantics apply, as with Slack, Zoom, Cloudflare, and Coinbase. The
+  future-dated half of the symmetry is stricter than the SDKs enforce but
+  cannot reject legitimate deliveries.
+- Test-vector provenance: the primary vector is Mux's own byte-exact
+  published vector from its official Elixir SDK test utilities
+  (<https://hexdocs.pm/mux/Mux.Webhooks.TestUtils.html>:
+  `generate_signature("payload", "SuperSecret123")` gives
+  `t=1591664030,v1=e43496b6aae982c4c2fd6f8e92935f1d90216f1f64d56024e72390acfb988272`,
+  verified by the same SDK's `verify_header/3`). Additional vectors cover the
+  empty and UTF-8 body boundary cases, multi-`v1` rotation, the comma-space
+  spelling, and the failure modes, constructed locally over exactly the
+  documented construction; Mux's published example header is replayed as a
+  well-formed-but-mismatching input.
+
 ### Standard Webhooks spec
 
 Source: <https://www.standardwebhooks.com> and the canonical spec at

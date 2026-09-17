@@ -78,6 +78,7 @@
 //! | Xero | HMAC-SHA256, base64, `x-xero-signature` |
 //! | Sentry | HMAC-SHA256 over raw body, hex, `Sentry-Hook-Signature` (no timestamp) |
 //! | Adyen | HMAC-SHA256 over raw body, base64, `HmacSignature` (hex key, no timestamp) |
+//! | Mux | HMAC-SHA256 over `t.body`, hex, `Mux-Signature` + tolerance window |
 //! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, ...) |
 //! | Custom | User-supplied HMAC scheme via [`Provider::Custom`] |
 //!
