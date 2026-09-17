@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: LaunchDarkly** (`Provider::LaunchDarkly`): HMAC-SHA256 over
+  the raw body bytes, hex-encoded and delivered bare (no `sha256=` prefix) in
+  the `X-LD-Signature` header. The signing secret configured on the
+  integration is used verbatim (its UTF-8 bytes) as the HMAC key — LaunchDarkly
+  never decodes or re-encodes it. No timestamp is signed, so the shared
+  `max_age` replay window has no effect for this provider (LaunchDarkly itself
+  recommends reordering deliveries by the payload's own `date` field). Sources:
+  <https://launchdarkly.com/docs/home/infrastructure/webhooks> and
+  <https://launchdarkly.com/docs/api/webhooks>. LaunchDarkly publishes no
+  byte-exact example signature, so the vectors are locally constructed over
+  exactly the documented construction, cross-checked with OpenSSL.
 - **New provider: Zendesk** (`Provider::Zendesk`): HMAC-SHA256 over
   `{timestamp}{raw_body}` — the `X-Zendesk-Webhook-Signature-Timestamp` header
   value exactly as sent (RFC 3339) concatenated with the raw body bytes, no

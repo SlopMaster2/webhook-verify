@@ -94,6 +94,8 @@
 //!   signature (no prefix, no timestamp).
 //! - `linear-hex-signature` — Linear's raw hex HMAC-SHA256 signature (no
 //!   prefix, no timestamp).
+//! - `launchdarkly-hex-signature` — LaunchDarkly's bare hex HMAC-SHA256
+//!   signature (no prefix, no timestamp).
 //! - `shopify-base64-signature` — Shopify's base64 HMAC-SHA256 signature (no
 //!   prefix, no timestamp).
 //! - `twilio-base64-signature` — Twilio's documented example signature
@@ -150,6 +152,10 @@ const IMPLEMENTED: &[Provider] = &[
     // header bytes exercise its hex-decode and 32-byte gate, and a
     // well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Linear,
+    // LaunchDarkly is a single-header raw-body HMAC (bare hex, no prefix, no
+    // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
+    // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
+    Provider::LaunchDarkly,
     // Dropbox is a single-header raw-body HMAC (hex, no prefix); arbitrary
     // header bytes exercise its hex-decode and 32-byte gate, and a
     // well-formed-shaped attempt below reaches HMAC comparison.
@@ -731,6 +737,20 @@ fuzz_target!(|data: &[u8]| {
         Provider::Linear,
         &[(
             "linear-signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // LaunchDarkly: a well-formed-shaped `X-LD-Signature` (valid hex sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::LaunchDarkly,
+        &[(
+            "X-LD-Signature".to_string(),
             "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,

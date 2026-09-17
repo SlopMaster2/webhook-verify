@@ -53,6 +53,7 @@ pub enum Provider {
     Paddle,
     PagerDuty,
     Linear,
+    LaunchDarkly,
     Notion,
     Zoom,
     Cloudflare,
@@ -473,6 +474,35 @@ Source: <https://developers.linear.app/docs/graphql/working-with-the-graphql-api
   no byte-exact example signature, so the implementation is validated against
   locally constructed, deterministic vectors over exactly the documented
   construction. Replace them if Linear ever publishes fixed vectors.
+
+### LaunchDarkly
+
+Source: <https://launchdarkly.com/docs/home/infrastructure/webhooks> ("Sign a
+webhook": the `X-LD-Signature` header and the HMAC-SHA256 hex construction)
+and <https://launchdarkly.com/docs/api/webhooks> (the webhooks API reference,
+repeating the signing guidance and the "Sample payload").
+
+- Header: `X-LD-Signature: <hex_hmac>` — a bare lowercase hex digest, no
+  `sha256=` prefix and no timestamp; same shape as Dropbox, Razorpay, and
+  Lemon Squeezy.
+- Signed string: raw body bytes, unmodified. LaunchDarkly's docs state the
+  header "will contain an HMAC SHA256 hex digest of the webhook payload",
+  keyed by the webhook secret configured on the integration — re-serializing
+  the JSON payload would change the bytes and fail verification.
+- Algorithm: HMAC-SHA256, hex-encoded. Key: the webhook secret as its UTF-8
+  bytes, matching the documented construction
+  (`crypto.createHmac("sha256", secret).update(body).digest("hex")`).
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Shopify/Dropbox/Linear. LaunchDarkly's docs note webhooks may not be
+  delivered in chronological order and recommend reordering from the
+  payload's own `date` field, which is outside this crate's scope (payload
+  parsing is a non-goal, §1).
+- Test-vector provenance: LaunchDarkly's docs describe the construction but
+  publish no byte-exact example signature, so the implementation is validated
+  against locally constructed, deterministic vectors over exactly the
+  documented construction (the vector's body mirrors the shape of
+  LaunchDarkly's documented webhook payload). Replace them if LaunchDarkly
+  ever publishes fixed vectors.
 
 ### Notion
 
