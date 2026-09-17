@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Calendly** (`Provider::Calendly`): HMAC-SHA256 over
+  `{t}.{raw_body}`, hex-encoded, delivered in the `Calendly-Webhook-Signature`
+  header as a comma-separated `t=<unix_ts>,v1=<hex_hmac>` list. The `t`
+  timestamp rides verbatim into the signed string and enables the shared
+  symmetric `max_age` replay window (Calendly's docs demonstrate a 180-second
+  tolerance; the crate default is 300s and callers can match the documented
+  zone with `with_max_age`). Duplicate `t`/`v1` elements are rejected as
+  ambiguous (`spec.md` §4.4) — Calendly documents no rotation list, so a second
+  `v1=` is malformed rather than rotation — and unknown elements are ignored for
+  forward compatibility. Source:
+  <https://developer.calendly.com/api-docs/overview/webhooks/webhook-signatures>
+  ("Webhook Signatures"). Calendly publishes an example header but no body or
+  signing key, so the vectors are locally constructed over exactly the
+  documented construction, cross-checked across OpenSSL and Python; the
+  published example header is replayed as a well-formed-but-mismatching input.
 - **New provider: WooCommerce** (`Provider::WooCommerce`): HMAC-SHA256 over
   the raw request body, **base64**-encoded (standard alphabet with padding,
   not hex — the same bug class as Shopify/Xero), delivered in the
