@@ -74,6 +74,9 @@
 //! - `coinbase-t-v0-delivery` — Coinbase's combined `t=...,v0=...` header (the
 //!   shape also carries optional `h=`/`v1=` fields), reaching timestamp and
 //!   `v0` comparison parsing.
+//! - `mux-t-v1-signature` — Mux's combined `t=...,v1=...` header with a
+//!   `v1=` rotation list, reaching the comma-split, timestamp parse, hex
+//!   decode, and multi-element HMAC comparison.
 //! - `notion-sha256-prefix-delivery` — Notion's official `sha256=` sample value,
 //!   reaching prefix match, hex decode, and the 32-byte gate.
 //! - `typeform-sha256-prefix-signature` — Typeform's documented `sha256=` +
@@ -170,6 +173,11 @@ const IMPLEMENTED: &[Provider] = &[
     // and empty-header rejection, and a well-formed-shaped attempt below
     // reaches its hex-decode/comparison paths too.
     Provider::Coinbase,
+    // Mux needs a combined `t=...,v1=...` header to reach its signature path;
+    // arbitrary bytes exercise the comma/key-value splitting and empty-header
+    // rejection, and a well-formed-shaped attempt below reaches its
+    // hex-decode/comparison (including the multi-`v1` rotation) paths too.
+    Provider::Mux,
     // Xero is a single-header raw-body HMAC (base64, no prefix); arbitrary
     // header bytes exercise its base64-decode and 32-byte gate, and a
     // well-formed-shaped attempt below reaches HMAC comparison.
@@ -504,6 +512,21 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "X-Hook0-Signature".to_string(),
             "t=1700000000,v0=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Mux: a well-formed-shaped `Mux-Signature` (digit t, valid-hex 32-byte
+    // v1 entries, rotation list) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison; without it the loop above mostly fails
+    // earlier on malformed/missing header fields.
+    attempt(
+        Provider::Mux,
+        &[(
+            "Mux-Signature".to_string(),
+            "t=1700000000,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

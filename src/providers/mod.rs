@@ -16,6 +16,7 @@ mod github;
 mod hubspot;
 mod lemonsqueezy;
 mod linear;
+mod mux;
 mod notion;
 mod paddle;
 mod pagerduty;
@@ -185,6 +186,15 @@ pub enum Provider {
     /// rather than the raw body, so they are not covered by this variant —
     /// see the provider module for the exact scheme.
     Adyen,
+    /// Mux (`Mux-Signature`, HMAC-SHA256 over `t.body`).
+    ///
+    /// Covers Mux webhook notifications (video assets, live streams, uploads,
+    /// ...): the `t` and `v1` fields ride inside the single `Mux-Signature`
+    /// header, the signed string is `{t}.{raw_body}`, hex-encoded, with
+    /// timestamp replay protection. Multiple `v1=` values are accepted during
+    /// signing-secret rotation (a match on any is accepted). The signing
+    /// secret is the per-webhook `signing_secret` from the Mux Webhooks API.
+    Mux,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -232,6 +242,7 @@ impl fmt::Display for Provider {
             Provider::Xero => f.write_str("Xero"),
             Provider::Sentry => f.write_str("Sentry"),
             Provider::Adyen => f.write_str("Adyen"),
+            Provider::Mux => f.write_str("Mux"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -295,6 +306,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("xero") => Ok(Provider::Xero),
             n if n.eq_ignore_ascii_case("sentry") => Ok(Provider::Sentry),
             n if n.eq_ignore_ascii_case("adyen") => Ok(Provider::Adyen),
+            n if n.eq_ignore_ascii_case("mux") => Ok(Provider::Mux),
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks") =>
             {
@@ -316,7 +328,7 @@ impl fmt::Display for ProviderParseError {
         "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, or `standardwebhooks` (or `standard webhooks`) \
+             `xero`, `sentry`, `adyen`, `mux`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -368,6 +380,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Sentry => vec![sentry::SIGNATURE_HEADER],
         Provider::Adyen => vec![adyen::SIGNATURE_HEADER],
+        Provider::Mux => vec![mux::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -467,6 +480,7 @@ pub fn verify(
         Provider::Xero => xero::verify(headers, raw_body, secret, &options),
         Provider::Sentry => sentry::verify(headers, raw_body, secret, &options),
         Provider::Adyen => adyen::verify(headers, raw_body, secret, &options),
+        Provider::Mux => mux::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
         #[cfg(not(feature = "paypal"))]
@@ -1046,6 +1060,7 @@ mod tests {
         assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::Sentry.to_string(), "Sentry");
         assert_eq!(Provider::Adyen.to_string(), "Adyen");
+        assert_eq!(Provider::Mux.to_string(), "Mux");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1107,6 +1122,7 @@ mod tests {
             ("xero", Provider::Xero),
             ("sentry", Provider::Sentry),
             ("adyen", Provider::Adyen),
+            ("mux", Provider::Mux),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1152,6 +1168,7 @@ mod tests {
             Provider::Xero,
             Provider::Sentry,
             Provider::Adyen,
+            Provider::Mux,
             Provider::StandardWebhooks,
         ];
         for provider in providers {
@@ -1207,7 +1224,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 27] {
+    fn provider_list() -> [Provider; 28] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1235,6 +1252,7 @@ mod tests {
             Provider::Xero,
             Provider::Sentry,
             Provider::Adyen,
+            Provider::Mux,
             Provider::StandardWebhooks,
         ]
     }

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Mux** (`Provider::Mux`): HMAC-SHA256 over `{t}.{raw_body}`,
+  hex-encoded, delivered in the `Mux-Signature` header as a comma-separated
+  `t=<unix_ts>,v1=<hex_hmac>` list. Multiple `v1=` values are accepted during
+  signing-secret rotation (a match on any is accepted), matching Mux's
+  official SDKs, and the signed timestamp enables the shared symmetric
+  `max_age` replay window (Mux's SDKs use a 300s tolerance). Sources:
+  <https://www.mux.com/docs/core/verify-webhook-signatures>, the official
+  Elixir verifier
+  (<https://github.com/muxinc/mux-elixir/blob/master/lib/mux/webhooks.ex>),
+  and the official Node verifier
+  (<https://github.com/muxinc/mux-node-sdk/blob/main/src/resources/webhooks/webhooks.ts>);
+  the primary test vector is Mux's own published vector from its SDK test
+  utilities (<https://hexdocs.pm/mux/Mux.Webhooks.TestUtils.html>).
 - **New provider: Adyen** (`Provider::Adyen`): HMAC-SHA256 over the raw body,
   base64-encoded, delivered in the `HmacSignature` header (header lookup is
   case-insensitive, so the docs' lowercase `hmacsignature` also resolves) with

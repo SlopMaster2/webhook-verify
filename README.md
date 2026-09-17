@@ -111,6 +111,7 @@ hand-copied signing-string logic to get wrong.
 | Xero | HMAC-SHA256, base64, `x-xero-signature` | ✅ |
 | Sentry (Integration Platform webhooks) | HMAC-SHA256 over raw body, hex, `Sentry-Hook-Signature` (Client Secret key, no timestamp) | ✅ |
 | Adyen (header-based HMAC: Platforms/Banking, Management API, classic notifications) | HMAC-SHA256 over raw body, base64, `HmacSignature` (hex-decoded Customer Area key, no timestamp) | ✅ |
+| Mux | HMAC-SHA256 over `t.body`, hex, `Mux-Signature` (`t=;v1=` list, rotation-safe) + replay window | ✅ |
 | Standard Webhooks spec (Svix, Clerk, Resend, GitLab 19.0+ signing tokens, ...) | HMAC-SHA256, `webhook-signature` (`v1,` base64, rotation list) + replay window | ✅ |
 | Custom | User-supplied HMAC scheme via `Provider::Custom(..)` (SHA-256/SHA-1/SHA-512, hex/base64, optional prefix + timestamp replay window) | ✅ |
 
