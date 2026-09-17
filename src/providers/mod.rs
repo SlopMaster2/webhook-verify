@@ -1202,6 +1202,7 @@ mod tests {
             Provider::Paddle,
             Provider::PagerDuty,
             Provider::Linear,
+            Provider::LaunchDarkly,
             Provider::Notion,
             Provider::Zoom,
             Provider::Cloudflare,
