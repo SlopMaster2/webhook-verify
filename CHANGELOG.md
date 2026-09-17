@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: WooCommerce** (`Provider::WooCommerce`): HMAC-SHA256 over
+  the raw request body, **base64**-encoded (standard alphabet with padding,
+  not hex — the same bug class as Shopify/Xero), delivered in the
+  `X-WC-Webhook-Signature` header. The webhook's configured `secret` is used
+  verbatim as its UTF-8 bytes (never decoded). No timestamp is signed, so the
+  shared `max_age` replay window has no effect for this provider (WooCommerce
+  recommends deduping on the payload's own `id`). Sources:
+  <https://developer.woocommerce.com/docs/apis/rest-api/v3/webhooks> (the
+  delivery-header reference: "X-WC-Webhook-Signature - a base64 encoded
+  HMAC-SHA256 hash of the payload") and the `WC_Webhook::generate_signature`
+  reference implementation
+  (<https://woocommerce.github.io/code-reference/classes/WC-Webhook.html>).
+  WooCommerce publishes no byte-exact example signature, so the vectors are
+  locally constructed over exactly the documented construction, cross-checked
+  with OpenSSL.
 - **New provider: WorkOS** (`Provider::WorkOS`): HMAC-SHA256 over
   `{t}.{raw_body}`, hex-encoded, delivered in the `WorkOS-Signature` header as
   a comma-separated `t=<epoch_ms>,v1=<hex_hmac>` list. The `t` timestamp is in

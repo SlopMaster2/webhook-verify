@@ -1268,6 +1268,32 @@ the SDK reference documentation
   (`t=1234567890,v1=...`) is replayed as a well-formed-but-mismatching input.
   Replace them if WorkOS ever publishes fixed vectors.
 
+### WooCommerce
+
+Source: <https://developer.woocommerce.com/docs/apis/rest-api/v3/webhooks> (the
+delivery-header reference lists `X-WC-Webhook-Signature` as "a base64 encoded
+HMAC-SHA256 hash of the payload") and the `WC_Webhook::generate_signature`
+reference implementation
+(<https://woocommerce.github.io/code-reference/classes/WC-Webhook.html>:
+"Generate a base64-encoded HMAC-SHA256 signature of the payload body ... Note
+that the signature is calculated after the body has already been encoded").
+
+- Header: `X-WC-Webhook-Signature: <base64_hmac>` (lookup is case-insensitive)
+- Signed string: raw body bytes, unmodified — the reference implementation
+  signs the already-encoded body, so the received bytes are what must be hashed
+- Algorithm: HMAC-SHA256, **base64**-encoded (standard alphabet with padding) —
+  not hex, the same base64 bug class as Shopify and Xero
+- Key: the webhook's configured `secret` as its UTF-8 bytes, used verbatim
+  (WooCommerce never base64/hex-decodes it)
+- No timestamp in the signature scheme (`max_age` has no effect); WooCommerce's
+  own guidance is to respond quickly and dedupe on the payload's `id`, which is
+  outside this crate's scope (payload parsing is a non-goal, §1)
+- Test-vector provenance: WooCommerce's docs and reference implementation
+  describe the construction but publish no byte-exact example signature, so the
+  implementation is validated against locally constructed, deterministic
+  vectors over exactly the documented recipe, cross-checked with OpenSSL.
+  Replace them if WooCommerce ever publishes fixed vectors.
+
 ### Standard Webhooks spec
 
 Source: <https://www.standardwebhooks.com> and the canonical spec at

@@ -35,6 +35,7 @@ mod stripe;
 mod twilio;
 mod twitch;
 mod typeform;
+mod woocommerce;
 mod workos;
 mod xero;
 mod zendesk;
@@ -220,6 +221,13 @@ pub enum Provider {
     /// HMAC-covered, so the shared `max_age` replay window applies after the
     /// millisecond value is floored to whole seconds (as with HubSpot).
     WorkOS,
+    /// WooCommerce (`X-WC-Webhook-Signature`, base64-encoded HMAC-SHA256 over
+    /// the raw body).
+    ///
+    /// The signing key is the webhook's configured `secret`, used verbatim as
+    /// its UTF-8 bytes. No timestamp rides in the header, so `max_age` has no
+    /// effect for this provider.
+    WooCommerce,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -271,6 +279,7 @@ impl fmt::Display for Provider {
             Provider::Mux => f.write_str("Mux"),
             Provider::Zendesk => f.write_str("Zendesk"),
             Provider::WorkOS => f.write_str("WorkOS"),
+            Provider::WooCommerce => f.write_str("WooCommerce"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -338,6 +347,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("mux") => Ok(Provider::Mux),
             n if n.eq_ignore_ascii_case("zendesk") => Ok(Provider::Zendesk),
             n if n.eq_ignore_ascii_case("workos") => Ok(Provider::WorkOS),
+            n if n.eq_ignore_ascii_case("woocommerce") => Ok(Provider::WooCommerce),
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks") =>
             {
@@ -360,7 +370,7 @@ impl fmt::Display for ProviderParseError {
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
              `launchdarkly`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, or `standardwebhooks` (or `standard webhooks`) \
+             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -416,6 +426,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Mux => vec![mux::SIGNATURE_HEADER],
         Provider::Zendesk => vec![zendesk::SIGNATURE_HEADER, zendesk::TIMESTAMP_HEADER],
         Provider::WorkOS => vec![workos::SIGNATURE_HEADER],
+        Provider::WooCommerce => vec![woocommerce::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -540,6 +551,7 @@ pub(crate) fn verify_ref(
         Provider::Mux => mux::verify(headers, raw_body, secret, options),
         Provider::Zendesk => zendesk::verify(headers, raw_body, secret, options),
         Provider::WorkOS => workos::verify(headers, raw_body, secret, options),
+        Provider::WooCommerce => woocommerce::verify(headers, raw_body, secret, options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, options),
         #[cfg(not(feature = "paypal"))]
@@ -1128,6 +1140,7 @@ mod tests {
         assert_eq!(Provider::Mux.to_string(), "Mux");
         assert_eq!(Provider::Zendesk.to_string(), "Zendesk");
         assert_eq!(Provider::WorkOS.to_string(), "WorkOS");
+        assert_eq!(Provider::WooCommerce.to_string(), "WooCommerce");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1193,6 +1206,7 @@ mod tests {
             ("mux", Provider::Mux),
             ("zendesk", Provider::Zendesk),
             ("workos", Provider::WorkOS),
+            ("woocommerce", Provider::WooCommerce),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1242,6 +1256,7 @@ mod tests {
             Provider::Mux,
             Provider::Zendesk,
             Provider::WorkOS,
+            Provider::WooCommerce,
             Provider::StandardWebhooks,
         ];
         for provider in providers {
@@ -1297,7 +1312,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 31] {
+    fn provider_list() -> [Provider; 32] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1329,6 +1344,7 @@ mod tests {
             Provider::Mux,
             Provider::Zendesk,
             Provider::WorkOS,
+            Provider::WooCommerce,
             Provider::StandardWebhooks,
         ]
     }

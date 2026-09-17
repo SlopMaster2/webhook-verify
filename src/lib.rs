@@ -82,6 +82,7 @@
 //! | Mux | HMAC-SHA256 over `t.body`, hex, `Mux-Signature` + tolerance window |
 //! | Zendesk | HMAC-SHA256 over `{timestamp}{raw_body}`, base64, `X-Zendesk-Webhook-Signature` + tolerance window |
 //! | WorkOS | HMAC-SHA256 over `t.body`, hex, `WorkOS-Signature` (`t=;v1=` list, millis timestamp floored for the replay window) |
+//! | WooCommerce | HMAC-SHA256 over raw body, base64, `X-WC-Webhook-Signature` (no timestamp) |
 //! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, ...) |
 //! | Custom | User-supplied HMAC scheme via [`Provider::Custom`] |
 //!
