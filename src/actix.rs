@@ -362,12 +362,17 @@ impl FromRequest for VerifiedBody {
                 }
             }
 
-            match crate::verify(
+            match crate::providers::verify_ref(
                 config.provider,
                 req.headers(),
                 raw_body.as_ref(),
                 &config.secret,
-                (*config.options).clone(),
+                // Borrow the shared options out of the `Arc`; the by-value
+                // `crate::verify()` would deep-clone them on every request
+                // (copying `verifying_material`, `request_url`, ...), which is
+                // exactly the copying the `WebhookConfig` `Arc`s exist to
+                // avoid.
+                config.options.as_ref(),
             ) {
                 Ok(()) => Ok(VerifiedBody(raw_body)),
                 Err(error) => Err(WebhookVerificationError(Rejection::Verify(error))),

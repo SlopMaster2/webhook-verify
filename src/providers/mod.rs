@@ -489,47 +489,68 @@ pub fn verify(
     secret: &Secret,
     options: VerifyOptions,
 ) -> Result<(), VerifyError> {
+    // The by-value signature is pure ergonomics: no provider mutates its
+    // options, so delegate to the borrowing dispatch below immediately rather
+    // than ever cloning the caller's options.
+    verify_ref(provider, headers, raw_body, secret, &options)
+}
+
+/// The shared verification dispatch, taking `options` by reference.
+///
+/// [`verify`] and [`verify_any`] accept [`VerifyOptions`] by value for API
+/// ergonomics but never mutate them; both delegate here, and the tower/actix
+/// adapters call this directly. That keeps repeated verifications from
+/// deep-cloning the caller's options on every call — the per-secret loop
+/// inside `verify_any` and every request through a framework adapter would
+/// otherwise copy `request_url`, `form_params`, `webhook_id`, and the
+/// `verifying_material` key/certificate bytes each time, despite `verify`
+/// only ever reading them.
+pub(crate) fn verify_ref(
+    provider: Provider,
+    headers: &dyn HeaderMap,
+    raw_body: &[u8],
+    secret: &Secret,
+    options: &VerifyOptions,
+) -> Result<(), VerifyError> {
     match provider {
-        Provider::Discord => discord::verify(headers, raw_body, secret, &options),
-        Provider::GitHub => github::verify(headers, raw_body, secret, &options),
-        Provider::Bitbucket => bitbucket::verify(headers, raw_body, secret, &options),
-        Provider::HubSpot => hubspot::verify(headers, raw_body, secret, &options),
-        Provider::Linear => linear::verify(headers, raw_body, secret, &options),
-        Provider::LaunchDarkly => launchdarkly::verify(headers, raw_body, secret, &options),
-        Provider::Notion => notion::verify(headers, raw_body, secret, &options),
-        Provider::Zoom => zoom::verify(headers, raw_body, secret, &options),
-        Provider::Shopify => shopify::verify(headers, raw_body, secret, &options),
-        Provider::Slack => slack::verify(headers, raw_body, secret, &options),
-        Provider::Square => square::verify(headers, raw_body, secret, &options),
-        Provider::Stripe => stripe::verify(headers, raw_body, secret, &options),
-        Provider::StandardWebhooks => {
-            standard_webhooks::verify(headers, raw_body, secret, &options)
-        }
-        Provider::Twilio => twilio::verify(headers, raw_body, secret, &options),
-        Provider::Twitch => twitch::verify(headers, raw_body, secret, &options),
-        Provider::Typeform => typeform::verify(headers, raw_body, secret, &options),
-        Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, &options),
-        Provider::Coinbase => coinbase::verify(headers, raw_body, secret, &options),
-        Provider::Dropbox => dropbox::verify(headers, raw_body, secret, &options),
-        Provider::Razorpay => razorpay::verify(headers, raw_body, secret, &options),
-        Provider::LemonSqueezy => lemonsqueezy::verify(headers, raw_body, secret, &options),
-        Provider::Xero => xero::verify(headers, raw_body, secret, &options),
-        Provider::Sentry => sentry::verify(headers, raw_body, secret, &options),
-        Provider::Adyen => adyen::verify(headers, raw_body, secret, &options),
-        Provider::Mux => mux::verify(headers, raw_body, secret, &options),
-        Provider::Zendesk => zendesk::verify(headers, raw_body, secret, &options),
-        Provider::WorkOS => workos::verify(headers, raw_body, secret, &options),
+        Provider::Discord => discord::verify(headers, raw_body, secret, options),
+        Provider::GitHub => github::verify(headers, raw_body, secret, options),
+        Provider::Bitbucket => bitbucket::verify(headers, raw_body, secret, options),
+        Provider::HubSpot => hubspot::verify(headers, raw_body, secret, options),
+        Provider::Linear => linear::verify(headers, raw_body, secret, options),
+        Provider::LaunchDarkly => launchdarkly::verify(headers, raw_body, secret, options),
+        Provider::Notion => notion::verify(headers, raw_body, secret, options),
+        Provider::Zoom => zoom::verify(headers, raw_body, secret, options),
+        Provider::Shopify => shopify::verify(headers, raw_body, secret, options),
+        Provider::Slack => slack::verify(headers, raw_body, secret, options),
+        Provider::Square => square::verify(headers, raw_body, secret, options),
+        Provider::Stripe => stripe::verify(headers, raw_body, secret, options),
+        Provider::StandardWebhooks => standard_webhooks::verify(headers, raw_body, secret, options),
+        Provider::Twilio => twilio::verify(headers, raw_body, secret, options),
+        Provider::Twitch => twitch::verify(headers, raw_body, secret, options),
+        Provider::Typeform => typeform::verify(headers, raw_body, secret, options),
+        Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, options),
+        Provider::Coinbase => coinbase::verify(headers, raw_body, secret, options),
+        Provider::Dropbox => dropbox::verify(headers, raw_body, secret, options),
+        Provider::Razorpay => razorpay::verify(headers, raw_body, secret, options),
+        Provider::LemonSqueezy => lemonsqueezy::verify(headers, raw_body, secret, options),
+        Provider::Xero => xero::verify(headers, raw_body, secret, options),
+        Provider::Sentry => sentry::verify(headers, raw_body, secret, options),
+        Provider::Adyen => adyen::verify(headers, raw_body, secret, options),
+        Provider::Mux => mux::verify(headers, raw_body, secret, options),
+        Provider::Zendesk => zendesk::verify(headers, raw_body, secret, options),
+        Provider::WorkOS => workos::verify(headers, raw_body, secret, options),
         #[cfg(feature = "paypal")]
-        Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
+        Provider::PayPal => paypal::verify(headers, raw_body, secret, options),
         #[cfg(not(feature = "paypal"))]
         Provider::PayPal => Err(VerifyError::UnsupportedProvider),
         #[cfg(feature = "sendgrid")]
-        Provider::SendGrid => sendgrid::verify(headers, raw_body, secret, &options),
+        Provider::SendGrid => sendgrid::verify(headers, raw_body, secret, options),
         #[cfg(not(feature = "sendgrid"))]
         Provider::SendGrid => Err(VerifyError::UnsupportedProvider),
-        Provider::Paddle => paddle::verify(headers, raw_body, secret, &options),
-        Provider::PagerDuty => pagerduty::verify(headers, raw_body, secret, &options),
-        Provider::Custom(scheme) => custom::verify(&scheme, headers, raw_body, secret, &options),
+        Provider::Paddle => paddle::verify(headers, raw_body, secret, options),
+        Provider::PagerDuty => pagerduty::verify(headers, raw_body, secret, options),
+        Provider::Custom(scheme) => custom::verify(&scheme, headers, raw_body, secret, options),
     }
 }
 
@@ -643,7 +664,12 @@ pub fn verify_any(
     let mut any_well_formed_mismatch = false;
 
     for secret in secrets {
-        match verify(provider, headers, raw_body, secret, options.clone()) {
+        // Verify against a single borrow of `options`, not a fresh deep clone
+        // per secret: rotation slices are iterated on the hot path, and the
+        // options may carry heap-allocated context (`verifying_material`,
+        // `request_url`, `form_params`) that costs a redundant allocation to
+        // copy for every key.
+        match verify_ref(provider, headers, raw_body, secret, &options) {
             // A match on any active key is enough during rotation.
             Ok(()) => return Ok(()),
             // A well-formed key that simply doesn't match: keep trying the

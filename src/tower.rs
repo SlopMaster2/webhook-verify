@@ -363,12 +363,17 @@ where
                 }
             }
 
-            if let Err(error) = crate::verify(
+            if let Err(error) = crate::providers::verify_ref(
                 config.provider,
                 &parts.headers,
                 raw_body.as_ref(),
                 &config.secret,
-                (*config.options).clone(),
+                // Borrow the shared options straight out of the `Arc`; the
+                // by-value `crate::verify()` would deep-clone them on every
+                // request (copying `verifying_material`, `request_url`, ...),
+                // which is exactly the copying the `Config` `Arc`s exist to
+                // avoid.
+                config.options.as_ref(),
             ) {
                 return Ok(rejection_response::<ResB>(&error));
             }
