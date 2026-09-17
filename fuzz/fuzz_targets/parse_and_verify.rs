@@ -96,6 +96,17 @@
 //!   prefix, no timestamp).
 //! - `shopify-base64-signature` — Shopify's base64 HMAC-SHA256 signature (no
 //!   prefix, no timestamp).
+//! - `twilio-base64-signature` — Twilio's documented example signature
+//!   (`X-Twilio-Signature`, sha1 base64 over the request URL + sorted form
+//!   fields), reaching base64 decode, the 20-byte gate, and the HMAC comparison
+//!   constructed from the `twilio_options` below.
+//! - `paypal-signature-delivery` — PayPal's published example delivery (the
+//!   five `PayPal-*` headers, RFC 3339 transmission time, decimal CRC-32
+//!   signed string, and the docs event body), reaching the RSA/X.509 and
+//!   replay paths with caller-supplied `webhook_id`.
+//! - `sendgrid-ecdsa-delivery` — SendGrid's official test vector (two-header
+//!   shape, `{timestamp}{body}` message, P-256 key from the provider's own
+//!   suite), reaching DER/SPKI parsing and ECDSA verification.
 //! - `header-garbage-without-body-separator` — an adversarial malformed input
 //!   with no `\n\n` separator, anchoring the parser's fail-closed paths.
 
