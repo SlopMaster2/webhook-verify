@@ -270,6 +270,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Lint: `missing_debug_implementations`** — all public types are now
+  required to implement `Debug`, enforced by `#![deny(missing_debug_implementations)]`
+  (mirrors the existing `#![deny(missing_docs)]` guard). Every public type
+  already has a deliberately-redacted `Debug` impl (spec §4.3: `Secret`,
+  `VerifyOptions`, `VerifyingKeyMaterial`, and `WebhookConfig` never surface
+  secret material, raw bodies, or request URLs), so this is a zero-behavior
+  hardening lint that prevents a new public type from shipping without a
+  safe-to-log `Debug` impl — the same "guard future API surface" philosophy as
+  the `missing_docs` deny that this entry mirrors.
 - **Docs: GitLab discoverability** — GitLab's webhook "signing token" (GitLab
   19.0+) implements the Standard Webhooks specification, so
   `Provider::StandardWebhooks` verifies it with no new code. Documented in the
