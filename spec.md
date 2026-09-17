@@ -64,6 +64,7 @@ pub enum Provider {
     Sentry,
     Adyen,
     Mux,
+    Zendesk,
     StandardWebhooks,
     Custom(CustomScheme),
 }
@@ -1148,6 +1149,41 @@ direct uploads, etc.), which all share the `Mux-Signature` scheme.
   spelling, and the failure modes, constructed locally over exactly the
   documented construction; Mux's published example header is replayed as a
   well-formed-but-mismatching input.
+
+### Zendesk
+
+Source: <https://developer.zendesk.com/documentation/webhooks/verifying>
+("Verifying webhook authenticity": header reference, the exact
+`base64(HMACSHA256(TIMESTAMP + BODY))` construction, and the Node reference
+implementation), corroborated by the request-header reference on
+<https://developer.zendesk.com/documentation/webhooks/anatomy-of-a-webhook-request>.
+
+- Headers: `X-Zendesk-Webhook-Signature`, `X-Zendesk-Webhook-Signature-Timestamp`
+  (RFC 3339, e.g. `2021-03-25T05:09:27Z`).
+- Signed string: `"{timestamp}{raw_body}"` — the timestamp header value exactly
+  as sent, concatenated with the raw request body bytes, no separators. The
+  timestamp's numeric grammar is never re-serialized into the signed bytes
+  (mirroring Twitch/PayPal, whose docs also sign the timestamp verbatim).
+- Algorithm: HMAC-SHA256, **base64**-encoded (standard alphabet with padding),
+  carried bare in the header — no `sha256=` prefix.
+- Key: the webhook's signing secret as its UTF-8 bytes, **not** decoded. The
+  docs' reference code keys the HMAC with the secret string verbatim
+  (`crypto.createHmac("sha256", SIGNING_SECRET)`); Zendesk never publishes the
+  raw key bytes, only the opaque secret string, so decoding it would be an
+  unsupported inference.
+- Replay protection: the timestamp is HMAC-covered, so the shared symmetric
+  `|now - t| > max_age` (default 300s) semantics apply, as with Twitch and
+  PayPal. Zendesk's docs only demonstrate the checksum comparison and do not
+  prescribe a window; applying the shared window is strictly stronger.
+- Test-vector provenance: Zendesk's docs publish example headers and a static
+  test-webhook secret
+  (`dGhpc19zZWNyZXRfaXNfZm9yX3Rlc3Rpbmdfb25seQ==`, decoding to
+  `this_secret_is_for_testing_only`) but no byte-exact example signature over a
+  body, so vectors are locally constructed against exactly the documented
+  construction (`timestamp` + raw body, keyed verbatim with that static secret,
+  base64-encoded): the timestamp mirrors the example on the anatomy page.
+  Constructed and cross-checked across OpenSSL and Python's `hmac` module.
+  Replace them if Zendesk ever publishes fixed vectors.
 
 ### Standard Webhooks spec
 

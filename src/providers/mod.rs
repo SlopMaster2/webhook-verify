@@ -35,6 +35,7 @@ mod twilio;
 mod twitch;
 mod typeform;
 mod xero;
+mod zendesk;
 mod zoom;
 
 pub use custom::{CustomScheme, Encoding, HashAlg};
@@ -195,6 +196,16 @@ pub enum Provider {
     /// signing-secret rotation (a match on any is accepted). The signing
     /// secret is the per-webhook `signing_secret` from the Mux Webhooks API.
     Mux,
+    /// Zendesk (`X-Zendesk-Webhook-Signature`, HMAC-SHA256 over
+    /// `{timestamp}{raw_body}`, base64, `X-Zendesk-Webhook-Signature-Timestamp`
+    /// in RFC 3339).
+    ///
+    /// The signed string concatenates the timestamp *exactly as sent* with the
+    /// raw body — no separators (`base64(HMACSHA256(TIMESTAMP + BODY))`). The
+    /// timestamp is HMAC-covered, so the shared `max_age` replay window
+    /// applies. The signing secret is used verbatim as the HMAC key (the docs'
+    /// reference code never base64-decodes it).
+    Zendesk,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -243,6 +254,7 @@ impl fmt::Display for Provider {
             Provider::Sentry => f.write_str("Sentry"),
             Provider::Adyen => f.write_str("Adyen"),
             Provider::Mux => f.write_str("Mux"),
+            Provider::Zendesk => f.write_str("Zendesk"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -307,6 +319,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("sentry") => Ok(Provider::Sentry),
             n if n.eq_ignore_ascii_case("adyen") => Ok(Provider::Adyen),
             n if n.eq_ignore_ascii_case("mux") => Ok(Provider::Mux),
+            n if n.eq_ignore_ascii_case("zendesk") => Ok(Provider::Zendesk),
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks") =>
             {
@@ -328,7 +341,7 @@ impl fmt::Display for ProviderParseError {
         "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, `mux`, or `standardwebhooks` (or `standard webhooks`) \
+             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -381,6 +394,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Sentry => vec![sentry::SIGNATURE_HEADER],
         Provider::Adyen => vec![adyen::SIGNATURE_HEADER],
         Provider::Mux => vec![mux::SIGNATURE_HEADER],
+        Provider::Zendesk => vec![zendesk::SIGNATURE_HEADER, zendesk::TIMESTAMP_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -481,6 +495,7 @@ pub fn verify(
         Provider::Sentry => sentry::verify(headers, raw_body, secret, &options),
         Provider::Adyen => adyen::verify(headers, raw_body, secret, &options),
         Provider::Mux => mux::verify(headers, raw_body, secret, &options),
+        Provider::Zendesk => zendesk::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
         #[cfg(not(feature = "paypal"))]
@@ -1061,6 +1076,7 @@ mod tests {
         assert_eq!(Provider::Sentry.to_string(), "Sentry");
         assert_eq!(Provider::Adyen.to_string(), "Adyen");
         assert_eq!(Provider::Mux.to_string(), "Mux");
+        assert_eq!(Provider::Zendesk.to_string(), "Zendesk");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1123,6 +1139,7 @@ mod tests {
             ("sentry", Provider::Sentry),
             ("adyen", Provider::Adyen),
             ("mux", Provider::Mux),
+            ("zendesk", Provider::Zendesk),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1169,6 +1186,7 @@ mod tests {
             Provider::Sentry,
             Provider::Adyen,
             Provider::Mux,
+            Provider::Zendesk,
             Provider::StandardWebhooks,
         ];
         for provider in providers {
@@ -1224,7 +1242,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 28] {
+    fn provider_list() -> [Provider; 29] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1253,6 +1271,7 @@ mod tests {
             Provider::Sentry,
             Provider::Adyen,
             Provider::Mux,
+            Provider::Zendesk,
             Provider::StandardWebhooks,
         ]
     }
