@@ -66,6 +66,7 @@ pub enum Provider {
     Adyen,
     Mux,
     Zendesk,
+    WorkOS,
     StandardWebhooks,
     Custom(CustomScheme),
 }
@@ -1214,6 +1215,58 @@ implementation), corroborated by the request-header reference on
   base64-encoded): the timestamp mirrors the example on the anatomy page.
   Constructed and cross-checked across OpenSSL and Python's `hmac` module.
   Replace them if Zendesk ever publishes fixed vectors.
+
+### WorkOS
+
+Source: <https://workos.com/docs/events/data-syncing/webhooks> ("Sync data
+with webhooks" — the manual-verification section), corroborated by the
+official SDKs' webhook verifiers (e.g. `workos-go`'s `WebhookVerifier`) and
+the SDK reference documentation
+(<https://workos-workos-node.mintlify.app/api/webhooks>: the
+`workos-signature` header value is "in format `t=,v1=`").
+
+- Header: `WorkOS-Signature: t=<epoch_ms>,v1=<hex_hmac>` — a comma-separated
+  `key=value` list. The docs: "There are two values to parse from the
+  `WorkOS-Signature` header, delimited by a `,` character." `t` is the
+  `issued_timestamp` — **epoch milliseconds** (13 digits), not seconds —
+  `v1` is the HMAC-SHA256 signature over `{t}.{raw_body}` and is the only
+  scheme defined.
+- Signed string: `"{t}.{raw_body}"` — the `t` value exactly as it appears in
+  the header (sub-second digits included), a literal dot, then the raw request
+  body bytes, unmodified (the docs build "`issued_timestamp`, the `.`
+  character, the request's body as a utf-8 decoded string" and warn that
+  parsing the body before signing breaks the signature).
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded, keyed by the
+  webhook signing secret as a plain UTF-8 string ("using the webhook secret as
+  the key" — never decoded, matching the SDK verifiers).
+- Timestamp validation routes through the shared pure-ASCII-digit
+  epoch-milliseconds parser (`parse_millis`, the same shape rules HubSpot's
+  millisecond timestamp uses): sign-prefixed, whitespace-padded, empty, or
+  overflowing values fail closed as `MalformedHeader`.
+- Replay protection: WorkOS's SDKs take a tolerance window in **seconds**
+  (their defaults are "usually 3–5 minutes"; the PHP SDK's example passes
+  `180`, the .NET example `300`), so the shared symmetric
+  `|now - t| > max_age` (default 300s) semantics apply, as with Slack, Zoom,
+  Cloudflare, Coinbase, and HubSpot. Because `t` is epoch milliseconds, the
+  parsed value is floored to whole seconds (`millis / 1000`) before the shared
+  check — identical treatment to HubSpot's `X-HubSpot-Request-Timestamp`; the
+  sub-second truncation error (< 1s) is negligible against any configured
+  window. The future-dated half of the symmetry is stricter than the SDKs
+  enforce but cannot reject legitimate deliveries.
+- Duplicate `t` or `v1` elements are rejected as ambiguous (`spec.md` §4.4) —
+  never first-wins; unknown elements are discarded for forward compatibility.
+  The docs define exactly two comma-delimited elements, so a duplicate
+  signature element is treated as malformed rather than rotation, matching the
+  Coinbase treatment of its single `v0` field (Mux's rotation-list acceptance
+  exists only because its docs/SDKs explicitly define multiple `v1` values).
+- Test-vector provenance: WorkOS publishes no byte-exact example signature, so
+  vectors are locally constructed over exactly the documented construction
+  (`{t}.{raw_body}`, HMAC-SHA256 hex against the docs' manual-verification
+  recipe), cross-checked with OpenSSL. The `t` value is a deliberate
+  non-round millisecond timestamp so the sub-second-truncation boundary is
+  exercised by the primary vector. The SDK reference's sample header
+  (`t=1234567890,v1=...`) is replayed as a well-formed-but-mismatching input.
+  Replace them if WorkOS ever publishes fixed vectors.
 
 ### Standard Webhooks spec
 

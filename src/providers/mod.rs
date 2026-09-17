@@ -35,6 +35,7 @@ mod stripe;
 mod twilio;
 mod twitch;
 mod typeform;
+mod workos;
 mod xero;
 mod zendesk;
 mod zoom;
@@ -211,6 +212,14 @@ pub enum Provider {
     /// applies. The signing secret is used verbatim as the HMAC key (the docs'
     /// reference code never base64-decodes it).
     Zendesk,
+    /// WorkOS (`WorkOS-Signature`, HMAC-SHA256 over `{t}.{raw_body}`, hex,
+    /// `t=...;v1=...` list with the timestamp in epoch milliseconds).
+    ///
+    /// The signed string reuses the `t` value *exactly as sent* (milliseconds
+    /// included), a literal dot, then the raw body. The timestamp is
+    /// HMAC-covered, so the shared `max_age` replay window applies after the
+    /// millisecond value is floored to whole seconds (as with HubSpot).
+    WorkOS,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -261,6 +270,7 @@ impl fmt::Display for Provider {
             Provider::Adyen => f.write_str("Adyen"),
             Provider::Mux => f.write_str("Mux"),
             Provider::Zendesk => f.write_str("Zendesk"),
+            Provider::WorkOS => f.write_str("WorkOS"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -327,6 +337,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("adyen") => Ok(Provider::Adyen),
             n if n.eq_ignore_ascii_case("mux") => Ok(Provider::Mux),
             n if n.eq_ignore_ascii_case("zendesk") => Ok(Provider::Zendesk),
+            n if n.eq_ignore_ascii_case("workos") => Ok(Provider::WorkOS),
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks") =>
             {
@@ -349,7 +360,7 @@ impl fmt::Display for ProviderParseError {
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
              `launchdarkly`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, or `standardwebhooks` (or `standard webhooks`) \
+             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -404,6 +415,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Adyen => vec![adyen::SIGNATURE_HEADER],
         Provider::Mux => vec![mux::SIGNATURE_HEADER],
         Provider::Zendesk => vec![zendesk::SIGNATURE_HEADER, zendesk::TIMESTAMP_HEADER],
+        Provider::WorkOS => vec![workos::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -506,6 +518,7 @@ pub fn verify(
         Provider::Adyen => adyen::verify(headers, raw_body, secret, &options),
         Provider::Mux => mux::verify(headers, raw_body, secret, &options),
         Provider::Zendesk => zendesk::verify(headers, raw_body, secret, &options),
+        Provider::WorkOS => workos::verify(headers, raw_body, secret, &options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, &options),
         #[cfg(not(feature = "paypal"))]
@@ -1088,6 +1101,7 @@ mod tests {
         assert_eq!(Provider::Adyen.to_string(), "Adyen");
         assert_eq!(Provider::Mux.to_string(), "Mux");
         assert_eq!(Provider::Zendesk.to_string(), "Zendesk");
+        assert_eq!(Provider::WorkOS.to_string(), "WorkOS");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1152,6 +1166,7 @@ mod tests {
             ("adyen", Provider::Adyen),
             ("mux", Provider::Mux),
             ("zendesk", Provider::Zendesk),
+            ("workos", Provider::WorkOS),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1199,6 +1214,7 @@ mod tests {
             Provider::Adyen,
             Provider::Mux,
             Provider::Zendesk,
+            Provider::WorkOS,
             Provider::StandardWebhooks,
         ];
         for provider in providers {
@@ -1254,7 +1270,7 @@ mod tests {
     /// parse-error guard it serves; the display/round-trip tests retain their
     /// own explicit lists so a mismatch between the two is caught, not
     /// masked by shared state.
-    fn provider_list() -> [Provider; 30] {
+    fn provider_list() -> [Provider; 31] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1285,6 +1301,7 @@ mod tests {
             Provider::Adyen,
             Provider::Mux,
             Provider::Zendesk,
+            Provider::WorkOS,
             Provider::StandardWebhooks,
         ]
     }

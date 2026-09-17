@@ -77,6 +77,9 @@
 //! - `mux-t-v1-signature` — Mux's combined `t=...,v1=...` header with a
 //!   `v1=` rotation list, reaching the comma-split, timestamp parse, hex
 //!   decode, and multi-element HMAC comparison.
+//! - `workos-t-v1-delivery` — WorkOS's combined `t=...,v1=...` header with an
+//!   epoch-*millisecond* timestamp, reaching the comma-split, ms-timestamp
+//!   parse, hex decode, and HMAC comparison.
 //! - `notion-sha256-prefix-delivery` — Notion's official `sha256=` sample value,
 //!   reaching prefix match, hex decode, and the 32-byte gate.
 //! - `typeform-sha256-prefix-signature` — Typeform's documented `sha256=` +
@@ -243,6 +246,11 @@ const IMPLEMENTED: &[Provider] = &[
     // reach its signature path; a well-formed-shaped attempt below reaches its
     // timestamp parse, base64 decode, and `{timestamp}{body}` HMAC comparison.
     Provider::Zendesk,
+    // WorkOS needs a combined `t=...,v1=...` header to reach its signature
+    // path; arbitrary bytes exercise the comma/key-value splitting and
+    // empty-header rejection, and a well-formed-shaped attempt below
+    // reaches its hex-decode/comparison and ms→s replay paths too.
+    Provider::WorkOS,
 ];
 
 /// A well-formed secret for each provider's scheme, so the fuzzer reaches the
@@ -780,6 +788,22 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "x-xero-signature".to_string(),
             "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // WorkOS: a well-formed-shaped `WorkOS-Signature` (digit epoch-ms t,
+    // valid-hex 32-byte v1) lets arbitrary body bytes reach the 32-byte length
+    // gate and HMAC comparison, and the `t` digits reach the ms→s replay
+    // handling; without it the loop above mostly fails earlier on
+    // malformed/missing header fields.
+    attempt(
+        Provider::WorkOS,
+        &[(
+            "WorkOS-Signature".to_string(),
+            "t=1720000000554,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,
