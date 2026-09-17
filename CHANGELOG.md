@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: WorkOS** (`Provider::WorkOS`): HMAC-SHA256 over
+  `{t}.{raw_body}`, hex-encoded, delivered in the `WorkOS-Signature` header as
+  a comma-separated `t=<epoch_ms>,v1=<hex_hmac>` list. The `t` timestamp is in
+  epoch **milliseconds** and rides verbatim into the signed string (sub-second
+  digits included), then is floored to whole seconds for the shared symmetric
+  `max_age` replay window (WorkOS's SDKs take the tolerance in seconds, "usually
+  3–5 minutes"). Duplicate `t`/`v1` elements are rejected as ambiguous
+  (`spec.md` §4.4); unknown elements are ignored for forward compatibility.
+  Source: <https://workos.com/docs/events/data-syncing/webhooks> ("Sync data
+  with webhooks" — manual-verification section), corroborated by the official
+  SDK verifiers (`workos-go`'s `WebhookVerifier`) and the SDK reference
+  (`workos-workos-node.mintlify.app/api/webhooks`). WorkOS publishes no
+  byte-exact example signature, so the vectors are locally constructed over
+  exactly the documented construction with a non-round millisecond timestamp
+  (exercising the sub-second truncation boundary), cross-checked with OpenSSL.
 - **New provider: LaunchDarkly** (`Provider::LaunchDarkly`): HMAC-SHA256 over
   the raw body bytes, hex-encoded and delivered bare (no `sha256=` prefix) in
   the `X-LD-Signature` header. The signing secret configured on the
