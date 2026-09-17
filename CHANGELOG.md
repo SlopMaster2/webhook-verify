@@ -192,6 +192,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build; `riscv32imac-unknown-none-elf` is a bare-metal target with no
   standard library, closing the gap between the spec.md §7 claim and CI
   enforcement.
+- CI now gates the crates.io tarball with a `cargo package --all-features` job
+  (`package`). `cargo package` verifies two things no other job checks: the
+  packaged **file list** stays free of tracked debris that would ship
+  verbatim in the tarball (the regression class that shipped
+  `probe_ci_write_test.yml` earlier — nothing checked the tarball contents),
+  and the packaged tree compiles with every feature from a clean extract, so
+  a feature-gated module that builds in-repo but would fail for a crates.io
+  consumer is caught pre-merge instead of at first release. Previously this
+  was a manual `cargo package` step in the README's releasing flow only.
 - The Standard Webhooks provider's test module now covers the §5.5
   garbage-value case for the opaque `webhook-id` header: a non-id-shaped
   value is pinned as well-formed (verified against a signature made over it)

@@ -134,6 +134,24 @@ jobs:
           tool: cargo-semver-checks
       - run: cargo semver-checks
 
+  package:
+    name: cargo package (publish tarball)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The crates.io tarball is the exact artifact downstream consumers
+      # install, and `cargo package` succeeds only if two things no other job
+      # checks hold: (a) the packaged file list is clean — no tracked debris
+      # that would ship verbatim (the class that shipped
+      # `probe_ci_write_test.yml` earlier), and (b) the packaged tree
+      # compiles from a clean extract. `--all-features` matches the crate's
+      # own gate discipline everywhere else: every feature-gated module ships
+      # in the tarball, so a default-features-only verify would hide a broken
+      # feature combo that crates.io users could reach directly.
+      - run: cargo package --all-features
+
   constant-time:
     name: constant-time assertion (informational)
     runs-on: ubuntu-latest
