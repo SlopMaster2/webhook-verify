@@ -15,7 +15,11 @@ mod discord;
 mod dropbox;
 mod github;
 mod hubspot;
-mod klaviyo;
+/// Header-name constants re-exported publicly for Klaviyo's caller-side
+/// webhook-id pair check ([`crate::klaviyo`]). `pub` so the crate root can
+/// re-export them without traversing a private module path; the enclosing
+/// `providers` module stays crate-private.
+pub mod klaviyo;
 mod launchdarkly;
 mod lemonsqueezy;
 mod linear;

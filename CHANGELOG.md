@@ -341,6 +341,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Provider::StandardWebhooks` verifies it with no new code. Documented in the
   README provider table, `spec.md` §3, and the module docs. Source:
   <https://docs.gitlab.com/user/project/integrations/webhooks>.
+- **Klaviyo header constants are now public** —
+  [`klaviyo::SIGNATURE_HEADER`](crate::klaviyo::SIGNATURE_HEADER),
+  [`klaviyo::TIMESTAMP_HEADER`](crate::klaviyo::TIMESTAMP_HEADER),
+  and the new
+  [`klaviyo::WEBHOOK_ID_HEADER`](crate::klaviyo::WEBHOOK_ID_HEADER)
+  are exported so callers performing Klaviyo's delegated
+  `Klaviyo-Webhook-Id` ↔ `meta.klaviyo_webhook_id` pair check after a
+  successful `verify()` can reference the actual header spellings instead of
+  hardcoding them. The module docs previously directed callers to "the
+  constants in this module" that were not part of the public API and carried
+  no constant for the webhook-id header at all; the docs now point at the real
+  items (also fixing a non-resolving intra-doc link).
 - The crate-level `missing_docs` lint is `deny` instead of `warn`: an
   undocumented public item is now a hard compile error in every configuration
   (stable/MSRV/beta, clippy, and the `no_std` feature matrix) instead of a
