@@ -1368,6 +1368,8 @@ mod tests {
             (Provider::Sentry, &[sentry::SIGNATURE_HEADER]),
             (Provider::Adyen, &[adyen::SIGNATURE_HEADER]),
             (Provider::Mux, &[mux::SIGNATURE_HEADER]),
+            (Provider::Paddle, &[paddle::SIGNATURE_HEADER]),
+            (Provider::PagerDuty, &[pagerduty::SIGNATURE_HEADER]),
             (
                 Provider::Zendesk,
                 &[zendesk::SIGNATURE_HEADER, zendesk::TIMESTAMP_HEADER],
