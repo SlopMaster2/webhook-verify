@@ -51,6 +51,7 @@ pub enum Provider {
     Discord,
     PayPal,
     SendGrid,
+    Paystack,
     Paddle,
     PagerDuty,
     Linear,
@@ -964,6 +965,37 @@ body may be hashed).
   and body `{c:1, d:2}` → `58fd9fac909b57d776606e9313e83a26a9e67a3488b9ca7259134e09f4badfb1`.
   Additional vectors cover the empty and UTF-8 body boundary cases, constructed
   locally with `openssl` over exactly the documented construction.
+
+### Paystack
+
+Source: <https://paystack.com/docs/payments/webhooks/> ("Verify event origin →
+Signature validation": the `x-paystack-signature` header, the HMAC-SHA512
+construction, and the secret-key requirement).
+
+- Header: `x-paystack-signature: <hex_hmac>` — a bare lowercase hex digest, no
+  prefix and no timestamp; same shape as Dropbox, Razorpay, and Lemon Squeezy,
+  but the **only built-in provider keyed with HMAC-SHA512** rather than
+  SHA-256. Paystack's docs' Node sample hashes `JSON.stringify(req.body)`,
+  which only works when a framework reproduces Paystack's exact bytes; this
+  crate hashes the raw request bytes verbatim (`§4`), the construction that
+  survives a non-normalizing proxy.
+- Signed string: raw body bytes, unmodified.
+- Algorithm: HMAC-SHA512, hex-encoded. Key: the Paystack secret key from the
+  dashboard ("Settings → API Keys & Webhooks") as its UTF-8 bytes, matching the
+  documented construction
+  (`crypto.createHmac("sha512", secret).update(body).digest("hex")`).
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Shopify/Dropbox/Linear. Paystack's docs recommend IP allow-listing
+  the documented source address ranges as a complement to signature
+  validation, which is a deployment concern outside this crate's scope.
+- Test-vector provenance: Paystack's docs describe the construction but publish
+  no byte-exact example signature, so the implementation is validated against
+  locally constructed, deterministic vectors over exactly the documented
+  construction (the primary vector's body mirrors the shape of Paystack's
+  documented `charge.success` event; the vectors were independently
+  cross-checked with Python `hmac` against `openssl`, and the SHA-256-length
+  reject case pins the 64-byte digest shape). Replace them if Paystack ever
+  publishes fixed vectors.
 
 ### Zoom
 

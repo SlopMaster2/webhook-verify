@@ -97,7 +97,8 @@ pub(crate) fn verify_hmac_sha1(
 ///
 /// Same guarantees as [`verify_hmac_sha256`]. Used by [`crate::CustomScheme`]
 /// (`spec.md` §2.2), whose `HashAlg::Sha512` option covers long-tail senders
-/// standardizing on SHA-512 HMACs.
+/// standardizing on SHA-512 HMACs, and by `Provider::Paystack`, the only
+/// built-in provider whose scheme mandates HMAC-SHA512 (`spec.md` §3).
 #[must_use]
 pub(crate) fn verify_hmac_sha512(
     key: &[u8],

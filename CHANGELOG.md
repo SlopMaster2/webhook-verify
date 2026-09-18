@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Paystack** (`Provider::Paystack`): HMAC-SHA512 over the raw
+  request body, **hex**-encoded, delivered bare (no prefix, no timestamp) in
+  the `x-paystack-signature` header. The signing key is the Paystack secret key
+  from the dashboard ("Settings → API Keys & Webhooks"), used verbatim as its
+  UTF-8 bytes. Paystack is the built-in providers' only HMAC-SHA512 scheme —
+  it exercises the shared `verify_hmac_sha512` helper that `CustomScheme`
+  previously used alone. No timestamp is signed, so the shared `max_age` replay
+  window has no effect (the docs recommend IP allow-listing as a complement,
+  which is a deployment concern outside this crate's scope). Source:
+  <https://paystack.com/docs/payments/webhooks/> ("Verify event origin →
+  Signature validation"). Paystack publishes no byte-exact example signature,
+  so the vectors are locally constructed over exactly the documented
+  construction, cross-checked across OpenSSL and Python; the 
+  SHA-256-length reject case pins the 64-byte digest shape.
 - **New provider: Klaviyo** (`Provider::Klaviyo`): HMAC-SHA256 over
   `{raw_body}{timestamp}` — the `Klaviyo-Timestamp` header value exactly as
   sent (IMF-fixdate / RFC 1123, e.g. `Thu, 04 Jan 2024 18:05:25 GMT`)
