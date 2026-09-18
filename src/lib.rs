@@ -71,6 +71,7 @@
 //! | Paystack | HMAC-SHA512 over raw body, hex, `x-paystack-signature` (no timestamp) |
 //! | Paddle | HMAC-SHA256 over `{ts}:{raw_body}`, hex, `Paddle-Signature` + tolerance window |
 //! | PagerDuty | HMAC-SHA256 over raw body, hex, `v1=` prefix, `X-PagerDuty-Signature` (`v1=` rotation list) |
+//! | Pusher | HMAC-SHA256 over raw POST body, hex, `X-Pusher-Signature` (keyed by the app token's secret, no timestamp) |
 //! | Linear | HMAC-SHA256, `linear-signature` |
 //! | LaunchDarkly | HMAC-SHA256 over raw body, hex, `X-LD-Signature` (no timestamp) |
 //! | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` |

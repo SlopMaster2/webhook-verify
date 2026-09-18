@@ -33,6 +33,7 @@ mod pagerduty;
 #[cfg(feature = "paypal")]
 mod paypal;
 mod paystack;
+mod pusher;
 mod razorpay;
 #[cfg(feature = "sendgrid")]
 mod sendgrid;
@@ -185,6 +186,13 @@ pub enum Provider {
     /// Go SDK). No timestamp rides in the header, so `max_age` has no effect
     /// for this provider.
     PagerDuty,
+    /// Pusher Channels (`X-Pusher-Signature`, HMAC-SHA256 over the raw POST
+    /// body, bare lowercase hex — no prefix, no timestamp).
+    ///
+    /// Keyed by the **secret** of the app token named in the `X-Pusher-Key`
+    /// header; the key itself is not part of the signed content. Pusher signs
+    /// no timestamp, so `max_age` has no effect for this provider.
+    Pusher,
     /// Linear (`linear-signature`, HMAC-SHA256).
     Linear,
     /// LaunchDarkly (`X-LD-Signature`, HMAC-SHA256 over the raw body, bare
@@ -348,6 +356,7 @@ impl fmt::Display for Provider {
             Provider::Paystack => f.write_str("Paystack"),
             Provider::Paddle => f.write_str("Paddle"),
             Provider::PagerDuty => f.write_str("PagerDuty"),
+            Provider::Pusher => f.write_str("Pusher"),
             Provider::Linear => f.write_str("Linear"),
             Provider::LaunchDarkly => f.write_str("LaunchDarkly"),
             Provider::Notion => f.write_str("Notion"),
@@ -419,6 +428,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("paystack") => Ok(Provider::Paystack),
             n if n.eq_ignore_ascii_case("paddle") => Ok(Provider::Paddle),
             n if n.eq_ignore_ascii_case("pagerduty") => Ok(Provider::PagerDuty),
+            n if n.eq_ignore_ascii_case("pusher") => Ok(Provider::Pusher),
             n if n.eq_ignore_ascii_case("linear") => Ok(Provider::Linear),
             n if n.eq_ignore_ascii_case("launchdarkly") => Ok(Provider::LaunchDarkly),
             n if n.eq_ignore_ascii_case("notion") => Ok(Provider::Notion),
@@ -461,7 +471,7 @@ impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `intercom`, `meta`, `hubspot`, `klaviyo`, `shopify`, \
-             `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `linear`, \
+             `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, \
              or `standardwebhooks` (or `standard webhooks`) \
@@ -562,6 +572,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::SendGrid => Vec::new(),
         Provider::Paddle => vec![paddle::SIGNATURE_HEADER],
         Provider::PagerDuty => vec![pagerduty::SIGNATURE_HEADER],
+        Provider::Pusher => vec![pusher::SIGNATURE_HEADER],
     }
 }
 
@@ -670,6 +681,7 @@ pub(crate) fn verify_ref(
         Provider::Paystack => paystack::verify(headers, raw_body, secret, options),
         Provider::Paddle => paddle::verify(headers, raw_body, secret, options),
         Provider::PagerDuty => pagerduty::verify(headers, raw_body, secret, options),
+        Provider::Pusher => pusher::verify(headers, raw_body, secret, options),
         Provider::Custom(scheme) => custom::verify(&scheme, headers, raw_body, secret, options),
     }
 }
@@ -1236,6 +1248,7 @@ mod tests {
         assert_eq!(Provider::Paystack.to_string(), "Paystack");
         assert_eq!(Provider::Paddle.to_string(), "Paddle");
         assert_eq!(Provider::PagerDuty.to_string(), "PagerDuty");
+        assert_eq!(Provider::Pusher.to_string(), "Pusher");
         assert_eq!(Provider::Linear.to_string(), "Linear");
         assert_eq!(Provider::LaunchDarkly.to_string(), "LaunchDarkly");
         assert_eq!(Provider::Notion.to_string(), "Notion");
@@ -1308,6 +1321,7 @@ mod tests {
             ("paystack", Provider::Paystack),
             ("paddle", Provider::Paddle),
             ("pagerduty", Provider::PagerDuty),
+            ("pusher", Provider::Pusher),
             ("linear", Provider::Linear),
             ("launchdarkly", Provider::LaunchDarkly),
             ("notion", Provider::Notion),
@@ -1457,6 +1471,7 @@ mod tests {
             (Provider::Mux, &[mux::SIGNATURE_HEADER]),
             (Provider::Paddle, &[paddle::SIGNATURE_HEADER]),
             (Provider::PagerDuty, &[pagerduty::SIGNATURE_HEADER]),
+            (Provider::Pusher, &[pusher::SIGNATURE_HEADER]),
             (
                 Provider::Zendesk,
                 &[zendesk::SIGNATURE_HEADER, zendesk::TIMESTAMP_HEADER],
@@ -1578,7 +1593,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 39] {
+    fn provider_list() -> [Provider; 40] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1599,6 +1614,7 @@ mod tests {
             Provider::Paystack,
             Provider::Paddle,
             Provider::PagerDuty,
+            Provider::Pusher,
             Provider::Linear,
             Provider::LaunchDarkly,
             Provider::Notion,

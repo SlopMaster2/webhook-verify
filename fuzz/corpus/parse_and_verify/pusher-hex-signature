@@ -1,0 +1,3 @@
+X-Pusher-Signature:159e9c6c5a6dc47e0b116262b621776395b5cf17eedc2376f33567d813fc5a71
+
+{"time_ms":1327078148132,"events":[{"name":"channel_occupied","channel":"presence-foobar"}]}

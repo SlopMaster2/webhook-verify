@@ -64,6 +64,9 @@
 //!   (`X-PagerDuty-Signature` with a `v1=` hex HMAC over the raw body, no
 //!   timestamp), reaching the `v1=` prefix strip, comma-split rotation-list
 //!   parsing, hex decode, the 32-byte gate, and HMAC comparison.
+//! - `pusher-hex-signature` — Pusher's `X-Pusher-Signature` bare hex
+//!   HMAC-SHA256 over the raw body (no prefix, no timestamp), reaching hex
+//!   decode, the 32-byte gate, and HMAC comparison.
 //! - `standard-webhooks-shape` — the official test-suite delivery (three
 //!   `webhook-*` headers), reaching the `v1,<base64>` split, base64 decode,
 //!   and multi-element comparison.
@@ -290,6 +293,10 @@ const IMPLEMENTED: &[Provider] = &[
     // hex-decode paths, and a well-formed-shaped attempt below reaches its
     // 32-byte gate and HMAC comparison.
     Provider::PagerDuty,
+    // Pusher is a single-header raw-body HMAC (bare hex, no prefix, no
+    // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
+    // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
+    Provider::Pusher,
     // Zendesk needs two headers (bare-base64 signature + RFC 3339 timestamp) to
     // reach its signature path; a well-formed-shaped attempt below reaches its
     // timestamp parse, base64 decode, and `{timestamp}{body}` HMAC comparison.
@@ -930,6 +937,20 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "X-PagerDuty-Signature".to_string(),
             "v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Pusher: a well-formed-shaped `X-Pusher-Signature` (valid hex sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::Pusher,
+        &[(
+            "X-Pusher-Signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,
