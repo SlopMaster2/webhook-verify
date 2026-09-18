@@ -369,6 +369,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ParseRFC3339Timestamp` now accepts lowercase `t`/`z` separators.** The
+  shared RFC 3339 parser (PayPal `PayPal-Transmission-Time`, Twitch
+  `Twitch-Eventsub-Message-Timestamp`, Zendesk
+  `X-Zendesk-Webhook-Signature-Timestamp`) previously rejected the lowercase
+  `t`/`z` spellings that RFC 3339 §5.6 explicitly permits as the ISO 8601
+  alternative to `T`/`Z`, producing a spurious `MalformedHeader` for an
+  otherwise-valid timestamp. Parsing is still fail-closed and the raw
+  timestamp bytes remain signature-covered, so accepting the RFC-legal
+  lowercase spelling does not widen any replay or forgery surface.
 - **Twitch: an empty `Twitch-Eventsub-Message-Id` now fails closed as
   `MalformedHeader`.** The message id stays opaque — no UUID/format grammar
   is imposed, and a garbage value is still signed verbatim and verifies only

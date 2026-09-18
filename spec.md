@@ -630,7 +630,8 @@ is locally constructed over exactly the documented construction.
   this matches the fail-closed treatment of Standard Webhooks' opaque
   `webhook-id` (`spec.md` §4.4).
 - Replay protection: the timestamp header is parsed through the shared RFC
-  3339 parser (sub-second precision truncated) and checked against the shared
+  3339 parser (sub-second precision truncated; the `T`/`Z` separators are
+  case-insensitive per the RFC 3339 §5.6 note) and checked against the shared
   symmetric `|now - t| <= max_age` window (default 300s), as with Zoom and
   Paddle. Twitch's docs demonstrate only the checksum comparison; applying
   the window is strictly stronger and cannot reject a fresh delivery.
@@ -744,7 +745,8 @@ certificate is supplied by the caller, mirroring SendGrid (§3).
   numeric window, so the shared default tolerance (symmetric
   `|now - t| <= max_age`, 300s, injectable clock) is applied. The RFC 3339
   instant is normalized to UTC (offsets and fractional seconds — truncated,
-  not rounded — are supported) before the window applies.
+  not rounded — are supported; the `T`/`Z` separators are case-insensitive
+  per the RFC 3339 §5.6 note) before the window applies.
 - Feature gate: shipped behind `features = ["paypal"]` (optional `rsa`,
   `x509-parser`, `crc32fast`). **Std-bounded today**: the certificate path's
   transitive defaults (`der-parser` and `nom`, pulled via `x509-parser`)
@@ -1213,7 +1215,9 @@ implementation), corroborated by the request-header reference on
   unsupported inference.
 - Replay protection: the timestamp is HMAC-covered, so the shared symmetric
   `|now - t| > max_age` (default 300s) semantics apply, as with Twitch and
-  PayPal. Zendesk's docs only demonstrate the checksum comparison and do not
+  PayPal; it is parsed through the same shared RFC 3339 parser (with the
+  `T`/`Z` separators case-insensitive per the RFC 3339 §5.6 note). Zendesk's
+  docs only demonstrate the checksum comparison and do not
   prescribe a window; applying the shared window is strictly stronger.
 - Test-vector provenance: Zendesk's docs publish example headers and a static
   test-webhook secret

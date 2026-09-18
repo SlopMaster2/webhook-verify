@@ -76,11 +76,14 @@ fn parse_unsigned_decimal(
 /// Parses an RFC 3339 / ISO 8601 `<date>T<time>` timestamp into unix seconds.
 ///
 /// Accepts the exact shapes the RFC 3339 timestamp headers use (`spec.md`
-/// §3): PayPal's `PayPal-Transmission-Time` and Twitch's
-/// `Twitch-Eventsub-Message-Timestamp` — `YYYY-MM-DDTHH:MM:SS`, an optional
-/// fractional-seconds component, and either a `Z` suffix or a numeric
-/// `±HH:MM` UTC offset. The fractional part (if any) is truncated —
-/// sub-second precision is below the resolution of the shared replay check.
+/// §3): PayPal's `PayPal-Transmission-Time`, Twitch's
+/// `Twitch-Eventsub-Message-Timestamp`, and Zendesk's
+/// `X-Zendesk-Webhook-Signature-Timestamp` — `YYYY-MM-DDTHH:MM:SS`, an
+/// optional fractional-seconds component, and either a `Z` suffix or a
+/// numeric `±HH:MM` UTC offset. The `T` and `Z` characters are
+/// case-insensitive, per RFC 3339 §5.6 note (a lowercase `t`/`z` is the ISO
+/// 8601 spelling). The fractional part (if any) is truncated — sub-second
+/// precision is below the resolution of the shared replay check.
 ///
 /// The conversion is a dependency-free reimplementation of Howard Hinnant's
 /// `days_from_civil` algorithm (C++ `<chrono>`), which maps a
@@ -106,7 +109,7 @@ pub(crate) fn parse_rfc3339_timestamp(
         && b[5..7].iter().all(u8::is_ascii_digit)
         && b[7] == b'-'
         && b[8..10].iter().all(u8::is_ascii_digit)
-        && b[10] == b'T'
+        && (b[10] == b'T' || b[10] == b't')
         && b[11..13].iter().all(u8::is_ascii_digit)
         && b[13] == b':'
         && b[14..16].iter().all(u8::is_ascii_digit)
@@ -170,10 +173,11 @@ pub(crate) fn parse_rfc3339_timestamp(
         }
     }
 
-    // UTC designator or a numeric ±HH:MM offset.
+    // UTC designator or a numeric ±HH:MM offset. RFC 3339 §5.6 allows the
+    // `Z` designator in lowercase (`z`) as the ISO 8601 spelling.
     let mut offset_seconds: i64 = 0;
     match b.get(i) {
-        Some(b'Z') => i += 1,
+        Some(b'Z') | Some(b'z') => i += 1,
         Some(b'+') | Some(b'-') => {
             let sign: i64 = if b[i] == b'-' { -1 } else { 1 };
             i += 1;
@@ -436,6 +440,17 @@ mod tests {
             assert_eq!(parse_header("2024-05-16T01:19:23-04:00"), Ok(1_715_836_763));
             // `+00:00` is the numeric spelling of the same instant as `Z`.
             assert_eq!(parse_header("2024-05-16T05:19:23+00:00"), Ok(1_715_836_763));
+        }
+
+        #[test]
+        fn accepts_lowercase_t_and_z_separators() {
+            // RFC 3339 §5.6 note: "the 'T' and 'Z' characters in this syntax
+            // may alternatively be lower case 't' or 'z' respectively."
+            assert_eq!(parse_header("2024-05-16t05:19:23z"), Ok(1_715_836_763));
+            assert_eq!(parse_header("2024-05-16t05:19:23Z"), Ok(1_715_836_763));
+            assert_eq!(parse_header("2024-05-16T05:19:23z"), Ok(1_715_836_763));
+            // A numeric offset is unaffected by the lowercase `t`.
+            assert_eq!(parse_header("2024-05-16t07:19:23+02:00"), Ok(1_715_836_763));
         }
 
         #[test]
