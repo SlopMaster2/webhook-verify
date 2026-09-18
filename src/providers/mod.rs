@@ -230,7 +230,7 @@ pub enum Provider {
     /// reference code never base64-decodes it).
     Zendesk,
     /// WorkOS (`WorkOS-Signature`, HMAC-SHA256 over `{t}.{raw_body}`, hex,
-    /// `t=...;v1=...` list with the timestamp in epoch milliseconds).
+    /// `t=...,v1=...` list with the timestamp in epoch milliseconds).
     ///
     /// The signed string reuses the `t` value *exactly as sent* (milliseconds
     /// included), a literal dot, then the raw body. The timestamp is
@@ -245,7 +245,7 @@ pub enum Provider {
     /// effect for this provider.
     WooCommerce,
     /// Calendly (`Calendly-Webhook-Signature`, HMAC-SHA256 over `t.body`, hex,
-    /// `t=...;v1=...` list).
+    /// `t=...,v1=...` list).
     ///
     /// The signed string reuses the `t` value *exactly as sent*, a literal
     /// dot, then the raw body. The timestamp is HMAC-covered, so the shared
