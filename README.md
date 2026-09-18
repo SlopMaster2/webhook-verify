@@ -98,6 +98,7 @@ hand-copied signing-string logic to get wrong.
 | Square | HMAC-SHA256 over notification URL + body, base64, `x-square-hmacsha256-signature` (needs `VerifyOptions::request_url`) | ✅ |
 | Twilio | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Twilio-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
 | Mailchimp Transactional (Mandrill) | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Mandrill-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
+| LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) | ✅ |
 | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp replay window | ✅ |
 | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` | ✅ |
 | Discord | Ed25519 (public-key), no shared secret | ✅ |

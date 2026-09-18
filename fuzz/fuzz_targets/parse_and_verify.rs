@@ -117,6 +117,10 @@
 //!   signature (no prefix, no timestamp).
 //! - `shopify-base64-signature` — Shopify's base64 HMAC-SHA256 signature (no
 //!   prefix, no timestamp).
+//! - `line-base64-signature` — LINE's official byte-exact example
+//!   (`x-line-signature`, base64 HMAC-SHA256 over the confirmation webhook
+//!   body, channel-secret key), reaching base64 decode, the 32-byte gate, and
+//!   HMAC comparison on the lowercase header spelling the docs use.
 //! - `woocommerce-base64-signature` — WooCommerce's `X-WC-Webhook-Signature`
 //!   base64 HMAC-SHA256 signature over the raw body (no prefix, no timestamp),
 //!   reaching base64 decode, the 32-byte gate, and HMAC comparison.
@@ -203,6 +207,11 @@ const IMPLEMENTED: &[Provider] = &[
     // well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Shopify,
     Provider::Slack,
+    // Line is a single-header raw-body HMAC (base64, no prefix, no timestamp,
+    // verbatim string key); arbitrary header bytes exercise its base64-decode
+    // and 32-byte gate, and a well-formed-shaped attempt below reaches HMAC
+    // comparison.
+    Provider::Line,
     // Linear is a single-header raw-body HMAC (hex, no prefix); arbitrary
     // header bytes exercise its hex-decode and 32-byte gate, and a
     // well-formed-shaped attempt below reaches HMAC comparison.
@@ -1033,6 +1042,20 @@ fuzz_target!(|data: &[u8]| {
         Provider::Shopify,
         &[(
             "X-Shopify-Hmac-Sha256".to_string(),
+            "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Line: a well-formed-shaped `x-line-signature` (valid base64 sig, no
+    // prefix, no timestamp, verbatim string key) lets arbitrary body bytes
+    // reach the 32-byte length gate and HMAC comparison.
+    attempt(
+        Provider::Line,
+        &[(
+            "x-line-signature".to_string(),
             "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
         )],
         body,
