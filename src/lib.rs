@@ -55,6 +55,7 @@
 //! | Stripe | HMAC-SHA256 over `timestamp.body`, tolerance window |
 //! | GitHub | HMAC-SHA256, `X-Hub-Signature-256` |
 //! | Bitbucket | HMAC-SHA256, `X-Hub-Signature` |
+//! | Box | HMAC-SHA256 over `{raw_body}{delivery_timestamp}`, base64, `BOX-SIGNATURE-PRIMARY`/`BOX-SIGNATURE-SECONDARY` (rotation-safe) + RFC 3339 timestamp tolerance window |
 //! | Intercom | HMAC-SHA1, `sha1=` prefix, `X-Hub-Signature` |
 //! | Meta (Graph API, Messenger, Instagram, WhatsApp Cloud API) | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Hub-Signature-256` (App Secret key, no timestamp) |
 //! | HubSpot | HMAC-SHA256 over `{method}{uri}{body}{timestamp}` (epoch ms), base64, `X-HubSpot-Signature-V3` + tolerance window |

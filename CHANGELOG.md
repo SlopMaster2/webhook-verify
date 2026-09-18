@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Box** (`Provider::Box`): HMAC-SHA256 over
+  `{raw_body}{delivery_timestamp}`, **base64**-encoded and delivered in two
+  headers — `BOX-SIGNATURE-PRIMARY` and `BOX-SIGNATURE-SECONDARY`. Box signs
+  every delivery with both configured keys, so a delivery verifies when
+  **either** header matches the caller's single `Secret` (rotation-safe);
+  both headers are required, and the signed `BOX-DELIVERY-TIMESTAMP`
+  (RFC 3339) makes the shared `max_age` replay window apply. The optional
+  `BOX-SIGNATURE-VERSION`/`BOX-SIGNATURE-ALGORITHM` metadata is validated
+  only when present. The byte-exact vectors come from Box's Java SDK
+  reference test (`WebhookValidationTest`); note the secrets it actually keys
+  with are `SamplePrimaryKey`/`SampleSecondaryKey`, not the keys the docs
+  display on developer.box.com. Sources:
+  <https://developer.box.com/guides/webhooks/v2/signatures-v2> and
+  <https://github.com/box/box-java-sdk/blob/main/doc/webhooks.md>.
 - **New provider: Pusher Channels** (`Provider::Pusher`): HMAC-SHA256 over
   the raw POST body, **hex**-encoded, delivered bare (no prefix, no
   timestamp) in the `X-Pusher-Signature` header. The signing key is the

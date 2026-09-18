@@ -40,6 +40,7 @@ pub enum Provider {
     Stripe,
     GitHub,
     Bitbucket,
+    Box,
     Intercom,
     Meta,
     HubSpot,
@@ -377,6 +378,46 @@ validation" worked example) and the webhooks-security overview
   signature that the implementation reproduces byte-for-byte. Boundary-vector
   bodies are locally constructed over the same documented recipe, cross-checked
   with `openssl dgst`.
+
+### Box
+
+Source: <https://developer.box.com/guides/webhooks/v2/signatures-v2> ("Verify
+Box webhook signatures") and the reference implementation in Box's Java SDK
+(the `BoxWebhookSignatureValidator` class and the `WebhookValidationTest`
+test class, <https://github.com/box/box-java-sdk/blob/main/doc/webhooks.md>).
+
+- Headers: `BOX-DELIVERY-TIMESTAMP`, `BOX-SIGNATURE-PRIMARY`,
+  `BOX-SIGNATURE-SECONDARY`. Box sends **two** signatures on every delivery —
+  one per configured key (primary/secondary) — so rolling from one key to the
+  other needs no downtime: a delivery verifies when **either** signature
+  header matches the single `Secret` the caller holds. Both headers are
+  required; Box always sends both, and requiring both means an attacker who
+  knows only one key cannot strip the other header to dodge a mismatch.
+- Signed string: `{raw_body}{delivery_timestamp}` — the raw body bytes
+  concatenated with the `BOX-DELIVERY-TIMESTAMP` header value **exactly as
+  sent** (no separators; the timestamp's `-07:00`-style offset spelling is
+  part of the signed bytes and must never be re-serialized). Box's reference
+  implementation concatenates `payload || deliveryTimestamp`.
+- Algorithm: HMAC-SHA256, **base64**-encoded (standard alphabet, padded),
+  carried bare (no prefix). Key: the primary/secondary webhook signing key as
+  its UTF-8 string bytes, verbatim (never base64-decoded).
+- Replay protection: the timestamp is HMAC-covered, so the shared symmetric
+  `max_age` window (default 300s) applies. Box's docs recommend a ten-minute
+  window; the crate's default is strictly stronger (an attacker cannot
+  freshen a captured delivery), and callers wanting Box's prescribed window
+  can set `VerifyOptions::max_age` to 600s.
+- The optional metadata headers `BOX-SIGNATURE-VERSION` (`1`) and
+  `BOX-SIGNATURE-ALGORITHM` (`HmacSHA256`) are validated only when present;
+  a present-but-wrong value fails closed as `MalformedHeader`, mirroring the
+  reference validator's refusal to accept an unexpected algorithm.
+  `BOX-DELIVERY-ID` is opaque and ignored.
+- Test-vector provenance: the reference test publishes the byte-exact body,
+  timestamp, and per-key signatures; the secrets it actually keys with are
+  `SamplePrimaryKey`/`SampleSecondaryKey`. (The keys the docs *display* —
+  `4py2I9eSFb0ezXH5iPeQRcFK1LRLCdip` / `Aq5EEEjAu4ssbz8n9UMu7EerI0LKj2TL` —
+  do not reproduce the published signatures.) Boundary, tamper, and
+  replay-window vectors are locally constructed over the documented recipe,
+  cross-checked with `openssl dgst`.
 
 ### Intercom
 
