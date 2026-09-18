@@ -301,6 +301,11 @@ const IMPLEMENTED: &[Provider] = &[
     // empty-header rejection, and a well-formed-shaped attempt below reaches
     // its hex-decode/comparison and replay paths too.
     Provider::Calendly,
+    // Vercel is a single-header raw-body HMAC (bare hex, no prefix, no
+    // timestamp, but SHA-1 — a 20-byte digest); arbitrary header bytes
+    // exercise its hex-decode and 20-byte gate, and a well-formed-shaped
+    // attempt below reaches HMAC comparison.
+    Provider::Vercel,
 ];
 
 /// A well-formed secret for each provider's scheme, so the fuzzer reaches the
@@ -841,6 +846,21 @@ fuzz_target!(|data: &[u8]| {
             "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e\
              5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
                 .to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Vercel: a well-formed-shaped `x-vercel-signature` (valid 40-char hex
+    // sig, no prefix, no timestamp) lets arbitrary body bytes reach the
+    // 20-byte length gate and HMAC comparison; without it the loop above
+    // mostly fails earlier on malformed/missing header fields.
+    attempt(
+        Provider::Vercel,
+        &[(
+            "x-vercel-signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c4".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

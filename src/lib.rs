@@ -88,6 +88,7 @@
 //! | WorkOS | HMAC-SHA256 over `t.body`, hex, `WorkOS-Signature` (`t=,v1=` list, millis timestamp floored for the replay window) |
 //! | WooCommerce | HMAC-SHA256 over raw body, base64, `X-WC-Webhook-Signature` (no timestamp) |
 //! | Calendly | HMAC-SHA256 over `t.body`, hex, `Calendly-Webhook-Signature` (`t=,v1=` list) + tolerance window |
+//! | Vercel | HMAC-SHA1 over raw body, hex, `x-vercel-signature` (no timestamp) |
 //! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, ...) |
 //! | Custom | User-supplied HMAC scheme via [`Provider::Custom`] |
 //!

@@ -73,6 +73,7 @@ pub enum Provider {
     WorkOS,
     WooCommerce,
     Calendly,
+    Vercel,
     StandardWebhooks,
     Custom(CustomScheme),
 }
@@ -1515,6 +1516,39 @@ the timestamp string, and the example delivery used below).
   construction, cross-checked with OpenSSL and Python. The docs' published
   example delivery is replayed as a well-formed-but-mismatching input.
   Replace them if Klaviyo ever publishes fixed vectors.
+
+### Vercel
+
+Source: <https://vercel.com/docs/webhooks/webhooks-api> ("Securing webhooks":
+the `x-vercel-signature` header and the HMAC-SHA1 construction over the raw
+request body) and the request-header reference
+(<https://vercel.com/docs/headers/request-headers#x-vercel-signature>, which
+states the signature "contains an HMAC-SHA1 signature" and ships the reference
+`crypto.createHmac('sha1', secret).update(rawBody).digest('hex')` verifier with
+an explicit constant-time comparison).
+
+- Header: `x-vercel-signature: <hex_hmac>` — a bare lowercase hex digest, no
+  prefix and no timestamp; the reference code compares `digest('hex')` output
+  directly against the header value. Same shape as Dropbox, Razorpay, and
+  Lemon Squeezy, but the built-in providers' **only HMAC-SHA1 scheme** besides
+  Twilio (which signs a different construction). Covers requests from Webhooks,
+  Log Drains, and integration webhooks alike.
+- Signed string: raw request body bytes, unmodified — Vercel's docs verify
+  the signature *before* `JSON.parse`, and warn that URL-encoded or
+  re-encoded bodies break the HMAC.
+- Algorithm: HMAC-SHA1, hex-encoded. Key: the webhook secret (account
+  webhooks) or Integration Secret (integration webhooks) as its UTF-8 bytes,
+  matching the documented construction.
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Shopify/Dropbox/Linear.
+- Test-vector provenance: Vercel's docs describe the construction and ship
+  full verifier code but publish no byte-exact example signature, so the
+  implementation is validated against locally constructed, deterministic
+  vectors over exactly the documented construction (the primary vector's body
+  mirrors the shape of a documented `project.created` event; the vectors were
+  independently cross-checked with Python `hmac` against `openssl`, and the
+  SHA-256-length reject case pins the 20-byte digest shape). Replace them if
+  Vercel ever publishes fixed vectors.
 
 ### Standard Webhooks spec
 
