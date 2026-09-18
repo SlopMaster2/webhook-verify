@@ -99,16 +99,27 @@ pub(crate) fn conflicting_signature_header<H: MultiValueHeaders + ?Sized>(
 
 /// The request's declared `Content-Length`, when present and decodable.
 ///
-/// A parsing failure — a non-visible-ASCII or non-numeric value, or an
-/// unparseable header name — is treated as "no declared length": the request
-/// then falls through to the post-buffer size check, which still bounds the
-/// verification work, and the framing layer (`hyper`/`axum` on tower,
-/// actix-http on actix) has already rejected inconsistent `Content-Length`
-/// fields. Shared between the adapters so the pre-buffer 413 guard cannot
-/// drift.
+/// Parse failure — a non-visible-ASCII value, a value that is not the
+/// canonical `1*DIGIT` spelling HTTP requires (a leading `+`/`-`, a radix
+/// prefix, empty), or an unparseable header name — is treated as "no declared
+/// length": the request then falls through to the post-buffer size check,
+/// which still bounds the verification work, and the framing layer
+/// (`hyper`/`axum` on tower, actix-http on actix) has already rejected
+/// inconsistent `Content-Length` fields. Shared between the adapters so the
+/// pre-buffer 413 guard cannot drift.
 #[must_use]
 pub(crate) fn declared_content_length<H: MultiValueHeaders + ?Sized>(headers: &H) -> Option<usize> {
-    headers.get_first_str("content-length")?.trim().parse().ok()
+    let value = headers.get_first_str("content-length")?.trim();
+    // HTTP's Content-Length grammar is `1*DIGIT` (RFC 9110 §8.6) — no sign, no
+    // radix prefix, no separator. Parse strictly, mirroring `parse_unsigned_decimal`
+    // in `replay.rs`: Rust's `usize::from_str` would otherwise silently accept a
+    // leading `+` (e.g. `+100`), which is not a valid Content-Length. Any
+    // non-canonical value is treated as "no declared length" and falls through to
+    // the post-buffer size check, which still bounds the signature-verification work.
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
 }
 
 /// Maps a verification outcome to its rejection HTTP status code.
@@ -221,5 +232,28 @@ mod tests {
             ::http::HeaderValue::from_static("oops"),
         );
         assert_eq!(declared_content_length(&headers), None);
+        // Non-canonical spellings of a length must be rejected, not rounded
+        // down to a number: HTTP's Content-Length grammar is `1*DIGIT`, and
+        // `usize::from_str` would otherwise silently accept a leading `+`
+        // (e.g. `+131072`), which is not a valid Content-Length (mirrors the
+        // crate's strict timestamp parsing, `replay.rs`).
+        for value in ["+131072", "+0", "-131072", "0x20000"] {
+            headers.insert(
+                ::http::header::CONTENT_LENGTH,
+                ::http::HeaderValue::from_static(value),
+            );
+            assert_eq!(
+                declared_content_length(&headers),
+                None,
+                "non-canonical Content-Length {value:?} must be treated as undeclared"
+            );
+        }
+        // Legacy tolerance: surrounding whitespace was historically trimmed
+        // before parsing, so keep accepting the padded spelling.
+        headers.insert(
+            ::http::header::CONTENT_LENGTH,
+            ::http::HeaderValue::from_static(" 131072 "),
+        );
+        assert_eq!(declared_content_length(&headers), Some(131072));
     }
 }
