@@ -477,6 +477,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Docs: Twilio rows now name the base64 encoding, and Vercel's SHA-1
+  "only" claim is scoped to the built-in providers.** The crate-level and
+  README provider tables described Twilio's scheme only as "HMAC-SHA1 over
+  URL + sorted form params", omitting that its digest is **base64** — the
+  only base64-HMAC among the built-in providers — and the lib.rs row omitted
+  the `X-Twilio-Signature` header name; both rows now state the encoding and
+  header. Separately, the Vercel variant/Provider and module docs called
+  Vercel "the crate's only bare-hex raw-body SHA-1 scheme", which only holds
+  for the *built-in* providers: a `CustomScheme` configured with `HashAlg::Sha1`,
+  `Encoding::Hex`, no prefix, and the identity signed-string reproduces the
+  same bare-hex shape. The claim is now scoped to the built-in providers,
+  matching `spec.md` §3's phrasing, and notes that `Custom` can express the
+  same scheme. Doc-only changes; no behavior or verification semantics.
 - **`ParseRFC3339Timestamp` now accepts lowercase `t`/`z` separators.** The
   shared RFC 3339 parser (PayPal `PayPal-Transmission-Time`, Twitch
   `Twitch-Eventsub-Message-Timestamp`, Zendesk
