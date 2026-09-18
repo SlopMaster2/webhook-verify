@@ -99,6 +99,7 @@ hand-copied signing-string logic to get wrong.
 | Discord | Ed25519 (public-key), no shared secret | ✅ |
 | PayPal | RSASSA-PKCS1-v1_5 SHA-256 over `transmission_id|time|webhook_id|crc32(body)`, X.509 cert + webhook ID via `VerifyOptions::verifying_material` + `webhook_id` (needs `paypal` feature) | ✅ |
 | SendGrid | ECDSA P-256 over the raw timestamp from its header immediately concatenated with the raw body (no separator), public key via `VerifyOptions::verifying_material` (needs `sendgrid` feature) | ✅ |
+| Paystack | HMAC-SHA512 over raw body, bare hex, `x-paystack-signature` (no prefix, no timestamp) | ✅ |
 | Paddle | HMAC-SHA256, hex, `Paddle-Signature` (`ts=;h1=` list, rotation-safe) + replay window | ✅ |
 | PagerDuty (v3 webhooks) | HMAC-SHA256 over raw body, hex, `v1=` prefix, `X-PagerDuty-Signature` (`v1=` rotation list, no timestamp) | ✅ |
 | Linear | HMAC-SHA256, `linear-signature` | ✅ |

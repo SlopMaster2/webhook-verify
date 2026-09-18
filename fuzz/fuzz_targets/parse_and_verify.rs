@@ -182,6 +182,11 @@ const IMPLEMENTED: &[Provider] = &[
     // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
     // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Razorpay,
+    // Paystack is a single-header raw-body HMAC (bare hex, no prefix, no
+    // timestamp, but SHA-512 — the only built-in provider with a 64-byte
+    // digest); arbitrary header bytes exercise its hex-decode and 64-byte
+    // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
+    Provider::Paystack,
     // Sentry is a single-header raw-body HMAC (bare hex, no prefix, no
     // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
     // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
@@ -784,6 +789,23 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "Sentry-Hook-Signature".to_string(),
             "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Paystack: a well-formed-shaped `x-paystack-signature` (valid 128-char
+    // hex sig, no prefix, no timestamp) lets arbitrary body bytes reach the
+    // 64-byte length gate and HMAC comparison; without it the loop above
+    // mostly fails earlier on malformed/missing header fields.
+    attempt(
+        Provider::Paystack,
+        &[(
+            "x-paystack-signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e\
+             5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
+                .to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

@@ -29,6 +29,7 @@ mod paddle;
 mod pagerduty;
 #[cfg(feature = "paypal")]
 mod paypal;
+mod paystack;
 mod razorpay;
 #[cfg(feature = "sendgrid")]
 mod sendgrid;
@@ -136,6 +137,15 @@ pub enum Provider {
     /// Requires the `sendgrid` crate feature; without it this variant fails
     /// closed with [`VerifyError::UnsupportedProvider`].
     SendGrid,
+    /// Paystack (`x-paystack-signature`, HMAC-SHA512 over the raw body, bare
+    /// hex — no prefix, no timestamp).
+    ///
+    /// The signing key is the Paystack secret key from the dashboard
+    /// ("Settings → API Keys & Webhooks"). Paystack is the built-in providers'
+    /// only HMAC-SHA512 scheme (`spec.md` §3); it reuses the same audited
+    /// constant-time HMAC-SHA512 helper `CustomScheme` uses, so the
+    /// security guarantees stay in one place.
+    Paystack,
     /// Paddle (`Paddle-Signature`, HMAC-SHA256 over `{ts}:{raw_body}`, with
     /// timestamp replay protection; multiple `h1=` values accepted).
     ///
@@ -290,6 +300,7 @@ impl fmt::Display for Provider {
             Provider::Discord => f.write_str("Discord"),
             Provider::PayPal => f.write_str("PayPal"),
             Provider::SendGrid => f.write_str("SendGrid"),
+            Provider::Paystack => f.write_str("Paystack"),
             Provider::Paddle => f.write_str("Paddle"),
             Provider::PagerDuty => f.write_str("PagerDuty"),
             Provider::Linear => f.write_str("Linear"),
@@ -356,6 +367,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("discord") => Ok(Provider::Discord),
             n if n.eq_ignore_ascii_case("paypal") => Ok(Provider::PayPal),
             n if n.eq_ignore_ascii_case("sendgrid") => Ok(Provider::SendGrid),
+            n if n.eq_ignore_ascii_case("paystack") => Ok(Provider::Paystack),
             n if n.eq_ignore_ascii_case("paddle") => Ok(Provider::Paddle),
             n if n.eq_ignore_ascii_case("pagerduty") => Ok(Provider::PagerDuty),
             n if n.eq_ignore_ascii_case("linear") => Ok(Provider::Linear),
@@ -398,7 +410,7 @@ impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `klaviyo`, `shopify`, \
-             `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
+             `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `linear`, \
              `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
@@ -440,6 +452,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
             twitch::SIGNATURE_HEADER,
         ],
         Provider::Typeform => vec![typeform::SIGNATURE_HEADER],
+        Provider::Paystack => vec![paystack::SIGNATURE_HEADER],
         Provider::Discord => {
             vec![discord::SIGNATURE_HEADER, discord::TIMESTAMP_HEADER]
         }
@@ -594,6 +607,7 @@ pub(crate) fn verify_ref(
         Provider::SendGrid => sendgrid::verify(headers, raw_body, secret, options),
         #[cfg(not(feature = "sendgrid"))]
         Provider::SendGrid => Err(VerifyError::UnsupportedProvider),
+        Provider::Paystack => paystack::verify(headers, raw_body, secret, options),
         Provider::Paddle => paddle::verify(headers, raw_body, secret, options),
         Provider::PagerDuty => pagerduty::verify(headers, raw_body, secret, options),
         Provider::Custom(scheme) => custom::verify(&scheme, headers, raw_body, secret, options),
@@ -1158,6 +1172,7 @@ mod tests {
         assert_eq!(Provider::Discord.to_string(), "Discord");
         assert_eq!(Provider::PayPal.to_string(), "PayPal");
         assert_eq!(Provider::SendGrid.to_string(), "SendGrid");
+        assert_eq!(Provider::Paystack.to_string(), "Paystack");
         assert_eq!(Provider::Paddle.to_string(), "Paddle");
         assert_eq!(Provider::PagerDuty.to_string(), "PagerDuty");
         assert_eq!(Provider::Linear.to_string(), "Linear");
@@ -1225,6 +1240,7 @@ mod tests {
             ("discord", Provider::Discord),
             ("paypal", Provider::PayPal),
             ("sendgrid", Provider::SendGrid),
+            ("paystack", Provider::Paystack),
             ("paddle", Provider::Paddle),
             ("pagerduty", Provider::PagerDuty),
             ("linear", Provider::Linear),
@@ -1352,6 +1368,7 @@ mod tests {
                 ],
             ),
             (Provider::Typeform, &[typeform::SIGNATURE_HEADER]),
+            (Provider::Paystack, &[paystack::SIGNATURE_HEADER]),
             (
                 Provider::Discord,
                 &[discord::SIGNATURE_HEADER, discord::TIMESTAMP_HEADER],
@@ -1490,7 +1507,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 34] {
+    fn provider_list() -> [Provider; 35] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1506,6 +1523,7 @@ mod tests {
             Provider::Discord,
             Provider::PayPal,
             Provider::SendGrid,
+            Provider::Paystack,
             Provider::Paddle,
             Provider::PagerDuty,
             Provider::Linear,
