@@ -64,6 +64,7 @@
 //! | Slack | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Square | HMAC-SHA256 over notification URL + body, base64 |
 //! | Twilio | HMAC-SHA1 (base64) over URL + sorted form params, `X-Twilio-Signature` |
+//! | Mandrill (Mailchimp Transactional) | HMAC-SHA1 (base64) over URL + sorted form params, `X-Mandrill-Signature` |
 //! | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp tolerance window |
 //! | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` |
 //! | Discord | Ed25519 public-key signatures (no shared secret) |

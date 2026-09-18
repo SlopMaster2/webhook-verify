@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Mailchimp Transactional** (`Provider::Mandrill`,
+  formerly Mandrill): base64 **HMAC-SHA1** over the webhook URL (exactly as
+  configured, including any query string) followed by each `POST` form
+  field's name and value concatenated with no delimiter — `{url}{key1}{value1}...`
+  — the field names sorted alphabetically, delivered in `X-Mandrill-Signature`.
+  Like Twilio, the scheme covers the parsed form fields (`mandrill_events`, a
+  JSON array of batched events, historically the only field) rather than the
+  raw body, so callers pass the URL in `VerifyOptions::request_url` and every
+  received field via `VerifyOptions::form_params`; omitting either fails
+  closed with `MissingContext`. Mailchimp's official guide is explicit that
+  only base64 works ("using a hexadecimal signature will not work"), and the
+  SHA-1-HTMLMAC note from Twilio applies: the HMAC is keyed with the shared
+  webhook authentication key, which is immune to SHA-1's collision attacks.
+  No timestamp is signed, so `max_age` has no effect. The main vector
+  reproduces the guide's webhook-URL-check scenario (`mandrill_events=[]`
+  signed with the documented generic key `test-webhook`); Mailchimp publishes
+  the construction and reference code but no byte-exact example signature, so
+  the vectors are locally constructed over exactly the documented recipe,
+  cross-checked with OpenSSL. Sources:
+  <https://mailchimp.com/developer/transactional/guides/track-respond-activity-webhooks/>
+  ("Authenticating webhook requests") and the Node.js `generateSignature`
+  reference implementation in the same guide.
 - **New provider: Box** (`Provider::Box`): HMAC-SHA256 over
   `{raw_body}{delivery_timestamp}`, **base64**-encoded and delivered in two
   headers — `BOX-SIGNATURE-PRIMARY` and `BOX-SIGNATURE-SECONDARY`. Box signs
