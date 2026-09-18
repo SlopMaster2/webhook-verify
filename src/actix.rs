@@ -995,6 +995,28 @@ mod tests {
                 .unwrap_or_else(|_| unreachable!("visible ASCII")),
         );
         assert_eq!(declared_content_length(&headers), None);
+        // Non-canonical spellings (HTTP `1*DIGIT` grammar) are "no declared
+        // length" — `usize::from_str` would otherwise accept a leading `+`
+        // (mirrors `replay.rs`'s strict timestamp parsing).
+        for value in ["+131072", "+0", "-131072", "0x20000"] {
+            headers.insert(
+                HeaderName::from_static("content-length"),
+                http::header::HeaderValue::from_str(value)
+                    .unwrap_or_else(|_| unreachable!("visible ASCII")),
+            );
+            assert_eq!(
+                declared_content_length(&headers),
+                None,
+                "non-canonical Content-Length {value:?} must be treated as undeclared"
+            );
+        }
+        // Legacy tolerance: surrounding whitespace is trimmed before parsing.
+        headers.insert(
+            HeaderName::from_static("content-length"),
+            http::header::HeaderValue::from_str(" 131072 ")
+                .unwrap_or_else(|_| unreachable!("visible ASCII")),
+        );
+        assert_eq!(declared_content_length(&headers), Some(131072));
     }
 
     #[actix_web::test]
