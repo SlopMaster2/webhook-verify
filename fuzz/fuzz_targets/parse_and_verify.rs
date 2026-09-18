@@ -41,6 +41,10 @@
 //! - `docusign-base64-signature` — DocuSign's `X-Docusign-Signature-1` bare
 //!   base64 HMAC shape over the primary vector body (no prefix, no timestamp),
 //!   reaching base64 decode, the 32-byte gate, and HMAC comparison.
+//! - `paystack-hex-signature` — Paystack's `x-paystack-signature` bare-hex
+//!   HMAC-SHA512 shape over the raw body (no prefix, no timestamp — the only
+//!   built-in provider with a 64-byte digest), reaching hex decode, the 64-byte
+//!   gate, and HMAC comparison.
 //! - `razorpay-hex-signature` — Razorpay's `X-Razorpay-Signature` bare-hex HMAC
 //!   shape over the raw body (no prefix, no timestamp), reaching hex decode,
 //!   the 32-byte gate, and HMAC comparison.
