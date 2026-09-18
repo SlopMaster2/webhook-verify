@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Klaviyo** (`Provider::Klaviyo`): HMAC-SHA256 over
+  `{raw_body}{timestamp}` — the `Klaviyo-Timestamp` header value exactly as
+  sent (IMF-fixdate / RFC 1123, e.g. `Thu, 04 Jan 2024 18:05:25 GMT`)
+  concatenated after the raw body bytes, no separator — hex-encoded and
+  delivered bare (no `sha256=` prefix) in the `Klaviyo-Signature` header. The
+  signing secret is used verbatim as its UTF-8 bytes (Klaviyo's reference
+  code never decodes it); the signed timestamp enables the shared symmetric
+  `max_age` replay window via a new strict IMF-fixdate parser in
+  `src/core/replay.rs` (weekday checked against the date, leap-year-aware,
+  no non-`GMT` zones, no leap-second `:60` — RFC 3339 spellings and
+  two-digit-year variants fail closed). `Klaviyo-Webhook-Id` is not part of
+  the HMAC and is intentionally not verified (binding it requires
+  deserializing the body). Source:
+  <https://developers.klaviyo.com/en/docs/working_with_system_webhooks>
+  ("Working with system webhooks"). Klaviyo publishes an example delivery but
+  no body or signing key, so the vectors are locally constructed over exactly
+  the documented construction, cross-checked with OpenSSL; the published
+  example delivery is replayed as a well-formed-but-mismatching input.
 - **New provider: Calendly** (`Provider::Calendly`): HMAC-SHA256 over
   `{t}.{raw_body}`, hex-encoded, delivered in the `Calendly-Webhook-Signature`
   header as a comma-separated `t=<unix_ts>,v1=<hex_hmac>` list. The `t`

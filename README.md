@@ -89,6 +89,7 @@ hand-copied signing-string logic to get wrong.
 | GitHub | HMAC-SHA256, `X-Hub-Signature-256` | ✅ |
 | Bitbucket | HMAC-SHA256, `sha256=` prefix, `X-Hub-Signature` | ✅ |
 | HubSpot | HMAC-SHA256 over `{method}{uri}{body}{timestamp}` (epoch ms), base64, `X-HubSpot-Signature-V3` + replay window (needs `VerifyOptions::request_method` + `request_url`; pass the URI in the same decoded form HubSpot signed — it URL-decodes certain characters, `spec.md` §3) | ✅ |
+| Klaviyo | HMAC-SHA256 over `{raw_body}{timestamp}` (timestamps are IMF-fixdate/RFC 1123, e.g. `Thu, 04 Jan 2024 18:05:25 GMT`), hex, `Klaviyo-Signature` + `Klaviyo-Timestamp` replay window | ✅ |
 | Shopify | HMAC-SHA256, base64, `X-Shopify-Hmac-Sha256` | ✅ |
 | Slack | HMAC-SHA256 `v0=` scheme, `X-Slack-Signature` + timestamp + replay window | ✅ |
 | Square | HMAC-SHA256 over notification URL + body, base64, `x-square-hmacsha256-signature` (needs `VerifyOptions::request_url`) | ✅ |
