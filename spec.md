@@ -1384,7 +1384,10 @@ the timestamp string, and the example delivery used below).
   and cannot reject a legitimate delivery.
 - `Klaviyo-Webhook-Id` is intentionally not verified: binding it requires
   deserializing the body's `meta.klaviyo_webhook_id`, which is a non-goal
-  (§1). Callers should perform that pair check after `verify()` succeeds.
+  (§1). Callers should perform that pair check after `verify()` succeeds,
+  reading the header via the crate's public
+  `klaviyo::WEBHOOK_ID_HEADER` constant (with `klaviyo::SIGNATURE_HEADER`
+  and `klaviyo::TIMESTAMP_HEADER` for the HMAC-covered headers).
 - Test-vector provenance: Klaviyo publishes the example delivery
   (`Klaviyo-Signature: e6c00e31...912d1`, `Klaviyo-Timestamp:
   Thu, 04 Jan 2024 18:05:25 GMT`, `Klaviyo-Webhook-Id: a8b89045...3ecb`) but no

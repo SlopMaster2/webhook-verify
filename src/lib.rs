@@ -153,3 +153,14 @@ pub use crate::core::{Clock, HeaderMap, Secret, VerifyError, VerifyOptions, Veri
 pub use crate::providers::{
     CustomScheme, Encoding, HashAlg, Provider, ProviderParseError, verify, verify_any,
 };
+
+/// Header-name constants for the Klaviyo provider.
+///
+/// Klaviyo's HMAC covers only `Klaviyo-Signature` and `Klaviyo-Timestamp`;
+/// [`Provider::Klaviyo`] verification needs no other header. These constants
+/// exist for the caller-side pair check Klaviyo delegates (`spec.md` §3): after
+/// a successful [`verify`], match [`klaviyo::WEBHOOK_ID_HEADER`] against the
+/// body's `meta.klaviyo_webhook_id`.
+pub mod klaviyo {
+    pub use crate::providers::klaviyo::{SIGNATURE_HEADER, TIMESTAMP_HEADER, WEBHOOK_ID_HEADER};
+}

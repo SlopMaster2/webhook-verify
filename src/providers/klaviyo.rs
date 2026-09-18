@@ -20,12 +20,13 @@
 //!   UTF-8 string, **hex**-encoded, carried bare in the header (no `sha256=`
 //!   prefix).
 //!
-//! [`Klaviyo-Webhook-Id`] is intentionally not verified by this crate. Klaviyo
+//! `Klaviyo-Webhook-Id` is intentionally not verified by this crate. Klaviyo
 //! directs integrators to check that it matches the body's
 //! `meta.klaviyo_webhook_id`; binding it requires deserializing the body, which
 //! this crate never does (`spec.md` §1 — payload parsing is a non-goal).
 //! Callers should perform that pair check after a successful
-//! [`verify`](crate::verify) using the constants in this module.
+//! [`verify`](crate::verify) using the [`WEBHOOK_ID_HEADER`](crate::klaviyo::WEBHOOK_ID_HEADER)
+//! constant (the body side is up to the caller's own JSON parsing).
 //!
 //! # Replay protection
 //!
@@ -49,10 +50,14 @@ use crate::core::replay::{check_replay, parse_imf_fixdate};
 use crate::core::secret::Secret;
 
 /// The header carrying Klaviyo's HMAC-SHA256 signature.
-pub(crate) const SIGNATURE_HEADER: &str = "Klaviyo-Signature";
+pub const SIGNATURE_HEADER: &str = "Klaviyo-Signature";
 
 /// The header carrying the signed IMF-fixdate (RFC 1123) webhook timestamp.
-pub(crate) const TIMESTAMP_HEADER: &str = "Klaviyo-Timestamp";
+pub const TIMESTAMP_HEADER: &str = "Klaviyo-Timestamp";
+
+/// The header carrying the webhook's id. Not part of the HMAC; Klaviyo directs
+/// integrators to check it against the body's `meta.klaviyo_webhook_id`.
+pub const WEBHOOK_ID_HEADER: &str = "Klaviyo-Webhook-Id";
 
 /// HMAC-SHA256 output length in bytes.
 const SIGNATURE_LEN_BYTES: usize = 32;
@@ -119,7 +124,7 @@ fn parse_signature(value: &str) -> Result<Vec<u8>, VerifyError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SIGNATURE_HEADER, TIMESTAMP_HEADER};
+    use super::{SIGNATURE_HEADER, TIMESTAMP_HEADER, WEBHOOK_ID_HEADER};
     use crate::core::error::VerifyError;
     use crate::core::options::VerifyOptions;
     use crate::core::secret::Secret;
@@ -171,6 +176,11 @@ mod tests {
             (SIGNATURE_HEADER.to_string(), signature.to_string()),
             (TIMESTAMP_HEADER.to_string(), timestamp.to_string()),
         ]
+    }
+
+    #[test]
+    fn webhook_id_header_constant_matches_the_spec_spelling() {
+        assert_eq!(super::WEBHOOK_ID_HEADER, "Klaviyo-Webhook-Id");
     }
 
     fn verify_with(
@@ -227,7 +237,7 @@ mod tests {
             ),
             (TIMESTAMP_HEADER.to_string(), TIMESTAMP.to_string()),
             (
-                "Klaviyo-Webhook-Id".to_string(),
+                WEBHOOK_ID_HEADER.to_string(),
                 DOCS_EXAMPLE_WEBHOOK_ID.to_string(),
             ),
         ];
