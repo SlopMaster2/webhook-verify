@@ -45,6 +45,7 @@ pub enum Provider {
     Meta,
     HubSpot,
     Klaviyo,
+    Mandrill,
     Shopify,
     Slack,
     Square,
@@ -104,7 +105,7 @@ pub struct VerifyOptions {  // #[non_exhaustive]: configure via Default + the
     /// Clock used for "now", injectable for deterministic tests.
     pub clock: Option<Arc<dyn Clock>>,
     /// Full URL of the receiving endpoint, for URL-scoped schemes
-    /// (currently Square, Twilio, HubSpot). See §3.
+    /// (currently Square, Twilio, HubSpot, Mandrill). See §3.
     pub request_url: Option<String>,
     /// HTTP request method (uppercase, e.g. `POST`), for schemes that sign
     /// the method into their source string (currently HubSpot's v3 scheme).
@@ -113,8 +114,8 @@ pub struct VerifyOptions {  // #[non_exhaustive]: configure via Default + the
     pub request_method: Option<String>,
     /// Parsed `application/x-www-form-urlencoded` fields, required by
     /// schemes that sign form fields rather than the raw body
-    /// (currently Twilio). Pass every field as received; sorting into
-    /// signing order happens here. See §3.
+    /// (currently Twilio, Mandrill). Pass every field as received; sorting
+    /// into signing order happens here. See §3.
     pub form_params: Option<Vec<(String, String)>>,
     /// Asymmetric public-key/certificate material for schemes that verify
     /// against a configured key rather than a shared secret (currently
@@ -767,6 +768,44 @@ worked example) and the reference implementations in Twilio's official SDKs
   duplicates). Omitting either option fails closed with `MissingContext`.
   An explicitly empty parameter list is meaningful (the JSON-body variant
   carries a `bodySHA256` query parameter and signs the URL alone).
+- No timestamp in the signature scheme (`max_age` has no effect).
+
+### Mailchimp Transactional (Mandrill)
+
+Source: <https://mailchimp.com/developer/transactional/guides/track-respond-activity-webhooks/>
+("Authenticating webhook requests": the URL + sorted form-field construction,
+HMAC-SHA1, base64, and the `X-Mandrill-Signature` header) and the official
+reference implementation in the same guide (`generateSignature`, Node.js,
+`crypto.createHmac('sha1', webhook_key)` with `signed_data = url` then each
+sorted `key + params[key]`, `digest('base64')`). The guide also documents the
+generic key Mailchimp uses for webhook-URL-check POSTs: the value
+`test-webhook`.
+
+- Header: `X-Mandrill-Signature: <base64_hmac_sha1>`.
+- Signed string: the webhook's URL exactly as configured in Mailchimp
+  Transactional (including any query strings), followed by each `POST` form
+  field's name and value concatenated to the string **with no delimiter** —
+  `"{url}{key1}{value1}{key2}{value2}..."`, the field names sorted
+  alphabetically. Mailchimp's docs warn that escaping/expanding the URL
+  string (e.g. unescaping slashes) breaks verification, so the URL is used
+  verbatim.
+- Algorithm: HMAC-SHA1, base64-encoded (standard alphabet, padded). The same
+  SHA-1-secrecy argument as Twilio applies: the HMAC is keyed with the
+  shared webhook authentication key, so SHA-1's collision attacks do not
+  apply. Mailchimp's docs explicitly state a hex signature "will not work" —
+  only base64 is accepted.
+- Key: the webhook's authentication key (generated at webhook creation,
+  viewable/resettable from the Webhooks page or the Transactional API) as its
+  UTF-8 bytes; an empty key fails closed with `InvalidSecret`.
+- Not a raw-body scheme: the signature covers the parsed form fields
+  (`mandrill_events`, historically the only field), not the body bytes.
+  Callers pass every received field via [`VerifyOptions::form_params`], and
+  the URL via `VerifyOptions::request_url`, exactly as with Twilio. Sorting
+  is applied by this crate — callers pass fields in any order. Mailchimp's
+  official verifier uses keyed dicts, which cannot represent duplicate field
+  names; this crate keeps a duplicate field's received relative order. Both
+  options must be supplied or verification fails closed with
+  `MissingContext`.
 - No timestamp in the signature scheme (`max_age` has no effect).
 
 ### Twitch

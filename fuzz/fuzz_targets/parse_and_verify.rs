@@ -131,6 +131,11 @@
 //!   (`X-Twilio-Signature`, sha1 base64 over the request URL + sorted form
 //!   fields), reaching base64 decode, the 20-byte gate, and the HMAC comparison
 //!   constructed from the `twilio_options` below.
+//! - `mandrill-base64-signature` — the Mailchimp Transactional webhook-URL-check
+//!   scenario (`X-Mandrill-Signature`, sha1 base64 over the request URL +
+//!   sorted form fields, the documented generic `test-webhook` key), reaching
+//!   base64 decode, the 20-byte gate, and the HMAC comparison constructed from
+//!   the `mandrill_options` below.
 //! - `paypal-signature-delivery` — PayPal's published example delivery (the
 //!   five `PayPal-*` headers, RFC 3339 transmission time, decimal CRC-32
 //!   signed string, and the docs event body), reaching the RSA/X.509 and
@@ -279,6 +284,10 @@ const IMPLEMENTED: &[Provider] = &[
     // Twilio is exercised separately below: it needs form-param context to
     // reach its signature path, and ignores the raw body by design.
     Provider::Twilio,
+    // Mandrill (Mailchimp Transactional) is exercised like Twilio: it needs
+    // URL + form-param context to reach its signature path, and ignores the
+    // raw body by design.
+    Provider::Mandrill,
     // Zoom needs two headers (signature + timestamp) to reach its signature
     // path; timestamp-based replay is exercised via arbitrary body bytes.
     Provider::Zoom,
@@ -426,6 +435,14 @@ fuzz_target!(|data: &[u8]| {
             ("From", "+14158675310"),
         ]);
 
+    // Mandrill additionally needs parsed form params (like Twilio); arbitrary
+    // field bytes exercise its signed-string construction and base64 parsing
+    // paths. The form fields mirror its real request shape (`mandrill_events`
+    // carries the batched JSON events).
+    let mandrill_options = VerifyOptions::default()
+        .with_request_url("https://example.com/webhook")
+        .with_form_params([("mandrill_events", r#"[{"event":"open"}]"#)]);
+
     // Fail-closed dispatch for feature-gated providers must also never
     // panic. Square is exercised via IMPLEMENTED below, with and without
     // its required URL context.
@@ -452,6 +469,20 @@ fuzz_target!(|data: &[u8]| {
     );
     attempt(
         Provider::Twilio,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &VerifyOptions::default(),
+    );
+    attempt(
+        Provider::Mandrill,
+        &headers,
+        body,
+        WELL_FORMED_SECRET,
+        &mandrill_options,
+    );
+    attempt(
+        Provider::Mandrill,
         &headers,
         body,
         WELL_FORMED_SECRET,

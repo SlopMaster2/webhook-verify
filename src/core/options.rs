@@ -207,11 +207,11 @@ impl VerifyOptions {
     }
 
     /// Sets [`VerifyOptions::form_params`], for schemes that sign parsed form
-    /// fields (currently Twilio). Fields are sorted into signing order during
-    /// verification of Twilio's signed string, so distinct field names may be
-    /// passed in any order. The one exception is duplicate field names: each
-    /// duplicate keeps its received relative order (the sort is stable), so
-    /// same-named fields must be passed exactly as they arrived.
+    /// fields (currently Twilio and Mandrill). Fields are sorted into signing
+    /// order during verification of those signed strings, so distinct field
+    /// names may be passed in any order. The one exception is duplicate field
+    /// names: each duplicate keeps its received relative order (the sort is
+    /// stable), so same-named fields must be passed exactly as they arrived.
     pub fn with_form_params<I, K, V>(mut self, params: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,

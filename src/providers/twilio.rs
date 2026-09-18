@@ -20,8 +20,9 @@
 //!
 //! # Not a raw-body scheme
 //!
-//! This is the one shipped scheme that does **not** hash the raw body: the
-//! signature covers the parsed form fields instead. Callers parse the
+//! Twilio and Mailchimp Transactional ([`crate::Provider::Mandrill`]) are
+//! the two shipped schemes that do **not** hash the raw body: the signature
+//! covers the parsed form fields instead. Callers parse the
 //! `application/x-www-form-urlencoded` body themselves and pass every received
 //! field via [`VerifyOptions::form_params`] — Twilio's docs explicitly warn
 //! against validating against a hardcoded subset of parameters, since new ones
