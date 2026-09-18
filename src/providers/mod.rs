@@ -314,7 +314,9 @@ pub enum Provider {
     /// raw request body keyed by the webhook secret (account webhooks) or the
     /// Integration Secret (integration webhooks), both used verbatim as UTF-8
     /// bytes. Vercel signs no timestamp, so `max_age` has no effect. This is
-    /// the crate's only SHA-1 scheme besides Twilio (`spec.md` §3).
+    /// the crate's only bare-hex raw-body SHA-1 scheme — its other SHA-1
+    /// schemes are Twilio (URL + form params) and Intercom (raw body behind
+    /// a `sha1=` prefix) (`spec.md` §3).
     Vercel,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,

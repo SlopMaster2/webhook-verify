@@ -33,9 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   secret shown when creating an account webhook, or the Integration Secret
   (Client Secret) for integration webhooks, used verbatim as its UTF-8 bytes.
   Covers requests from Webhooks, Log Drains, and integration webhooks alike.
-  Vercel is the built-in providers' second SHA-1 scheme after Twilio, but the
-  only raw-body one — like Twilio and Intercom, the HMAC is keyed with the
-  shared secret, which is immune to SHA-1's collision attacks. No timestamp is
+  Vercel is the built-in providers' third SHA-1 scheme after Twilio and
+  Intercom, and the only bare-hex raw-body one — like Twilio and Intercom, the
+  HMAC is keyed with the shared secret, which is immune to SHA-1's collision
+  attacks. No timestamp is
   signed, so the shared `max_age` replay window has no effect. Sources:
   <https://vercel.com/docs/webhooks/webhooks-api> ("Securing webhooks") and
   <https://vercel.com/docs/headers/request-headers#x-vercel-signature> (the
