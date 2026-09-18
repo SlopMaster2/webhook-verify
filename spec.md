@@ -1610,9 +1610,13 @@ an explicit constant-time comparison).
 - Header: `x-vercel-signature: <hex_hmac>` — a bare lowercase hex digest, no
   prefix and no timestamp; the reference code compares `digest('hex')` output
   directly against the header value. Same shape as Dropbox, Razorpay, and
-  Lemon Squeezy, but the built-in providers' **only HMAC-SHA1 scheme** besides
-  Twilio (which signs a different construction). Covers requests from Webhooks,
-  Log Drains, and integration webhooks alike.
+  Lemon Squeezy, but keyed with **SHA-1** rather than the SHA-256 most
+  providers use. Vercel, Twilio, and Intercom are the built-in providers'
+  three HMAC-SHA1 schemes; Twilio signs a different construction (URL + form
+  params) and Intercom delivers its raw-body digest behind a `sha1=` prefix,
+  so Vercel's bare-hex raw-body header is the only one of the three without a
+  prefix. Covers requests from Webhooks, Log Drains, and integration webhooks
+  alike.
 - Signed string: raw request body bytes, unmodified — Vercel's docs verify
   the signature *before* `JSON.parse`, and warn that URL-encoded or
   re-encoded bodies break the HMAC.
