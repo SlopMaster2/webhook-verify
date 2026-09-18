@@ -26,6 +26,9 @@
 //! - `intercom-hub-signature` — intercom's documented `X-Hub-Signature`
 //!   construction (`sha1=` prefix, hex HMAC over the raw body), reaching the
 //!   prefix, hex decode, 20-byte gate, and constant-time HMAC comparison.
+//! - `meta-hub-signature-256` — the Meta vector (`sha256=` prefix, hex
+//!   HMAC-SHA256 over the raw body, no timestamp), reaching the prefix, hex
+//!   decode, 32-byte gate, and constant-time HMAC comparison.
 //! - `slack-timestamped-delivery` — Slack's documented worked example
 //!   (docs.slack.dev), reaching the `v0=` scheme, timestamp parse, and HMAC
 //!   comparison over `v0:{ts}:{body}`.
@@ -166,6 +169,11 @@ const IMPLEMENTED: &[Provider] = &[
     // and hex-decode paths, and a well-formed-shaped attempt below reaches its
     // 20-byte gate and HMAC comparison.
     Provider::Intercom,
+    // Meta is a single-header raw-body HMAC (`sha256=` prefixed hex, 32-byte
+    // digest, no timestamp); arbitrary header bytes exercise its prefix-strip
+    // and hex-decode paths, and a well-formed-shaped attempt below reaches its
+    // 32-byte gate and HMAC comparison.
+    Provider::Meta,
     // HubSpot needs both a method and a URL in VerifyOptions to get past its
     // context check and into the signature path; arbitrary header bytes
     // exercise its header splitting and MissingContext fail-closed paths, and
@@ -639,6 +647,21 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "X-Hub-Signature".to_string(),
             "sha1=cbf9bf16f89d9cf089ee3500c5ba94595b3aedcd".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Meta: a well-formed-shaped `X-Hub-Signature-256` (valid `sha256=` hex
+    // sig) lets arbitrary body bytes reach the 32-byte length gate and HMAC
+    // comparison; without it the loop above mostly fails earlier on
+    // malformed/missing prefix or hex.
+    attempt(
+        Provider::Meta,
+        &[(
+            "X-Hub-Signature-256".to_string(),
+            "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,
