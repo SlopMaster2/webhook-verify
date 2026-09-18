@@ -12,6 +12,7 @@ mod cloudflare;
 mod coinbase;
 mod custom;
 mod discord;
+mod docusign;
 mod dropbox;
 mod github;
 mod hubspot;
@@ -203,6 +204,15 @@ pub enum Provider {
     Coinbase,
     /// Dropbox (`X-Dropbox-Signature`, HMAC-SHA256 over the raw body).
     Dropbox,
+    /// DocuSign Connect (`X-Docusign-Signature-1`, HMAC-SHA256 over the raw
+    /// body, base64; no timestamp).
+    ///
+    /// Covers Connect's header-based HMAC for the *first* configured key
+    /// (`-1`); accounts with several active keys send one numbered header per
+    /// key and DocuSign accepts a match against any of them, but this crate's
+    /// single-header model reads `-1` only (`spec.md` §3). DocuSign signs no
+    /// timestamp, so `max_age` has no effect for this provider.
+    DocuSign,
     /// Razorpay (`X-Razorpay-Signature`, HMAC-SHA256 over the raw body, bare
     /// hex — no `sha256=` prefix, no timestamp).
     Razorpay,
@@ -319,6 +329,7 @@ impl fmt::Display for Provider {
             Provider::Cloudflare => f.write_str("Cloudflare"),
             Provider::Coinbase => f.write_str("Coinbase"),
             Provider::Dropbox => f.write_str("Dropbox"),
+            Provider::DocuSign => f.write_str("DocuSign"),
             Provider::Razorpay => f.write_str("Razorpay"),
             Provider::LemonSqueezy => f.write_str("LemonSqueezy"),
             Provider::Xero => f.write_str("Xero"),
@@ -387,6 +398,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
             n if n.eq_ignore_ascii_case("coinbase") => Ok(Provider::Coinbase),
             n if n.eq_ignore_ascii_case("dropbox") => Ok(Provider::Dropbox),
+            n if n.eq_ignore_ascii_case("docusign") => Ok(Provider::DocuSign),
             n if n.eq_ignore_ascii_case("razorpay") => Ok(Provider::Razorpay),
             n if n.eq_ignore_ascii_case("lemonsqueezy")
                 || n.eq_ignore_ascii_case("lemon squeezy") =>
@@ -421,7 +433,7 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `intercom`, `hubspot`, `klaviyo`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `linear`, \
-             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
+             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
@@ -473,6 +485,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
         Provider::Coinbase => vec![coinbase::SIGNATURE_HEADER],
         Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
+        Provider::DocuSign => vec![docusign::SIGNATURE_HEADER],
         Provider::Razorpay => vec![razorpay::SIGNATURE_HEADER],
         Provider::LemonSqueezy => vec![lemonsqueezy::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
@@ -601,6 +614,7 @@ pub(crate) fn verify_ref(
         Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, options),
         Provider::Coinbase => coinbase::verify(headers, raw_body, secret, options),
         Provider::Dropbox => dropbox::verify(headers, raw_body, secret, options),
+        Provider::DocuSign => docusign::verify(headers, raw_body, secret, options),
         Provider::Razorpay => razorpay::verify(headers, raw_body, secret, options),
         Provider::LemonSqueezy => lemonsqueezy::verify(headers, raw_body, secret, options),
         Provider::Xero => xero::verify(headers, raw_body, secret, options),
@@ -1195,6 +1209,7 @@ mod tests {
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
         assert_eq!(Provider::Coinbase.to_string(), "Coinbase");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
+        assert_eq!(Provider::DocuSign.to_string(), "DocuSign");
         assert_eq!(Provider::Razorpay.to_string(), "Razorpay");
         assert_eq!(Provider::LemonSqueezy.to_string(), "LemonSqueezy");
         assert_eq!(Provider::Xero.to_string(), "Xero");
@@ -1264,6 +1279,7 @@ mod tests {
             ("cloudflare", Provider::Cloudflare),
             ("coinbase", Provider::Coinbase),
             ("dropbox", Provider::Dropbox),
+            ("docusign", Provider::DocuSign),
             ("razorpay", Provider::Razorpay),
             ("lemonsqueezy", Provider::LemonSqueezy),
             ("lemon squeezy", Provider::LemonSqueezy),
@@ -1394,6 +1410,7 @@ mod tests {
             (Provider::Cloudflare, &[cloudflare::SIGNATURE_HEADER]),
             (Provider::Coinbase, &[coinbase::SIGNATURE_HEADER]),
             (Provider::Dropbox, &[dropbox::SIGNATURE_HEADER]),
+            (Provider::DocuSign, &[docusign::SIGNATURE_HEADER]),
             (Provider::Razorpay, &[razorpay::SIGNATURE_HEADER]),
             (Provider::LemonSqueezy, &[lemonsqueezy::SIGNATURE_HEADER]),
             (Provider::Xero, &[xero::SIGNATURE_HEADER]),
@@ -1522,7 +1539,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 36] {
+    fn provider_list() -> [Provider; 37] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1549,6 +1566,7 @@ mod tests {
             Provider::Cloudflare,
             Provider::Coinbase,
             Provider::Dropbox,
+            Provider::DocuSign,
             Provider::Razorpay,
             Provider::LemonSqueezy,
             Provider::Xero,

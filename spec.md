@@ -62,6 +62,7 @@ pub enum Provider {
     Cloudflare,
     Coinbase,
     Dropbox,
+    DocuSign,
     Razorpay,
     LemonSqueezy,
     Xero,
@@ -480,6 +481,48 @@ documentation, signature verification guidance and Python example code).
   implementation is validated against locally constructed, deterministic
   vectors over exactly the documented construction. Replace them if Dropbox
   ever publishes fixed vectors.
+
+### DocuSign
+
+Source: <https://developers.docusign.com/platform/webhooks/connect/validate/>
+("How to validate an HMAC signature": the raw-body/line-endings signing rule
+and the base64 encoding), <https://developers.docusign.com/platform/webhooks/connect/hmac/>
+("HMAC security for Docusign Connect": one numbered header per configured key,
+`-1`/`-2`/... up to 100), and the official verification samples
+(<https://www.docusign.com/blog/developers/hmac-verification-php>;
+<https://www.docusign.com/blog/developers/manually-authenticating-hmac-signatures-docusign-connect-webhook-configurations>).
+
+- Header: `X-Docusign-Signature-1: <base64(HMAC-SHA256(key, raw_body))>` — a
+  bare base64 digest, no prefix. One numbered header is sent per configured
+  HMAC key (`-1`, `-2`, ...); DocuSign accepts validation against any of
+  them.
+- Signed string: raw body bytes, unmodified — the docs are explicit that "the
+  entire body of the POST request is used, including line endings" and that
+  the signature must be verified before the body is parsed.
+- Algorithm: HMAC-SHA256, base64-encoded (standard alphabet with padding).
+  Key: the Connect configuration HMAC key as its UTF-8 bytes, verbatim. The
+  docs note that stray `"` characters copied into the secret must be removed
+  before computation; this crate uses the configured `Secret` exactly
+  (`spec.md` §2).
+- **Single-header scope:** this provider verifies `X-Docusign-Signature-1`
+  — the first-listed currently-active key. The `-1` header ships on every
+  delivery (there is one header per key), so a single-key account — the
+  integration DocuSign's own guides recommend — always signs `-1`. Numbered
+  headers beyond `-1` are not read (crate's single-header model, `spec.md`
+  §1); during rotation, keep the first-listed key valid on each receiver or
+  re-verify via `verify_any` once the rotated key holds the `-1` slot.
+  The companion `x-authorization-digest` header (`HMACSHA256`) is
+  informational, not HMAC-covered, and is not parsed — a future algorithm
+  change fails closed as a signature mismatch.
+- No timestamp in the signature scheme (`max_age` has no effect).
+- Test-vector provenance: DocuSign's docs publish the algorithm, header
+  layout, and reference code but **no byte-exact example body+signature
+  pair** (the "Validate" guide steers integrators to verify against a live
+  delivery via Postman). The vectors are therefore locally constructed over
+  exactly the documented raw-body + base64 construction and cross-checked
+  against two independent implementations (OpenSSL and Python's `hmac`
+  module); the 32-byte digest shape is pinned by the length-reject case.
+  Replace them if DocuSign ever publishes fixed vectors.
 
 ### Lemon Squeezy
 
