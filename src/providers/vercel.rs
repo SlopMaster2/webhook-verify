@@ -10,11 +10,11 @@
 //!   `crypto.createHmac('sha1', secret).update(rawBody).digest('hex')` output
 //!   directly against the header value. Same shape as Dropbox, Razorpay, and
 //!   Lemon Squeezy, but keyed with **SHA-1** rather than the SHA-256 most
-//!   providers use (the crate's SHA-1 schemes are Twilio, Intercom, and this
-//!   one — Twilio signs a different construction, and Intercom puts its
-//!   raw-body digest behind a `sha1=` prefix; Vercel's header is the bare
-//!   digest). Covers requests from Webhooks, Log Drains, and integration
-//!   webhooks alike.
+//!   providers use (the built-in providers' SHA-1 schemes are Twilio,
+//!   Intercom, and this one — Twilio signs a different construction, and
+//!   Intercom puts its raw-body digest behind a `sha1=` prefix; Vercel's
+//!   header is the bare digest). Covers requests from Webhooks, Log Drains,
+//!   and integration webhooks alike.
 //! - Signed string: raw request body bytes, unmodified. Vercel's docs verify
 //!   the signature *before* `JSON.parse` and warn that URL-encoding or
 //!   otherwise re-encoding the body breaks the HMAC — the crate hashes
