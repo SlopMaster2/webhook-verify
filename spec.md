@@ -40,6 +40,7 @@ pub enum Provider {
     Stripe,
     GitHub,
     Bitbucket,
+    Intercom,
     HubSpot,
     Klaviyo,
     Shopify,
@@ -372,6 +373,45 @@ validation" worked example) and the webhooks-security overview
   signature that the implementation reproduces byte-for-byte. Boundary-vector
   bodies are locally constructed over the same documented recipe, cross-checked
   with `openssl dgst`.
+
+### Intercom
+
+Source: <https://developers.intercom.com/docs/references/2.5/webhooks/webhook-models>
+(Intercom's "Webhook Topics" reference, "Signing notifications"): the
+`X-Hub-Signature` header format, the raw-body signing rule, and the
+`client_secret` keying are all documented on the official page; the docs also
+publish an example header value (`sha1=21ff2e149e0fdcac6f947740f6177f6434bda921`)
+alongside a sample delivery.
+
+- Header: `X-Hub-Signature: sha1=<hex_hmac>` — "the hexadecimal (40-byte)
+  representation of a SHA-1 signature computed using the HMAC algorithm as
+  defined in RFC2104", prefixed with the literal `sha1=`.
+- Signed string: the raw body bytes of the JSON request, unmodified — the docs
+  stress that the signature is computed over "the body of the JSON request",
+  i.e. exactly what Intercom delivers, so re-serializing or reformatting the
+  payload (JSON key order, whitespace, escapes) changes the signature.
+- Algorithm: HMAC-SHA1, hex-encoded (lowercase hex from Intercom; decoding is
+  case-insensitive, matching every other hex provider). Intercom is, like
+  Twilio, a scheme that still legitimately mandates SHA-1 — the HMAC is keyed
+  with the shared secret, so SHA-1's collision attacks do not apply.
+- Key: the app's `client_secret` (Developer Hub → Basic Info) as its UTF-8
+  bytes verbatim.
+- The `sha1=` prefix is matched case-sensitively, exactly like GitHub's and
+  Bitbucket's `sha256=`: Intercom's docs and examples emit only the literal
+  lowercase form, and an unknown scheme fails closed as `MalformedHeader`
+  rather than silently mis-verifying.
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub and Bitbucket. Intercom signs every webhook delivery, so a request
+  without the header is never a legitimate delivery and `verify()` reports
+  `MissingHeader`.
+- Test-vector provenance: Intercom publishes the header format and an example
+  header value, but no byte-exact signed body (the example header sits next to
+  a sample delivery whose body is illustrative, and the `client_secret` is
+  account-specific), so the vectors are locally constructed over exactly the
+  documented construction (`sha1=` + lowercase hex of
+  `HMAC-SHA1(client_secret, raw_body)`), cross-checked with `openssl dgst`
+  and Python's `hmac` module. Replace them if Intercom ever publishes fixed
+  vectors.
 
 ### HubSpot
 

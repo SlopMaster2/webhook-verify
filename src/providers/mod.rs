@@ -15,6 +15,7 @@ mod discord;
 mod dropbox;
 mod github;
 mod hubspot;
+mod intercom;
 /// Header-name constants re-exported publicly for Klaviyo's caller-side
 /// webhook-id pair check ([`crate::klaviyo`]). `pub` so the crate root can
 /// re-export them without traversing a private module path; the enclosing
@@ -83,6 +84,13 @@ pub enum Provider {
     /// Bitbucket Cloud (`X-Hub-Signature`, HMAC-SHA256 over the raw body,
     /// `sha256=` prefix; no timestamp).
     Bitbucket,
+    /// Intercom (`X-Hub-Signature`, `sha1=`-prefixed hex HMAC-SHA1 over the
+    /// raw body, keyed by the app's `client_secret`; no timestamp).
+    ///
+    /// Intercom is, like Twilio, a scheme that still legitimately mandates
+    /// SHA-1: the HMAC is keyed with the shared secret, which is immune to
+    /// SHA-1's collision attacks.
+    Intercom,
     /// HubSpot (`X-HubSpot-Signature-V3`, HMAC-SHA256 over
     /// `{method}{uri}{raw_body}{timestamp}` with `X-HubSpot-Request-Timestamp`
     /// in epoch ms; needs `VerifyOptions::request_method` and
@@ -289,6 +297,7 @@ impl fmt::Display for Provider {
             Provider::Stripe => f.write_str("Stripe"),
             Provider::GitHub => f.write_str("GitHub"),
             Provider::Bitbucket => f.write_str("Bitbucket"),
+            Provider::Intercom => f.write_str("Intercom"),
             Provider::HubSpot => f.write_str("HubSpot"),
             Provider::Klaviyo => f.write_str("Klaviyo"),
             Provider::Shopify => f.write_str("Shopify"),
@@ -356,6 +365,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("stripe") => Ok(Provider::Stripe),
             n if n.eq_ignore_ascii_case("github") => Ok(Provider::GitHub),
             n if n.eq_ignore_ascii_case("bitbucket") => Ok(Provider::Bitbucket),
+            n if n.eq_ignore_ascii_case("intercom") => Ok(Provider::Intercom),
             n if n.eq_ignore_ascii_case("hubspot") => Ok(Provider::HubSpot),
             n if n.eq_ignore_ascii_case("klaviyo") => Ok(Provider::Klaviyo),
             n if n.eq_ignore_ascii_case("shopify") => Ok(Provider::Shopify),
@@ -409,7 +419,7 @@ pub struct ProviderParseError;
 impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
-            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `klaviyo`, `shopify`, \
+            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `intercom`, `hubspot`, `klaviyo`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `linear`, \
              `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, or `standardwebhooks` (or `standard webhooks`) \
@@ -438,6 +448,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Stripe => vec![stripe::SIGNATURE_HEADER],
         Provider::GitHub => vec![github::SIGNATURE_HEADER],
         Provider::Bitbucket => vec![bitbucket::SIGNATURE_HEADER],
+        Provider::Intercom => vec![intercom::SIGNATURE_HEADER],
         Provider::HubSpot => {
             vec![hubspot::SIGNATURE_HEADER, hubspot::TIMESTAMP_HEADER]
         }
@@ -572,6 +583,7 @@ pub(crate) fn verify_ref(
         Provider::Discord => discord::verify(headers, raw_body, secret, options),
         Provider::GitHub => github::verify(headers, raw_body, secret, options),
         Provider::Bitbucket => bitbucket::verify(headers, raw_body, secret, options),
+        Provider::Intercom => intercom::verify(headers, raw_body, secret, options),
         Provider::HubSpot => hubspot::verify(headers, raw_body, secret, options),
         Provider::Klaviyo => klaviyo::verify(headers, raw_body, secret, options),
         Provider::Linear => linear::verify(headers, raw_body, secret, options),
@@ -1161,6 +1173,7 @@ mod tests {
         assert_eq!(Provider::Stripe.to_string(), "Stripe");
         assert_eq!(Provider::GitHub.to_string(), "GitHub");
         assert_eq!(Provider::Bitbucket.to_string(), "Bitbucket");
+        assert_eq!(Provider::Intercom.to_string(), "Intercom");
         assert_eq!(Provider::HubSpot.to_string(), "HubSpot");
         assert_eq!(Provider::Klaviyo.to_string(), "Klaviyo");
         assert_eq!(Provider::Shopify.to_string(), "Shopify");
@@ -1229,6 +1242,7 @@ mod tests {
             ("stripe", Provider::Stripe),
             ("github", Provider::GitHub),
             ("bitbucket", Provider::Bitbucket),
+            ("intercom", Provider::Intercom),
             ("hubspot", Provider::HubSpot),
             ("klaviyo", Provider::Klaviyo),
             ("shopify", Provider::Shopify),
@@ -1344,6 +1358,7 @@ mod tests {
             (Provider::Stripe, &[stripe::SIGNATURE_HEADER]),
             (Provider::GitHub, &[github::SIGNATURE_HEADER]),
             (Provider::Bitbucket, &[bitbucket::SIGNATURE_HEADER]),
+            (Provider::Intercom, &[intercom::SIGNATURE_HEADER]),
             (
                 Provider::HubSpot,
                 &[hubspot::SIGNATURE_HEADER, hubspot::TIMESTAMP_HEADER],
@@ -1507,11 +1522,12 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 35] {
+    fn provider_list() -> [Provider; 36] {
         [
             Provider::Stripe,
             Provider::GitHub,
             Provider::Bitbucket,
+            Provider::Intercom,
             Provider::HubSpot,
             Provider::Klaviyo,
             Provider::Shopify,
