@@ -25,6 +25,7 @@ mod intercom;
 pub mod klaviyo;
 mod launchdarkly;
 mod lemonsqueezy;
+mod line;
 mod linear;
 mod mandrill;
 mod meta;
@@ -147,6 +148,16 @@ pub enum Provider {
     /// `Twilio`, with Mailchimp's generic `test-webhook` key used for
     /// webhook-URL-check POSTs.
     Mandrill,
+    /// LINE (`x-line-signature`, base64-encoded HMAC-SHA256 over the raw
+    /// body, keyed by the channel secret).
+    ///
+    /// LINE (Messaging API) signs the exact request-body string — any
+    /// deserialization or formatting before verification breaks the digest —
+    /// so the crate hashes `raw_body` verbatim. The scheme signs no timestamp,
+    /// so `max_age` has no effect. The provider's official docs publish a
+    /// byte-exact confirmation-webhook example, used here as the primary test
+    /// vector.
+    Line,
     /// Shopify (`X-Shopify-Hmac-SHA256`, base64-encoded HMAC-SHA256).
     Shopify,
     /// Slack (`X-Slack-Signature`, `v0=` scheme with timestamp).
@@ -375,6 +386,7 @@ impl fmt::Display for Provider {
             Provider::HubSpot => f.write_str("HubSpot"),
             Provider::Klaviyo => f.write_str("Klaviyo"),
             Provider::Mandrill => f.write_str("Mandrill"),
+            Provider::Line => f.write_str("Line"),
             Provider::Shopify => f.write_str("Shopify"),
             Provider::Slack => f.write_str("Slack"),
             Provider::Square => f.write_str("Square"),
@@ -449,6 +461,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("hubspot") => Ok(Provider::HubSpot),
             n if n.eq_ignore_ascii_case("klaviyo") => Ok(Provider::Klaviyo),
             n if n.eq_ignore_ascii_case("mandrill") => Ok(Provider::Mandrill),
+            n if n.eq_ignore_ascii_case("line") => Ok(Provider::Line),
             n if n.eq_ignore_ascii_case("shopify") => Ok(Provider::Shopify),
             n if n.eq_ignore_ascii_case("slack") => Ok(Provider::Slack),
             n if n.eq_ignore_ascii_case("square") => Ok(Provider::Square),
@@ -503,7 +516,7 @@ pub struct ProviderParseError;
 impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
-            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `shopify`, \
+            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, \
@@ -547,6 +560,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         }
         Provider::Klaviyo => vec![klaviyo::SIGNATURE_HEADER, klaviyo::TIMESTAMP_HEADER],
         Provider::Mandrill => vec![mandrill::SIGNATURE_HEADER],
+        Provider::Line => vec![line::SIGNATURE_HEADER],
         Provider::Shopify => vec![shopify::SIGNATURE_HEADER],
         Provider::Slack => vec![slack::SIGNATURE_HEADER, slack::TIMESTAMP_HEADER],
         Provider::Square => vec![square::SIGNATURE_HEADER],
@@ -686,6 +700,7 @@ pub(crate) fn verify_ref(
         Provider::HubSpot => hubspot::verify(headers, raw_body, secret, options),
         Provider::Klaviyo => klaviyo::verify(headers, raw_body, secret, options),
         Provider::Mandrill => mandrill::verify(headers, raw_body, secret, options),
+        Provider::Line => line::verify(headers, raw_body, secret, options),
         Provider::Linear => linear::verify(headers, raw_body, secret, options),
         Provider::LaunchDarkly => launchdarkly::verify(headers, raw_body, secret, options),
         Provider::Notion => notion::verify(headers, raw_body, secret, options),
@@ -1280,6 +1295,7 @@ mod tests {
         assert_eq!(Provider::HubSpot.to_string(), "HubSpot");
         assert_eq!(Provider::Klaviyo.to_string(), "Klaviyo");
         assert_eq!(Provider::Mandrill.to_string(), "Mandrill");
+        assert_eq!(Provider::Line.to_string(), "Line");
         assert_eq!(Provider::Shopify.to_string(), "Shopify");
         assert_eq!(Provider::Slack.to_string(), "Slack");
         assert_eq!(Provider::Square.to_string(), "Square");
@@ -1354,6 +1370,7 @@ mod tests {
             ("hubspot", Provider::HubSpot),
             ("klaviyo", Provider::Klaviyo),
             ("mandrill", Provider::Mandrill),
+            ("line", Provider::Line),
             ("shopify", Provider::Shopify),
             ("slack", Provider::Slack),
             ("square", Provider::Square),
@@ -1491,6 +1508,7 @@ mod tests {
                 &[klaviyo::SIGNATURE_HEADER, klaviyo::TIMESTAMP_HEADER],
             ),
             (Provider::Mandrill, &[mandrill::SIGNATURE_HEADER]),
+            (Provider::Line, &[line::SIGNATURE_HEADER]),
             (Provider::Shopify, &[shopify::SIGNATURE_HEADER]),
             (
                 Provider::Slack,
@@ -1649,7 +1667,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 42] {
+    fn provider_list() -> [Provider; 43] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1660,6 +1678,7 @@ mod tests {
             Provider::HubSpot,
             Provider::Klaviyo,
             Provider::Mandrill,
+            Provider::Line,
             Provider::Shopify,
             Provider::Slack,
             Provider::Square,

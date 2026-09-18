@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: LINE Messaging API** (`Provider::Line`): **base64**
+  HMAC-SHA256 over the exact request body, keyed by the channel secret as its
+  UTF-8 bytes and delivered in `x-line-signature`. LINE's docs are explicit
+  that any modification of the body string — deserialization, JSON
+  formatting, escape-character interpretation, encoding changes — breaks the
+  signature, so the crate hashes `raw_body` verbatim like Shopify/Dropbox/
+  DocuSign. No timestamp is signed, so `max_age` has no effect. The primary
+  test vector is the byte-exact example LINE publishes on its
+  "Verify webhook signature" page (body, channel secret, and signature all
+  given there); the boundary vectors are locally constructed over the same
+  documented recipe, cross-checked with OpenSSL and Python's `hmac`. Source:
+  <https://developers.line.biz/en/docs/messaging-api/verify-webhook-signature/>
+  ("Verify webhook signature").
 - **New provider: Mailchimp Transactional** (`Provider::Mandrill`,
   formerly Mandrill): base64 **HMAC-SHA1** over the webhook URL (exactly as
   configured, including any query string) followed by each `POST` form

@@ -679,6 +679,40 @@ repeating the signing guidance and the "Sample payload").
   LaunchDarkly's documented webhook payload). Replace them if LaunchDarkly
   ever publishes fixed vectors.
 
+### LINE
+
+Source: <https://developers.line.biz/en/docs/messaging-api/verify-webhook-signature/>
+("Verify webhook signature": the required `X-Line-Signature` header, the
+`openssl` verification command below, and the byte-exact example) and
+<https://developers.line.biz/en/docs/messaging-api/receiving-messages/>
+(the messaging-receipt overview, which spells the header lowercase and
+documents the verification middleware contract).
+
+- Header: `X-Line-Signature: <base64_hmac>` — a bare base64 digest, no
+  `sha256=` prefix and no timestamp; standard alphabet with padding, same
+  single-header shape as DocuSign and Shopify.
+- Signed string: the exact request body. LINE's docs are explicit that
+  altering the body in any way — deserialization, JSON formatting,
+  escape-character interpretation, encoding changes — breaks the signature
+  ("any modification to the request body string [...] means the signature
+  is not successfully verified"), so the raw bytes must be hashed untouched.
+- Algorithm: HMAC-SHA256, base64-encoded. Key: the channel's **channel
+  secret** as its UTF-8 bytes. LINE publishes the exact verification
+  construction:
+  `openssl dgst -sha256 -hmac "$CHANNEL_SECRET" -binary | base64` applied to
+  the raw body string.
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Shopify/Dropbox/DocuSign. LINE's docs recommend handling replayed
+  (re-delivered) webhooks at the application layer — e.g. via the message
+  ID in the payload — which is outside this crate's scope.
+- Test-vector provenance: LINE publishes a byte-exact example (the
+  confirmation webhook body `{"destination":"U8e742f61d673b39c7fff3cecb7536ef0","events":[]}`,
+  the channel secret `8c570fa6dd201bb328f1c1eac23a96d8`, and the signature
+  `GhRKmvmHys4Pi8DxkF4+EayaH0OqtJtaZxgTD9fMDLs=`, exactly reproducing the
+  `openssl` command above). This is the primary test vector; the remaining
+  vectors are locally constructed over the same documented construction and
+  cross-checked against both OpenSSL and Python's `hmac` module.
+
 ### Notion
 
 Source: <https://developers.notion.com/reference/webhooks>
