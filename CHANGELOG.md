@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Intercom** (`Provider::Intercom`): HMAC-SHA1 over the raw
+  request body, **hex**-encoded with a literal `sha1=` prefix, delivered
+  case-sensitively in the `X-Hub-Signature` header (40 hex characters / 20
+  bytes). The signing key is the Intercom app's `client_secret` (Developer Hub
+  → Basic Info), used verbatim as its UTF-8 bytes. Intercom is, like Twilio, a
+  scheme that still legitimately mandates SHA-1 — the HMAC is keyed with the
+  shared secret, which is immune to SHA-1's collision attacks. No timestamp is
+  signed, so the shared `max_age` replay window has no effect (`spec.md` §3).
+  Source:
+  <https://developers.intercom.com/docs/references/2.5/webhooks/webhook-models>
+  ("Signing notifications"). Intercom publishes the header format and an
+  example header value but no byte-exact signed body, so the vectors are
+  locally constructed over exactly the documented construction
+  (`sha1=` + lowercase hex of `HMAC-SHA1(client_secret, raw_body)`), cross-checked
+  across OpenSSL and Python; the 20-byte digest length is pinned by the length
+  reject case.
 - **New provider: Paystack** (`Provider::Paystack`): HMAC-SHA512 over the raw
   request body, **hex**-encoded, delivered bare (no prefix, no timestamp) in
   the `x-paystack-signature` header. The signing key is the Paystack secret key

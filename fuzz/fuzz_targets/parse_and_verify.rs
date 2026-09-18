@@ -23,6 +23,9 @@
 //! - `bitbucket-hub-signature` — Bitbucket Cloud's documented worked example
 //!   (support.atlassian.com), reaching the `X-Hub-Signature` `sha256=` prefix,
 //!   hex decode, 32-byte gate, and constant-time HMAC comparison.
+//! - `intercom-hub-signature` — intercom's documented `X-Hub-Signature`
+//!   construction (`sha1=` prefix, hex HMAC over the raw body), reaching the
+//!   prefix, hex decode, 20-byte gate, and constant-time HMAC comparison.
 //! - `slack-timestamped-delivery` — Slack's documented worked example
 //!   (docs.slack.dev), reaching the `v0=` scheme, timestamp parse, and HMAC
 //!   comparison over `v0:{ts}:{body}`.
@@ -151,6 +154,11 @@ const IMPLEMENTED: &[Provider] = &[
     // and 32-byte gate, and a well-formed-shaped attempt below reaches HMAC
     // comparison.
     Provider::Bitbucket,
+    // Intercom is a single-header raw-body HMAC (`sha1=` prefixed hex, 20-byte
+    // digest, no timestamp); arbitrary header bytes exercise its prefix-strip
+    // and hex-decode paths, and a well-formed-shaped attempt below reaches its
+    // 20-byte gate and HMAC comparison.
+    Provider::Intercom,
     // HubSpot needs both a method and a URL in VerifyOptions to get past its
     // context check and into the signature path; arbitrary header bytes
     // exercise its header splitting and MissingContext fail-closed paths, and
@@ -599,6 +607,21 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "X-Hub-Signature".to_string(),
             "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Intercom: a well-formed-shaped `X-Hub-Signature` (valid `sha1=` hex of
+    // 20 bytes) lets arbitrary body bytes reach the 20-byte length gate and
+    // HMAC comparison; without it the loop above mostly fails earlier on
+    // malformed/missing prefix or hex.
+    attempt(
+        Provider::Intercom,
+        &[(
+            "X-Hub-Signature".to_string(),
+            "sha1=cbf9bf16f89d9cf089ee3500c5ba94595b3aedcd".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,
