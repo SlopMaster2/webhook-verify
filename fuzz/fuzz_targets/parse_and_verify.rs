@@ -167,6 +167,12 @@ const IMPLEMENTED: &[Provider] = &[
     // and 32-byte gate, and a well-formed-shaped attempt below reaches HMAC
     // comparison.
     Provider::Bitbucket,
+    // Box needs four headers (two base64 signature values + RFC 3339 delivery
+    // timestamp, with optional version/algorithm metadata) to reach its
+    // signature path; a well-formed-shaped attempt below reaches its RFC 3339
+    // timestamp parse, both base64 decodes, the `{body}{timestamp}`
+    // concatenation HMAC comparison, and the optional metadata validation.
+    Provider::Box,
     // Intercom is a single-header raw-body HMAC (`sha1=` prefixed hex, 20-byte
     // digest, no timestamp); arbitrary header bytes exercise its prefix-strip
     // and hex-decode paths, and a well-formed-shaped attempt below reaches its
@@ -640,6 +646,38 @@ fuzz_target!(|data: &[u8]| {
             "X-Hub-Signature".to_string(),
             "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Box: a well-formed-shaped three-header delivery (base64 signature plus
+    // RFC 3339 delivery timestamp on both signature headers) lets arbitrary
+    // body bytes reach the RFC 3339 timestamp parse, both 32-byte length
+    // gates, the `{body}{timestamp}` concatenation HMAC comparison, and the
+    // optional version/algorithm metadata validation; without it the loop
+    // above mostly fails earlier on malformed/missing header fields.
+    attempt(
+        Provider::Box,
+        &[
+            (
+                "BOX-SIGNATURE-PRIMARY".to_string(),
+                WELL_FORMED_SECRET.to_string(),
+            ),
+            (
+                "BOX-SIGNATURE-SECONDARY".to_string(),
+                WELL_FORMED_SECRET.to_string(),
+            ),
+            (
+                "BOX-DELIVERY-TIMESTAMP".to_string(),
+                "2020-01-01T00:00:00-07:00".to_string(),
+            ),
+            ("BOX-SIGNATURE-VERSION".to_string(), "1".to_string()),
+            (
+                "BOX-SIGNATURE-ALGORITHM".to_string(),
+                "HmacSHA256".to_string(),
+            ),
+        ],
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,

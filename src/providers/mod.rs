@@ -7,6 +7,7 @@
 
 mod adyen;
 mod bitbucket;
+mod box_webhooks;
 mod calendly;
 mod cloudflare;
 mod coinbase;
@@ -88,6 +89,16 @@ pub enum Provider {
     /// Bitbucket Cloud (`X-Hub-Signature`, HMAC-SHA256 over the raw body,
     /// `sha256=` prefix; no timestamp).
     Bitbucket,
+    /// Box (`BOX-SIGNATURE-PRIMARY` / `BOX-SIGNATURE-SECONDARY`,
+    /// base64-encoded HMAC-SHA256 over `{raw_body}{BOX-DELIVERY-TIMESTAMP}`).
+    ///
+    /// Box sends **two** signatures on every delivery — one per configured
+    /// key — so a delivery verifies when **either** header matches the caller's
+    /// single [`Secret`]. Both headers are required (Box always sends both).
+    /// The delivery timestamp is RFC 3339 (e.g. `-07:00` offsets) and is
+    /// HMAC-covered, so the shared `max_age` replay window applies; Box's docs
+    /// recommend a ten-minute window while the crate default is 300s.
+    Box,
     /// Intercom (`X-Hub-Signature`, `sha1=`-prefixed hex HMAC-SHA1 over the
     /// raw body, keyed by the app's `client_secret`; no timestamp).
     ///
@@ -345,6 +356,7 @@ impl fmt::Display for Provider {
             Provider::Stripe => f.write_str("Stripe"),
             Provider::GitHub => f.write_str("GitHub"),
             Provider::Bitbucket => f.write_str("Bitbucket"),
+            Provider::Box => f.write_str("Box"),
             Provider::Intercom => f.write_str("Intercom"),
             Provider::Meta => f.write_str("Meta"),
             Provider::HubSpot => f.write_str("HubSpot"),
@@ -417,6 +429,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("stripe") => Ok(Provider::Stripe),
             n if n.eq_ignore_ascii_case("github") => Ok(Provider::GitHub),
             n if n.eq_ignore_ascii_case("bitbucket") => Ok(Provider::Bitbucket),
+            n if n.eq_ignore_ascii_case("box") => Ok(Provider::Box),
             n if n.eq_ignore_ascii_case("intercom") => Ok(Provider::Intercom),
             n if n.eq_ignore_ascii_case("meta") => Ok(Provider::Meta),
             n if n.eq_ignore_ascii_case("hubspot") => Ok(Provider::HubSpot),
@@ -475,7 +488,7 @@ pub struct ProviderParseError;
 impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
-            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `intercom`, `meta`, `hubspot`, `klaviyo`, `shopify`, \
+            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `meta`, `hubspot`, `klaviyo`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, \
@@ -505,6 +518,13 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Stripe => vec![stripe::SIGNATURE_HEADER],
         Provider::GitHub => vec![github::SIGNATURE_HEADER],
         Provider::Bitbucket => vec![bitbucket::SIGNATURE_HEADER],
+        Provider::Box => vec![
+            box_webhooks::PRIMARY_SIGNATURE_HEADER,
+            box_webhooks::SECONDARY_SIGNATURE_HEADER,
+            box_webhooks::TIMESTAMP_HEADER,
+            box_webhooks::SIGNATURE_VERSION_HEADER,
+            box_webhooks::SIGNATURE_ALGORITHM_HEADER,
+        ],
         Provider::Intercom => vec![intercom::SIGNATURE_HEADER],
         Provider::Meta => vec![meta::SIGNATURE_HEADER],
         Provider::HubSpot => {
@@ -644,6 +664,7 @@ pub(crate) fn verify_ref(
         Provider::Discord => discord::verify(headers, raw_body, secret, options),
         Provider::GitHub => github::verify(headers, raw_body, secret, options),
         Provider::Bitbucket => bitbucket::verify(headers, raw_body, secret, options),
+        Provider::Box => box_webhooks::verify(headers, raw_body, secret, options),
         Provider::Intercom => intercom::verify(headers, raw_body, secret, options),
         Provider::Meta => meta::verify(headers, raw_body, secret, options),
         Provider::HubSpot => hubspot::verify(headers, raw_body, secret, options),
@@ -1430,6 +1451,16 @@ mod tests {
             (Provider::Stripe, &[stripe::SIGNATURE_HEADER]),
             (Provider::GitHub, &[github::SIGNATURE_HEADER]),
             (Provider::Bitbucket, &[bitbucket::SIGNATURE_HEADER]),
+            (
+                Provider::Box,
+                &[
+                    box_webhooks::PRIMARY_SIGNATURE_HEADER,
+                    box_webhooks::SECONDARY_SIGNATURE_HEADER,
+                    box_webhooks::TIMESTAMP_HEADER,
+                    box_webhooks::SIGNATURE_VERSION_HEADER,
+                    box_webhooks::SIGNATURE_ALGORITHM_HEADER,
+                ],
+            ),
             (Provider::Intercom, &[intercom::SIGNATURE_HEADER]),
             (Provider::Meta, &[meta::SIGNATURE_HEADER]),
             (
@@ -1598,11 +1629,12 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 40] {
+    fn provider_list() -> [Provider; 41] {
         [
             Provider::Stripe,
             Provider::GitHub,
             Provider::Bitbucket,
+            Provider::Box,
             Provider::Intercom,
             Provider::Meta,
             Provider::HubSpot,
