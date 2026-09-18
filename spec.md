@@ -56,6 +56,7 @@ pub enum Provider {
     Paystack,
     Paddle,
     PagerDuty,
+    Pusher,
     Linear,
     LaunchDarkly,
     Notion,
@@ -1008,6 +1009,42 @@ official Go SDK's reference implementation
   (`v1=7020c8a7...8bcaf5`). Additional vectors cover the empty and UTF-8 body
   boundary cases, the multi-`v1=` rotation list, and non-`v1=` elements,
   constructed locally over exactly the documented construction.
+
+### Pusher
+
+Source: <https://pusher.com/docs/channels/server_api/webhooks> (Pusher's
+"Webhooks" documentation for Channels: "The signature is generated using the
+POST body with the token's secret"), corroborated by Pusher's official PHP
+reference implementation in the pusher-http-php SDK
+(<https://github.com/pusher/pusher-http-php/blob/main/src/Webhook.php>,
+`hash_hmac("sha256", $body, $app_secret, false)` — raw POST body in, lowercase
+hex out).
+
+- Header: `X-Pusher-Signature: <hex_hmac>` — bare lowercase hex digest, no
+  `sha256=` prefix and no timestamp; same shape as LaunchDarkly/Dropbox/
+  Razorpay/LemonSqueezy.
+- Signed string: the raw request body bytes, unmodified — Pusher signs the
+  POST payload exactly as delivered, so re-serializing or reformatting the
+  body changes the signature.
+- Algorithm: HMAC-SHA256, hex-encoded.
+- Key: the **secret** of the app token named in the `X-Pusher-Key` header.
+  The key value is *not* part of the signed content — it only selects which
+  token's secret keys the HMAC. Because Pusher rotates tokens, callers with
+  multiple active tokens must supply the `Secret` matching the one the
+  delivery was signed with (verifying oldest active token first, per Pusher's
+  docs); the crate's `verify()` takes exactly one `Secret` and performs no
+  network lookups, so the caller resolves token→secret.
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub/Bitbucket/Sentry/LaunchDarkly.
+- Empty headers, non-hex values, and values that do not decode to 32 bytes
+  fail closed as `MalformedHeader`/`BadEncoding` (crate-wide error
+  granularity, `spec.md` §2.1).
+- Test-vector provenance: Pusher publishes no fixed test vector; the primary
+  vector is constructed locally over exactly the documented construction
+  (the byte-exact `time_ms`/`events` payload shape from Pusher's docs,
+  keyed with a representative token secret, cross-checked with
+  `openssl dgst -sha256 -hmac`). Vectors also cover the empty and UTF-8 body
+  boundary cases and the non-signed `X-Pusher-Key` header.
 
 ### Adyen
 

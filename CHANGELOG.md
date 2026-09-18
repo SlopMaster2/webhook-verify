@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Pusher Channels** (`Provider::Pusher`): HMAC-SHA256 over
+  the raw POST body, **hex**-encoded, delivered bare (no prefix, no
+  timestamp) in the `X-Pusher-Signature` header. The signing key is the
+  **secret** of the Pusher app token named in the `X-Pusher-Key` header —
+  the key value itself is not part of the signed content, it only selects
+  which token's secret keys the HMAC; callers with multiple active tokens
+  must pass the secret of the one the delivery was signed with (Pusher
+  rotates tokens, so verifying oldest-active first matches the docs). No
+  timestamp is signed, so the shared `max_age` replay window has no effect
+  (`spec.md` §3). Sources:
+  <https://pusher.com/docs/channels/server_api/webhooks> ("The signature is
+  generated using the POST body with the token's secret") and Pusher's
+  official PHP reference implementation
+  (<https://github.com/pusher/pusher-http-php/blob/main/src/Webhook.php>:
+  `hash_hmac("sha256", $body, $app_secret, false)`). Pusher publishes the
+  construction but no byte-exact example body+signature pair, so the vectors
+  are locally constructed over exactly the documented construction, cross-checked
+  with OpenSSL; the 32-byte digest length is pinned by the length-reject case.
 - **New provider: Vercel** (`Provider::Vercel`): HMAC-SHA1 over the raw
   request body, **hex**-encoded, delivered bare (no `sha1=` prefix, no
   timestamp) in the `x-vercel-signature` header. The signing key is the webhook

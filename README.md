@@ -104,6 +104,7 @@ hand-copied signing-string logic to get wrong.
 | Paystack | HMAC-SHA512 over raw body, bare hex, `x-paystack-signature` (no prefix, no timestamp) | ✅ |
 | Paddle | HMAC-SHA256, hex, `Paddle-Signature` (`ts=;h1=` list, rotation-safe) + replay window | ✅ |
 | PagerDuty (v3 webhooks) | HMAC-SHA256 over raw body, hex, `v1=` prefix, `X-PagerDuty-Signature` (`v1=` rotation list, no timestamp) | ✅ |
+| Pusher (Channels webhooks) | HMAC-SHA256 over raw POST body, bare hex, `X-Pusher-Signature` (keyed by the app token's secret, no timestamp) | ✅ |
 | Linear | HMAC-SHA256, `linear-signature` | ✅ |
 | LaunchDarkly | HMAC-SHA256 over raw body, hex, `X-LD-Signature` (no timestamp) | ✅ |
 | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` (verification-token key) | ✅ |
