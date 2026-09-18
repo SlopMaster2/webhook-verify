@@ -44,6 +44,7 @@ mod stripe;
 mod twilio;
 mod twitch;
 mod typeform;
+mod vercel;
 mod woocommerce;
 mod workos;
 mod xero;
@@ -283,6 +284,16 @@ pub enum Provider {
     /// default is 300s). Only a single `v1` signature is accepted — Calendly's
     /// docs define no rotation list.
     Calendly,
+    /// Vercel (`x-vercel-signature`, HMAC-SHA1 over the raw body, bare hex —
+    /// no `sha1=` prefix, no timestamp).
+    ///
+    /// Covers webhook deliveries from Webhooks, Log Drains, and integration
+    /// webhooks alike: the header holds a bare lowercase hex HMAC-SHA1 of the
+    /// raw request body keyed by the webhook secret (account webhooks) or the
+    /// Integration Secret (integration webhooks), both used verbatim as UTF-8
+    /// bytes. Vercel signs no timestamp, so `max_age` has no effect. This is
+    /// the crate's only SHA-1 scheme besides Twilio (`spec.md` §3).
+    Vercel,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -340,6 +351,7 @@ impl fmt::Display for Provider {
             Provider::WorkOS => f.write_str("WorkOS"),
             Provider::WooCommerce => f.write_str("WooCommerce"),
             Provider::Calendly => f.write_str("Calendly"),
+            Provider::Vercel => f.write_str("Vercel"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -413,6 +425,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("workos") => Ok(Provider::WorkOS),
             n if n.eq_ignore_ascii_case("woocommerce") => Ok(Provider::WooCommerce),
             n if n.eq_ignore_ascii_case("calendly") => Ok(Provider::Calendly),
+            n if n.eq_ignore_ascii_case("vercel") => Ok(Provider::Vercel),
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks") =>
             {
@@ -434,7 +447,8 @@ impl fmt::Display for ProviderParseError {
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `intercom`, `hubspot`, `klaviyo`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `linear`, \
              `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, or `standardwebhooks` (or `standard webhooks`) \
+             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, \
+             or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
@@ -496,6 +510,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::WorkOS => vec![workos::SIGNATURE_HEADER],
         Provider::WooCommerce => vec![woocommerce::SIGNATURE_HEADER],
         Provider::Calendly => vec![calendly::SIGNATURE_HEADER],
+        Provider::Vercel => vec![vercel::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -625,6 +640,7 @@ pub(crate) fn verify_ref(
         Provider::WorkOS => workos::verify(headers, raw_body, secret, options),
         Provider::WooCommerce => woocommerce::verify(headers, raw_body, secret, options),
         Provider::Calendly => calendly::verify(headers, raw_body, secret, options),
+        Provider::Vercel => vercel::verify(headers, raw_body, secret, options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, options),
         #[cfg(not(feature = "paypal"))]
@@ -1220,6 +1236,7 @@ mod tests {
         assert_eq!(Provider::WorkOS.to_string(), "WorkOS");
         assert_eq!(Provider::WooCommerce.to_string(), "WooCommerce");
         assert_eq!(Provider::Calendly.to_string(), "Calendly");
+        assert_eq!(Provider::Vercel.to_string(), "Vercel");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1291,6 +1308,7 @@ mod tests {
             ("workos", Provider::WorkOS),
             ("woocommerce", Provider::WooCommerce),
             ("calendly", Provider::Calendly),
+            ("vercel", Provider::Vercel),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1426,6 +1444,7 @@ mod tests {
             (Provider::WorkOS, &[workos::SIGNATURE_HEADER]),
             (Provider::WooCommerce, &[woocommerce::SIGNATURE_HEADER]),
             (Provider::Calendly, &[calendly::SIGNATURE_HEADER]),
+            (Provider::Vercel, &[vercel::SIGNATURE_HEADER]),
             (
                 Provider::Zoom,
                 &[zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
@@ -1539,7 +1558,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 37] {
+    fn provider_list() -> [Provider; 38] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1577,6 +1596,7 @@ mod tests {
             Provider::WorkOS,
             Provider::WooCommerce,
             Provider::Calendly,
+            Provider::Vercel,
             Provider::StandardWebhooks,
         ]
     }

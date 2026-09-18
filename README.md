@@ -121,6 +121,7 @@ hand-copied signing-string logic to get wrong.
 | WorkOS | HMAC-SHA256 over `t.body`, hex, `WorkOS-Signature` (`t=,v1=` list, timestamp in epoch millis, floored for the replay window) | ✅ |
 | WooCommerce | HMAC-SHA256, base64, `X-WC-Webhook-Signature` | ✅ |
 | Calendly | HMAC-SHA256 over `t.body`, hex, `Calendly-Webhook-Signature` (`t=,v1=` list) + replay window | ✅ |
+| Vercel (Webhooks, Log Drains, integration webhooks) | HMAC-SHA1 over raw body, bare hex, `x-vercel-signature` (no prefix, no timestamp) | ✅ |
 | Standard Webhooks spec (Svix, Clerk, Resend, GitLab 19.0+ signing tokens, ...) | HMAC-SHA256, `webhook-signature` (`v1,` base64, rotation list) + replay window | ✅ |
 | Custom | User-supplied HMAC scheme via `Provider::Custom(..)` (SHA-256/SHA-1/SHA-512, hex/base64, optional prefix + timestamp replay window) | ✅ |
 

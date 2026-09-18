@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: Vercel** (`Provider::Vercel`): HMAC-SHA1 over the raw
+  request body, **hex**-encoded, delivered bare (no `sha1=` prefix, no
+  timestamp) in the `x-vercel-signature` header. The signing key is the webhook
+  secret shown when creating an account webhook, or the Integration Secret
+  (Client Secret) for integration webhooks, used verbatim as its UTF-8 bytes.
+  Covers requests from Webhooks, Log Drains, and integration webhooks alike.
+  Vercel is the built-in providers' second SHA-1 scheme after Twilio, but the
+  only raw-body one — like Twilio and Intercom, the HMAC is keyed with the
+  shared secret, which is immune to SHA-1's collision attacks. No timestamp is
+  signed, so the shared `max_age` replay window has no effect. Sources:
+  <https://vercel.com/docs/webhooks/webhooks-api> ("Securing webhooks") and
+  <https://vercel.com/docs/headers/request-headers#x-vercel-signature> (the
+  latter states the header "contains an HMAC-SHA1 signature" and ships a
+  reference verifier that compares `digest('hex')` output to the header with
+  `crypto.timingSafeEqual`). Vercel publishes the construction and full
+  reference code but no byte-exact example signature, so the vectors are
+  locally constructed over exactly the documented construction, cross-checked
+  across OpenSSL and Python; the SHA-256-length reject case pins the 20-byte
+  digest shape.
 - **New provider: DocuSign** (`Provider::DocuSign`): Connect's HMAC-SHA256
   over the raw request body, **base64**-encoded (standard alphabet with
   padding), delivered bare (no prefix, no timestamp) in the
