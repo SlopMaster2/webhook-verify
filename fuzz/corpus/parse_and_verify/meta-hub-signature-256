@@ -1,0 +1,3 @@
+X-Hub-Signature-256:sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e
+
+{"object":"whatsapp_business_account","entry":[{"id":"0","changes":[{"value":{"messaging_product":"whatsapp","metadata":{"display_phone_number":"16505551111","phone_number_id":"1234567890"},"contacts":[{"profile":{"name":"Test User"},"wa_id":"16315551000"}],"messages":[{"from":"16315551000","id":"wamid.HBgLMTYzMTU1NTEwMDAVO0IA","timestamp":"1700000000","text":{"body":"Hello"}}]},"field":"messages"}]}]}

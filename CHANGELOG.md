@@ -65,6 +65,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`sha1=` + lowercase hex of `HMAC-SHA1(client_secret, raw_body)`), cross-checked
   across OpenSSL and Python; the 20-byte digest length is pinned by the length
   reject case.
+- **New provider: Meta** (`Provider::Meta`): HMAC-SHA256 over the raw
+  request body, **hex**-encoded with a `sha256=` prefix, delivered case-
+  sensitively in the `X-Hub-Signature-256` header. The signing key is the
+  app's **App Secret** (App Dashboard → Basic), used verbatim as its UTF-8
+  bytes — the same construction as GitHub's `X-Hub-Signature-256` but keyed
+  with Meta's App Secret. Covers Graph API webhooks (Facebook Pages, Messenger,
+  Instagram) and WhatsApp Cloud API deliveries alike. Meta signs the payload's
+  escaped-unicode serialization, so callers must pass the untouched request
+  bytes; for ASCII-only JSON the two encodings are byte-identical. No timestamp
+  is signed, so the shared `max_age` replay window has no effect. Sources:
+  <https://developers.facebook.com/docs/graph-api/webhooks/getting-started>
+  ("Validating payloads"), the WhatsApp Cloud API endpoint walkthrough
+  (<https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/create-webhook-endpoint>),
+  and the Messenger Platform reference (`verifyRequestSignature`). Meta
+  publishes the header format and an example header value but no byte-exact
+  signed body (the App Secret is account-specific), so the vectors are locally
+  constructed over exactly the documented construction (`sha256=` + lowercase
+  hex of `HMAC-SHA256(app_secret, raw_body)`), cross-checked across OpenSSL
+  and Python.
 - **New provider: Paystack** (`Provider::Paystack`): HMAC-SHA512 over the raw
   request body, **hex**-encoded, delivered bare (no prefix, no timestamp) in
   the `x-paystack-signature` header. The signing key is the Paystack secret key

@@ -41,6 +41,7 @@ pub enum Provider {
     GitHub,
     Bitbucket,
     Intercom,
+    Meta,
     HubSpot,
     Klaviyo,
     Shopify,
@@ -414,6 +415,48 @@ alongside a sample delivery.
   `HMAC-SHA1(client_secret, raw_body)`), cross-checked with `openssl dgst`
   and Python's `hmac` module. Replace them if Intercom ever publishes fixed
   vectors.
+
+### Meta
+
+Source: <https://developers.facebook.com/docs/graph-api/webhooks/getting-started>
+(Meta for Developers, "Validating payloads") and the WhatsApp Cloud API
+endpoint walkthrough
+(<https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/create-webhook-endpoint>,
+"To validate the request" — the same `X-Hub-Signature-256` algorithm across
+Graph API, Messenger Platform, Instagram, and WhatsApp Cloud API, with an
+example header value). The Messenger Platform docs also carry the reference
+verifier (`verifyRequestSignature`, computing `createHmac("sha256",
+appSecret).update(buf).digest("hex")` over the raw body).
+
+- Header: `X-Hub-Signature-256: sha256=<hex_hmac>` — the literal `sha256=`
+  prefix followed by the lowercase hex HMAC-SHA256 digest of the raw payload,
+  identical in shape to GitHub's header but keyed by the Meta **App Secret**
+  (notably distinct from the legacy SHA-1 `X-Hub-Signature` header, which
+  this crate does not read).
+- Signed string: the raw request body bytes, unmodified. Meta documents that it
+  signs the payload's *escaped-unicode* serialization (`äöå` is signed as
+  `\u00e4\u00f6\u00e5`), so a reparsed/re-serialized JSON value — which
+  switches between escaped and literal encodings — will not match. Passing the
+  untouched wire bytes (`spec.md` §4) is exactly what this crate does; for
+  ASCII-only JSON the escaped-unicode form is byte-identical to the raw body.
+- Algorithm: HMAC-SHA256, hex-encoded (lowercase hex from Meta; decoding is
+  case-insensitive, matching every other hex provider).
+- Key: the app's App Secret (App Dashboard → App settings → Basic) as its
+  UTF-8 bytes verbatim.
+- The `sha256=` prefix is matched case-sensitively, exactly like GitHub's:
+  Meta's docs and samples emit only the literal lowercase form, and an unknown
+  prefix fails closed as `MalformedHeader`.
+- No timestamp in the signature scheme (`max_age` has no effect): Meta's
+  payloads carry no freshness marker, so replay protection cannot be provided
+  at the signature layer — mirroring GitHub/Bitbucket.
+- Test-vector provenance: Meta publishes the header format, the algorithm, and
+  an example header value (`sha256={super-long-SHA256-signature}`), but no
+  byte-exact signed body+key pair (the App Secret is account-specific), so the
+  vectors are locally constructed over exactly the documented construction
+  (`sha256=` + lowercase hex of `HMAC-SHA256(app_secret, raw_body)`),
+  cross-checked with `openssl dgst` and Python's `hmac` module. The primary
+  vector's body mirrors the shape of a WhatsApp Cloud API `messages` delivery.
+  Replace them if Meta ever publishes fixed vectors.
 
 ### HubSpot
 
