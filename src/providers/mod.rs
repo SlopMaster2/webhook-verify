@@ -397,10 +397,9 @@ pub struct ProviderParseError;
 impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
-        "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `klaviyo`, `shopify`, \
+            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `klaviyo`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
-             `launchdarkly`, \
-             `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
+             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
         )
