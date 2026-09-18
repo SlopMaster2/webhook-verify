@@ -77,6 +77,7 @@
 //! | Cloudflare (Stream) | HMAC-SHA256 over `time.body`, hex, `Webhook-Signature` |
 //! | Coinbase (CDP) | HMAC-SHA256 over `t.body`, hex, `X-Hook0-Signature` + tolerance window |
 //! | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` |
+//! | DocuSign (Connect) | HMAC-SHA256 over raw body, base64, `X-Docusign-Signature-1` (first configured key, no timestamp) |
 //! | Razorpay | HMAC-SHA256 over raw body, hex, `X-Razorpay-Signature` (no timestamp) |
 //! | Lemon Squeezy | HMAC-SHA256, `X-Signature` (bare hex, no timestamp) |
 //! | Xero | HMAC-SHA256, base64, `x-xero-signature` |

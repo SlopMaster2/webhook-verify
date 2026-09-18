@@ -38,6 +38,9 @@
 //!   shape over the raw body, reaching hex decode, the 32-byte gate, and HMAC
 //!   comparison (parser-well-formed, no space after the colon, matching the
 //!   other bare-hex/bare-base64 HMAC seeds).
+//! - `docusign-base64-signature` — DocuSign's `X-Docusign-Signature-1` bare
+//!   base64 HMAC shape over the primary vector body (no prefix, no timestamp),
+//!   reaching base64 decode, the 32-byte gate, and HMAC comparison.
 //! - `razorpay-hex-signature` — Razorpay's `X-Razorpay-Signature` bare-hex HMAC
 //!   shape over the raw body (no prefix, no timestamp), reaching hex decode,
 //!   the 32-byte gate, and HMAC comparison.
@@ -186,6 +189,11 @@ const IMPLEMENTED: &[Provider] = &[
     // header bytes exercise its hex-decode and 32-byte gate, and a
     // well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Dropbox,
+    // DocuSign is a single-header raw-body HMAC (bare base64, no prefix, no
+    // timestamp, verbatim string key); arbitrary header bytes exercise its
+    // base64-decode and 32-byte gate, and a well-formed-shaped attempt below
+    // reaches HMAC comparison.
+    Provider::DocuSign,
     // Razorpay is a single-header raw-body HMAC (bare hex, no prefix, no
     // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
     // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
@@ -848,6 +856,21 @@ fuzz_target!(|data: &[u8]| {
         )],
         body,
         ADYEN_HEX_SECRET,
+        &url_scoped_options,
+    );
+
+    // DocuSign: a well-formed-shaped `X-Docusign-Signature-1` (valid base64
+    // sig, no prefix, no timestamp) lets arbitrary body bytes reach the
+    // 32-byte length gate and HMAC comparison. The key model is verbatim, so
+    // the base64-shaped `WELL_FORMED_SECRET` works directly as the HMAC key.
+    attempt(
+        Provider::DocuSign,
+        &[(
+            "X-Docusign-Signature-1".to_string(),
+            "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
         &url_scoped_options,
     );
 

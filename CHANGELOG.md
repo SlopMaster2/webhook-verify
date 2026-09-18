@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: DocuSign** (`Provider::DocuSign`): Connect's HMAC-SHA256
+  over the raw request body, **base64**-encoded (standard alphabet with
+  padding), delivered bare (no prefix, no timestamp) in the
+  `X-Docusign-Signature-1` header. The signing key is the Connect
+  configuration's HMAC key, used verbatim as its UTF-8 bytes. DocuSign sends
+  one numbered header per configured key (`-1`, `-2`, ... up to 100) and
+  accepts a match against any of them; this provider verifies the first key's
+  header (`-1`), which ships on every delivery and is the recommended
+  single-key setup — numbered headers beyond `-1` are intentionally out of
+  scope for the crate's single-header model (`spec.md` §3). No timestamp is
+  signed, so the shared `max_age` replay window has no effect. Sources:
+  <https://developers.docusign.com/platform/webhooks/connect/validate/>
+  ("How to validate an HMAC signature" — raw-body / line-endings signing rule
+  and base64 encoding),
+  <https://developers.docusign.com/platform/webhooks/connect/hmac/>
+  (one numbered header per key), and the official PHP verification sample
+  (<https://www.docusign.com/blog/developers/hmac-verification-php>).
+  DocuSign publishes the algorithm and reference code but no byte-exact
+  example body+signature pair, so the vectors are locally constructed over
+  exactly the documented construction and cross-checked against both OpenSSL
+  and Python's `hmac` module (two independent implementations).
 - **New provider: Intercom** (`Provider::Intercom`): HMAC-SHA1 over the raw
   request body, **hex**-encoded with a literal `sha1=` prefix, delivered
   case-sensitively in the `X-Hub-Signature` header (40 hex characters / 20
