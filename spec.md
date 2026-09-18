@@ -41,6 +41,7 @@ pub enum Provider {
     GitHub,
     Bitbucket,
     HubSpot,
+    Klaviyo,
     Shopify,
     Slack,
     Square,
@@ -1346,6 +1347,52 @@ subscription guide
   OpenSSL and Python. The docs' published example header is replayed as a
   well-formed-but-mismatching input. Replace them if Calendly ever publishes
   fixed vectors.
+
+### Klaviyo
+
+Source:
+<https://developers.klaviyo.com/en/docs/working_with_system_webhooks>
+("Working with system webhooks" — the `Klaviyo-Signature`/`Klaviyo-Timestamp`/
+`Klaviyo-Webhook-Id` request-header reference, the HMAC-SHA256 recipe, the
+reference Python verifier that hashes the body and then updates the HMAC with
+the timestamp string, and the example delivery used below).
+
+- Headers: `Klaviyo-Signature`, `Klaviyo-Timestamp` (IMF-fixdate / RFC 1123,
+  e.g. `Thu, 04 Jan 2024 18:05:25 GMT`), and `Klaviyo-Webhook-Id`. Only the
+  signature and timestamp participate in the HMAC; the webhook id is not part
+  of the signed material.
+- Signed string: `"{raw_body}{timestamp}"` — the raw request body bytes
+  unmodified, then the `Klaviyo-Timestamp` value exactly as it appears in its
+  header (concatenated, no separators). The docs' reference code computes
+  `hmac.new(secret, body)` and then `update(timestamp.encode())`; the numeric
+  grammar of the timestamp is never re-serialized into the signed bytes.
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded (lowercase),
+  carried bare in the header (no `sha256=` prefix).
+- Key: the webhook's signing secret as a plain UTF-8 string, never decoded —
+  matching the docs' reference `hmac.new(hmac_secret, ...)`.
+- Timestamp validation routes through a strict IMF-fixdate parser
+  (RFC 7231 §7.1.1.1, RFC 1123 four-digit-year spelling only): exactly 29
+  characters, a weekday name that must also match the date (as Go's
+  `time.Parse` and the `httpdate` crate enforce), a valid calendar day
+  (leap-year aware), 00–59 hour/minute/second (IMF-fixdate has no leap-second
+  `60`), a literal `GMT` designator, and a non-negative unix instant.
+  Anything else — including the RFC 3339 spelling, non-`GMT` zones, and the
+  two-digit-year variants — fails closed as `MalformedHeader`.
+- Replay protection: the timestamp is HMAC-covered, so the shared symmetric
+  `|now - t| > max_age` window applies. Klaviyo's docs prescribe no freshness
+  window; the crate default 300s is strictly stronger than their sample code
+  and cannot reject a legitimate delivery.
+- `Klaviyo-Webhook-Id` is intentionally not verified: binding it requires
+  deserializing the body's `meta.klaviyo_webhook_id`, which is a non-goal
+  (§1). Callers should perform that pair check after `verify()` succeeds.
+- Test-vector provenance: Klaviyo publishes the example delivery
+  (`Klaviyo-Signature: e6c00e31...912d1`, `Klaviyo-Timestamp:
+  Thu, 04 Jan 2024 18:05:25 GMT`, `Klaviyo-Webhook-Id: a8b89045...3ecb`) but no
+  body or signing key, so the implementation is validated against locally
+  constructed, deterministic vectors over exactly the documented
+  construction, cross-checked with OpenSSL and Python. The docs' published
+  example delivery is replayed as a well-formed-but-mismatching input.
+  Replace them if Klaviyo ever publishes fixed vectors.
 
 ### Standard Webhooks spec
 

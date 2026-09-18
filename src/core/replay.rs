@@ -211,6 +211,148 @@ pub(crate) fn parse_rfc3339_timestamp(
     Ok(unix_seconds as u64)
 }
 
+/// Parses an RFC 7231 IMF-fixdate timestamp (the "HTTP-date" format the
+/// `Date` header uses, spelled per RFC 1123 with a four-digit year) into unix
+/// seconds.
+///
+/// Accepts the exact shape Klaviyo's `Klaviyo-Timestamp` header uses
+/// (`spec.md` §3, Klaviyo row) — `Thu, 04 Jan 2024 18:05:25 GMT`: a
+/// case-sensitive English three-letter weekday, comma, space, a zero-padded
+/// two-digit day, space, a three-letter month name, space, a four-digit year,
+/// space, zero-padded `HH:MM:SS`, space, and a literal `GMT` designator. The
+/// value must be exactly 29 characters. This is the strict IMF-fixdate
+/// grammar of RFC 7231 §7.1.1.1 and rejects the two-digit-year/asctime
+/// spellings Go's `http.ParseTime` also accepts: a header the provider never
+/// emits should not be silently normalized into a replayable instant.
+///
+/// Validation is strict and fail-closed:
+/// - the weekday name must be one of the seven canonical English names *and*
+///   match the weekday of the parsed date (RFC 7231 requires the day name to
+///   be accurate; Go's `time.Parse` and the `httpdate` crate reject a
+///   mismatched name the same way),
+/// - the day must be valid for the month, including leap years,
+/// - hour/minutes/seconds must be in 00–59 (IMF-fixdate's grammar is
+///   `second = 2DIGIT`, so unlike RFC 3339 it has no leap-second value 60),
+/// - the four-digit year must map to a non-negative unix timestamp (dates
+///   before 1970-01-01 are rejected).
+///
+/// The conversion reuses the same `days_from_civil` algorithm as
+/// [`parse_rfc3339_timestamp`].
+pub(crate) fn parse_imf_fixdate(header: &'static str, value: &str) -> Result<u64, VerifyError> {
+    let malformed = || VerifyError::MalformedHeader {
+        header,
+        reason: "timestamp is not a valid IMF-fixdate (RFC 1123) timestamp",
+    };
+
+    let b = value.as_bytes();
+    if b.len() != 29 {
+        return Err(malformed());
+    }
+
+    // `Sun` = 0, `Mon` = 1, ..., `Sat` = 6 — Sunday-anchored so the value
+    // compares directly against the weekday computed below.
+    let weekday = match &b[..3] {
+        b"Sun" => 0,
+        b"Mon" => 1,
+        b"Tue" => 2,
+        b"Wed" => 3,
+        b"Thu" => 4,
+        b"Fri" => 5,
+        b"Sat" => 6,
+        _ => return Err(malformed()),
+    };
+
+    // Fixed punctuation and literals: `ddd, DD Mon YYYY HH:MM:SS GMT`.
+    if b[3] != b','
+        || b[4] != b' '
+        || b[7] != b' '
+        || b[11] != b' '
+        || b[16] != b' '
+        || b[19] != b':'
+        || b[22] != b':'
+        || b[25] != b' '
+        || &b[26..29] != b"GMT"
+    {
+        return Err(malformed());
+    }
+
+    let digits = |bytes: &[u8]| -> u64 {
+        bytes
+            .iter()
+            .fold(0u64, |acc, c| acc * 10 + u64::from(c - b'0'))
+    };
+
+    if !(b[5..7].iter().all(u8::is_ascii_digit)
+        && b[12..16].iter().all(u8::is_ascii_digit)
+        && b[17..19].iter().all(u8::is_ascii_digit)
+        && b[20..22].iter().all(u8::is_ascii_digit)
+        && b[23..25].iter().all(u8::is_ascii_digit))
+    {
+        return Err(malformed());
+    }
+
+    let month = match &b[8..11] {
+        b"Jan" => 1,
+        b"Feb" => 2,
+        b"Mar" => 3,
+        b"Apr" => 4,
+        b"May" => 5,
+        b"Jun" => 6,
+        b"Jul" => 7,
+        b"Aug" => 8,
+        b"Sep" => 9,
+        b"Oct" => 10,
+        b"Nov" => 11,
+        b"Dec" => 12,
+        _ => return Err(malformed()),
+    };
+
+    let day = digits(&b[5..7]);
+    let year = digits(&b[12..16]);
+    let hour = digits(&b[17..19]);
+    let minute = digits(&b[20..22]);
+    let second = digits(&b[23..25]);
+
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days_in_month: u64 = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        _ => return Err(malformed()),
+    };
+    if day < 1 || day > days_in_month {
+        return Err(malformed());
+    }
+    if hour > 23 || minute > 59 || second > 59 {
+        return Err(malformed());
+    }
+
+    let days = days_from_civil(year as i64, month as u32, day as u32);
+    let unix_seconds = days
+        .checked_mul(86_400)
+        .and_then(|d| d.checked_add((hour * 3600 + minute * 60 + second) as i64))
+        .ok_or_else(malformed)?;
+    if unix_seconds < 0 {
+        return Err(malformed());
+    }
+
+    // RFC 7231 requires the day name to be accurate for the date, exactly as
+    // Go's `time.Parse` and the `httpdate` crate enforce it. 1970-01-01 was a
+    // Thursday (Sunday-anchored index 4), so `days + 4` mod 7 is the weekday.
+    let computed_weekday = (days + 4).rem_euclid(7);
+    if computed_weekday != weekday {
+        return Err(malformed());
+    }
+
+    Ok(unix_seconds as u64)
+}
+
 /// Maps a proleptic-Gregorian civil date to the number of days since
 /// 1970-01-01 (Howard Hinnant's `days_from_civil`, public domain).
 fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
@@ -375,6 +517,121 @@ mod tests {
                     reason: "timestamp is not a valid RFC 3339 timestamp",
                 })
             );
+        }
+    }
+
+    // --- parse_imf_fixdate (Klaviyo's `Klaviyo-Timestamp`) -------------------
+
+    mod imf_fixdate {
+        use super::super::parse_imf_fixdate;
+        use crate::VerifyError;
+
+        fn parse_header(value: &str) -> Result<u64, VerifyError> {
+            parse_imf_fixdate("X-Timestamp", value)
+        }
+
+        fn malformed(_value: &str) -> Result<u64, VerifyError> {
+            Err(VerifyError::MalformedHeader {
+                header: "X-Timestamp",
+                reason: "timestamp is not a valid IMF-fixdate (RFC 1123) timestamp",
+            })
+        }
+
+        #[test]
+        fn parses_klaviyo_example_format() {
+            // Klaviyo's documented example timestamp header
+            // (developers.klaviyo.com "Working with system webhooks"):
+            // `Thu, 04 Jan 2024 18:05:25 GMT`.
+            assert_eq!(
+                parse_header("Thu, 04 Jan 2024 18:05:25 GMT"),
+                Ok(1_704_391_525)
+            );
+        }
+
+        #[test]
+        fn parses_rfc7231_canonical_example() {
+            // The epoch value RFC 7231 §7.1.1.1 works through for
+            // `Sun, 06 Nov 1994 08:49:37 GMT`.
+            assert_eq!(
+                parse_header("Sun, 06 Nov 1994 08:49:37 GMT"),
+                Ok(784_111_777)
+            );
+        }
+
+        #[test]
+        fn handles_boundary_dates_and_weekdays() {
+            assert_eq!(parse_header("Thu, 01 Jan 1970 00:00:00 GMT"), Ok(0));
+            assert_eq!(
+                parse_header("Fri, 01 Jan 1971 00:00:00 GMT"),
+                Ok(31_536_000)
+            );
+            // 2016 is a leap year: Feb 29 exists.
+            assert_eq!(
+                parse_header("Mon, 29 Feb 2016 00:00:00 GMT"),
+                Ok(1_456_704_000)
+            );
+            // The last instant representable in the four-digit-year form.
+            assert_eq!(
+                parse_header("Thu, 31 Dec 2026 23:59:59 GMT"),
+                Ok(1_798_761_599)
+            );
+            // Every weekday maps correctly; 2024-01-01 was a Monday.
+            assert_eq!(
+                parse_header("Mon, 01 Jan 2024 00:00:00 GMT"),
+                Ok(1_704_067_200)
+            );
+        }
+
+        #[test]
+        fn weekday_name_must_match_the_date() {
+            // RFC 7231 requires an accurate day name; 2024-01-04 was a
+            // Thursday, so Wed/Thu-spelling mismatches fail closed even though
+            // every other field is a well-formed calendar date.
+            assert_eq!(
+                parse_header("Wed, 04 Jan 2024 18:05:25 GMT"),
+                malformed("Wed, 04 Jan 2024 18:05:25 GMT")
+            );
+            // A correct name on the wrong instant is likewise rejected.
+            assert_eq!(
+                parse_header("Thu, 04 Jan 2024 18:05:26 GMT"),
+                Ok(1_704_391_526)
+            );
+        }
+
+        #[test]
+        fn rejects_malformed_values() {
+            let bad = [
+                "",
+                "Thu, 04 Jan 2024 18:05:25 GMT ", // trailing space
+                "Thu, 04 Jan 2024 18:05:25 GMTX",
+                "Thu, 04 Jan 2024 18:05:25",      // no GMT
+                "Thu, 04 Jan 2024 18:05:25 UT",   // wrong zone letter (same length)
+                "Thu, 04 Jan 2024 18:05:25 UTC",  // three-letter non-GMT zone
+                "Thu,04 Jan 2024 18:05:25 GMT",   // missing space after comma
+                "Thu,  4 Jan 2024 18:05:25 GMT",  // non-padded day
+                "Thu, 04 Jan 2024 18:05:25GMT",   // missing space before GMT
+                "thu, 04 Jan 2024 18:05:25 GMT",  // lowercase weekday
+                "Wen, 04 Jan 2024 18:05:25 GMT",  // misspelled weekday
+                "Thu, 04 Jaa 2024 18:05:25 GMT",  // misspelled month
+                "Thu, 04 Janv 2024 18:05:25 GMT", // janv ... wrong length too
+                "Thu, 00 Jan 2024 18:05:25 GMT",  // zero day
+                "Thu, 32 Jan 2024 18:05:25 GMT",  // day out of range
+                "Thu, 30 Feb 2024 18:05:25 GMT",  // Feb has no 30th
+                "Thu, 29 Feb 2023 18:05:25 GMT",  // 2023 is not a leap year
+                "Thu, 04 Jan 2024 24:05:25 GMT",  // hour out of range
+                "Thu, 04 Jan 2024 18:60:25 GMT",  // minute out of range
+                "Thu, 04 Jan 2024 18:05:60 GMT",  // IMF-fixdate has no :60 (unlike RFC 3339)
+                "Thu, 04 Jan 2024 18:05:25",      // truncated seconds
+                "Thu, 04 Jan 2024 18:05:25 GTM",  // transposed zone
+                "Thu, 04 Jan 20224 18:05:25 GMT", // five-digit year
+                "Thu, 04 Jan 024 18:05:25 GMT",   // three-digit year
+                "Thu, 04 Jan 2024 818:05:25 GMT", // three-digit hour
+                "Thu, 04 Jan 0000 18:05:25 GMT",  // pre-epoch year
+                "Thu, 04 Jan 2024T18:05:25 GMT",  // wrong separator
+            ];
+            for value in bad {
+                assert_eq!(parse_header(value), malformed(value), "input: {value:?}");
+            }
         }
     }
 

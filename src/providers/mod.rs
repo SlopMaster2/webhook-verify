@@ -15,6 +15,7 @@ mod discord;
 mod dropbox;
 mod github;
 mod hubspot;
+mod klaviyo;
 mod launchdarkly;
 mod lemonsqueezy;
 mod linear;
@@ -82,6 +83,16 @@ pub enum Provider {
     /// in epoch ms; needs `VerifyOptions::request_method` and
     /// `VerifyOptions::request_url`).
     HubSpot,
+    /// Klaviyo (`Klaviyo-Signature`, HMAC-SHA256 over the raw body followed by
+    /// the `Klaviyo-Timestamp` header value *exactly as sent* — no separator).
+    ///
+    /// `Klaviyo-Timestamp` is an IMF-fixdate / RFC 1123 value such as
+    /// `Thu, 04 Jan 2024 18:05:25 GMT` and is HMAC-covered, so the shared
+    /// `max_age` replay window applies. `Klaviyo-Webhook-Id` is not part of
+    /// the HMAC; Klaviyo directs integrators to match it against the body's
+    /// `meta.klaviyo_webhook_id` (a payload-parsing check this crate leaves to
+    /// the caller).
+    Klaviyo,
     /// Shopify (`X-Shopify-Hmac-SHA256`, base64-encoded HMAC-SHA256).
     Shopify,
     /// Slack (`X-Slack-Signature`, `v0=` scheme with timestamp).
@@ -265,6 +276,7 @@ impl fmt::Display for Provider {
             Provider::GitHub => f.write_str("GitHub"),
             Provider::Bitbucket => f.write_str("Bitbucket"),
             Provider::HubSpot => f.write_str("HubSpot"),
+            Provider::Klaviyo => f.write_str("Klaviyo"),
             Provider::Shopify => f.write_str("Shopify"),
             Provider::Slack => f.write_str("Slack"),
             Provider::Square => f.write_str("Square"),
@@ -330,6 +342,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("github") => Ok(Provider::GitHub),
             n if n.eq_ignore_ascii_case("bitbucket") => Ok(Provider::Bitbucket),
             n if n.eq_ignore_ascii_case("hubspot") => Ok(Provider::HubSpot),
+            n if n.eq_ignore_ascii_case("klaviyo") => Ok(Provider::Klaviyo),
             n if n.eq_ignore_ascii_case("shopify") => Ok(Provider::Shopify),
             n if n.eq_ignore_ascii_case("slack") => Ok(Provider::Slack),
             n if n.eq_ignore_ascii_case("square") => Ok(Provider::Square),
@@ -380,7 +393,7 @@ pub struct ProviderParseError;
 impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
-        "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `shopify`, \
+        "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `hubspot`, `klaviyo`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paddle`, `pagerduty`, `linear`, \
              `launchdarkly`, \
              `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
@@ -413,6 +426,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::HubSpot => {
             vec![hubspot::SIGNATURE_HEADER, hubspot::TIMESTAMP_HEADER]
         }
+        Provider::Klaviyo => vec![klaviyo::SIGNATURE_HEADER, klaviyo::TIMESTAMP_HEADER],
         Provider::Shopify => vec![shopify::SIGNATURE_HEADER],
         Provider::Slack => vec![slack::SIGNATURE_HEADER, slack::TIMESTAMP_HEADER],
         Provider::Square => vec![square::SIGNATURE_HEADER],
@@ -543,6 +557,7 @@ pub(crate) fn verify_ref(
         Provider::GitHub => github::verify(headers, raw_body, secret, options),
         Provider::Bitbucket => bitbucket::verify(headers, raw_body, secret, options),
         Provider::HubSpot => hubspot::verify(headers, raw_body, secret, options),
+        Provider::Klaviyo => klaviyo::verify(headers, raw_body, secret, options),
         Provider::Linear => linear::verify(headers, raw_body, secret, options),
         Provider::LaunchDarkly => launchdarkly::verify(headers, raw_body, secret, options),
         Provider::Notion => notion::verify(headers, raw_body, secret, options),
@@ -1130,6 +1145,7 @@ mod tests {
         assert_eq!(Provider::GitHub.to_string(), "GitHub");
         assert_eq!(Provider::Bitbucket.to_string(), "Bitbucket");
         assert_eq!(Provider::HubSpot.to_string(), "HubSpot");
+        assert_eq!(Provider::Klaviyo.to_string(), "Klaviyo");
         assert_eq!(Provider::Shopify.to_string(), "Shopify");
         assert_eq!(Provider::Slack.to_string(), "Slack");
         assert_eq!(Provider::Square.to_string(), "Square");
@@ -1196,6 +1212,7 @@ mod tests {
             ("github", Provider::GitHub),
             ("bitbucket", Provider::Bitbucket),
             ("hubspot", Provider::HubSpot),
+            ("klaviyo", Provider::Klaviyo),
             ("shopify", Provider::Shopify),
             ("slack", Provider::Slack),
             ("square", Provider::Square),
@@ -1311,6 +1328,10 @@ mod tests {
             (
                 Provider::HubSpot,
                 &[hubspot::SIGNATURE_HEADER, hubspot::TIMESTAMP_HEADER],
+            ),
+            (
+                Provider::Klaviyo,
+                &[klaviyo::SIGNATURE_HEADER, klaviyo::TIMESTAMP_HEADER],
             ),
             (Provider::Shopify, &[shopify::SIGNATURE_HEADER]),
             (
@@ -1464,12 +1485,13 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 33] {
+    fn provider_list() -> [Provider; 34] {
         [
             Provider::Stripe,
             Provider::GitHub,
             Provider::Bitbucket,
             Provider::HubSpot,
+            Provider::Klaviyo,
             Provider::Shopify,
             Provider::Slack,
             Provider::Square,

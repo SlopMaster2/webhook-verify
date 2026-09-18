@@ -107,6 +107,10 @@
 //! - `calendly-t-v1-signature` — Calendly's combined `t=...,v1=...`
 //!   `Calendly-Webhook-Signature` header, reaching the comma-split, timestamp
 //!   parse, hex decode, 32-byte gate, and HMAC comparison over `{t}.{body}`.
+//! - `klaviyo-timestamp-delivery` — Klaviyo's two-header shape (bare hex
+//!   `Klaviyo-Signature` + IMF-fixdate `Klaviyo-Timestamp`), reaching the
+//!   RFC 1123 timestamp parse and the `{raw_body}{timestamp}` concatenation
+//!   HMAC comparison.
 //! - `twilio-base64-signature` — Twilio's documented example signature
 //!   (`X-Twilio-Signature`, sha1 base64 over the request URL + sorted form
 //!   fields), reaching base64 decode, the 20-byte gate, and the HMAC comparison
@@ -152,6 +156,11 @@ const IMPLEMENTED: &[Provider] = &[
     // exercise its header splitting and MissingContext fail-closed paths, and
     // a well-formed-shaped attempt below reaches base64 decode + HMAC paths.
     Provider::HubSpot,
+    // Klaviyo needs two headers (bare-hex signature + IMF-fixdate timestamp)
+    // to reach its signature path; a well-formed-shaped attempt below reaches
+    // its timestamp parse, hex decode, and `{body}{timestamp}` HMAC
+    // comparison.
+    Provider::Klaviyo,
     // Shopify is a single-header raw-body HMAC (base64, no prefix); arbitrary
     // header bytes exercise its base64-decode and 32-byte gate, and a
     // well-formed-shaped attempt below reaches HMAC comparison.
@@ -851,6 +860,29 @@ fuzz_target!(|data: &[u8]| {
             "t=1700000000,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
                 .to_string(),
         )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Klaviyo: a well-formed-shaped two-header delivery (valid-hex 32-byte
+    // `Klaviyo-Signature` + valid IMF-fixdate `Klaviyo-Timestamp`) lets
+    // arbitrary body bytes reach the RFC 1123 timestamp parse, the 32-byte
+    // length gate, and the `{raw_body}{timestamp}` concatenation HMAC
+    // comparison; without it the loop above mostly fails earlier on
+    // malformed/missing header fields.
+    attempt(
+        Provider::Klaviyo,
+        &[
+            (
+                "Klaviyo-Signature".to_string(),
+                "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            ),
+            (
+                "Klaviyo-Timestamp".to_string(),
+                "Thu, 04 Jan 2024 18:05:25 GMT".to_string(),
+            ),
+        ],
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,

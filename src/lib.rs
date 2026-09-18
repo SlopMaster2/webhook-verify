@@ -56,6 +56,7 @@
 //! | GitHub | HMAC-SHA256, `X-Hub-Signature-256` |
 //! | Bitbucket | HMAC-SHA256, `X-Hub-Signature` |
 //! | HubSpot | HMAC-SHA256 over `{method}{uri}{body}{timestamp}` (epoch ms), base64, `X-HubSpot-Signature-V3` + tolerance window |
+//! | Klaviyo | HMAC-SHA256 over `{raw_body}{timestamp}`, hex, `Klaviyo-Signature` + `Klaviyo-Timestamp` (IMF-fixdate) replay window |
 //! | Shopify | HMAC-SHA256, base64 |
 //! | Slack | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Square | HMAC-SHA256 over notification URL + body, base64 |
