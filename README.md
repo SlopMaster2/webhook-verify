@@ -113,6 +113,7 @@ hand-copied signing-string logic to get wrong.
 | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` (verification-token key) | ✅ |
 | Zoom | HMAC-SHA256, `v0=` scheme, `x-zm-signature` + timestamp + replay window | ✅ |
 | Cloudflare (Stream webhooks) | HMAC-SHA256 over `time.body`, hex, in a combined `Webhook-Signature` header + timestamp tolerance | ✅ |
+| CircleCI (outbound webhooks) | HMAC-SHA256 over raw body, hex, `v1=` prefix in a comma-separated versioned `circleci-signature` header (no timestamp; other versions discarded) | ✅ |
 | Coinbase (CDP webhooks) | HMAC-SHA256 over `t.body`, hex, `v0` scheme in a combined `X-Hook0-Signature` header + timestamp tolerance | ✅ |
 | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` | ✅ |
 | DocuSign (Connect webhooks) | HMAC-SHA256 over raw body, base64, `X-Docusign-Signature-1` (first configured key, no timestamp) | ✅ |

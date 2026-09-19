@@ -9,6 +9,7 @@ mod adyen;
 mod bitbucket;
 mod box_webhooks;
 mod calendly;
+mod circleci;
 mod cloudflare;
 mod coinbase;
 mod custom;
@@ -249,6 +250,19 @@ pub enum Provider {
     /// `X-Signature-HMAC-SHA256-HEX` raw-body scheme); those are not this
     /// variant — see the provider module for the exact scheme.
     Cloudflare,
+    /// CircleCI (outbound webhooks; `circleci-signature`, HMAC-SHA256 over
+    /// the raw body, `v1=` prefix, comma-separated versioned list).
+    ///
+    /// Covers CircleCI's outbound webhooks (pipeline, workflow, job, and
+    /// project events; `app.circleci.com/webhooks`). The
+    /// `circleci-signature` header is a comma-separated list of *versioned*
+    /// signatures (`v1=<hex>[,v2=...]`); the docs define `v1` as the current
+    /// scheme — HMAC-SHA256 of the raw request body keyed by the webhook's
+    /// signing secret, hex-encoded — and direct integrators to check only the
+    /// latest signature type to prevent downgrade attacks. Other versions are
+    /// discarded for forward compatibility. CircleCI signs no timestamp, so
+    /// `max_age` has no effect.
+    CircleCi,
     /// Coinbase (`X-Hook0-Signature`, HMAC-SHA256 over `t.body`).
     ///
     /// Covers Coinbase CDP webhooks (wallets, transfers, onchain activity;
@@ -405,6 +419,7 @@ impl fmt::Display for Provider {
             Provider::Notion => f.write_str("Notion"),
             Provider::Zoom => f.write_str("Zoom"),
             Provider::Cloudflare => f.write_str("Cloudflare"),
+            Provider::CircleCi => f.write_str("CircleCi"),
             Provider::Coinbase => f.write_str("Coinbase"),
             Provider::Dropbox => f.write_str("Dropbox"),
             Provider::DocuSign => f.write_str("DocuSign"),
@@ -508,6 +523,12 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("notion") => Ok(Provider::Notion),
             n if n.eq_ignore_ascii_case("zoom") => Ok(Provider::Zoom),
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
+            n if n.eq_ignore_ascii_case("circleci")
+                || n.eq_ignore_ascii_case("circle ci")
+                || n.eq_ignore_ascii_case("circle-ci") =>
+            {
+                Ok(Provider::CircleCi)
+            }
             n if n.eq_ignore_ascii_case("coinbase") => Ok(Provider::Coinbase),
             n if n.eq_ignore_ascii_case("dropbox") => Ok(Provider::Dropbox),
             n if n.eq_ignore_ascii_case("docusign") => Ok(Provider::DocuSign),
@@ -553,7 +574,7 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
-             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
+             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, \
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
@@ -615,6 +636,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::LaunchDarkly => vec![launchdarkly::SIGNATURE_HEADER],
         Provider::Notion => vec![notion::SIGNATURE_HEADER],
         Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
+        Provider::CircleCi => vec![circleci::SIGNATURE_HEADER],
         Provider::Coinbase => vec![coinbase::SIGNATURE_HEADER],
         Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
         Provider::DocuSign => vec![docusign::SIGNATURE_HEADER],
@@ -750,6 +772,7 @@ pub(crate) fn verify_ref(
         Provider::Twitch => twitch::verify(headers, raw_body, secret, options),
         Provider::Typeform => typeform::verify(headers, raw_body, secret, options),
         Provider::Cloudflare => cloudflare::verify(headers, raw_body, secret, options),
+        Provider::CircleCi => circleci::verify(headers, raw_body, secret, options),
         Provider::Coinbase => coinbase::verify(headers, raw_body, secret, options),
         Provider::Dropbox => dropbox::verify(headers, raw_body, secret, options),
         Provider::DocuSign => docusign::verify(headers, raw_body, secret, options),
@@ -1350,6 +1373,7 @@ mod tests {
         assert_eq!(Provider::Notion.to_string(), "Notion");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
+        assert_eq!(Provider::CircleCi.to_string(), "CircleCi");
         assert_eq!(Provider::Coinbase.to_string(), "Coinbase");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
         assert_eq!(Provider::DocuSign.to_string(), "DocuSign");
@@ -1425,6 +1449,7 @@ mod tests {
             ("notion", Provider::Notion),
             ("zoom", Provider::Zoom),
             ("cloudflare", Provider::Cloudflare),
+            ("circleci", Provider::CircleCi),
             ("coinbase", Provider::Coinbase),
             ("dropbox", Provider::Dropbox),
             ("docusign", Provider::DocuSign),
@@ -1474,6 +1499,8 @@ mod tests {
             ("pager-duty", Provider::PagerDuty),
             ("woo commerce", Provider::WooCommerce),
             ("woo-commerce", Provider::WooCommerce),
+            ("circle ci", Provider::CircleCi),
+            ("circle-ci", Provider::CircleCi),
             ("standard-webhooks", Provider::StandardWebhooks),
             ("mailchimp", Provider::Mandrill),
             ("mailchimp transactional", Provider::Mandrill),
@@ -1598,6 +1625,7 @@ mod tests {
             (Provider::LaunchDarkly, &[launchdarkly::SIGNATURE_HEADER]),
             (Provider::Notion, &[notion::SIGNATURE_HEADER]),
             (Provider::Cloudflare, &[cloudflare::SIGNATURE_HEADER]),
+            (Provider::CircleCi, &[circleci::SIGNATURE_HEADER]),
             (Provider::Coinbase, &[coinbase::SIGNATURE_HEADER]),
             (Provider::Dropbox, &[dropbox::SIGNATURE_HEADER]),
             (Provider::DocuSign, &[docusign::SIGNATURE_HEADER]),
@@ -1731,7 +1759,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 43] {
+    fn provider_list() -> [Provider; 44] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1761,6 +1789,7 @@ mod tests {
             Provider::Notion,
             Provider::Zoom,
             Provider::Cloudflare,
+            Provider::CircleCi,
             Provider::Coinbase,
             Provider::Dropbox,
             Provider::DocuSign,
