@@ -419,7 +419,7 @@ impl fmt::Display for Provider {
             Provider::Notion => f.write_str("Notion"),
             Provider::Zoom => f.write_str("Zoom"),
             Provider::Cloudflare => f.write_str("Cloudflare"),
-            Provider::CircleCi => f.write_str("CircleCi"),
+            Provider::CircleCi => f.write_str("CircleCI"),
             Provider::Coinbase => f.write_str("Coinbase"),
             Provider::Dropbox => f.write_str("Dropbox"),
             Provider::DocuSign => f.write_str("DocuSign"),
@@ -1373,7 +1373,7 @@ mod tests {
         assert_eq!(Provider::Notion.to_string(), "Notion");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
-        assert_eq!(Provider::CircleCi.to_string(), "CircleCi");
+        assert_eq!(Provider::CircleCi.to_string(), "CircleCI");
         assert_eq!(Provider::Coinbase.to_string(), "Coinbase");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
         assert_eq!(Provider::DocuSign.to_string(), "DocuSign");
