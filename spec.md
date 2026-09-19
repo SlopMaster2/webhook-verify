@@ -70,7 +70,9 @@ pub enum Provider {
     Coinbase,
     Dropbox,
     DocuSign,
+    Fintoc,
     Razorpay,
+    Ripple,
     LemonSqueezy,
     Xero,
     Sentry,
@@ -81,6 +83,7 @@ pub enum Provider {
     WooCommerce,
     Calendly,
     Vercel,
+    X,
     StandardWebhooks,
     Custom(CustomScheme),
 }

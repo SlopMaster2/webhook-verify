@@ -643,6 +643,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Spec: `Provider` enum sketch in §2 missed the Fintoc, Ripple, and X
+  variants.** The Fintoc (#110), Ripple (#111), and X (formerly Twitter,
+  #109) providers all shipped with their `spec.md` §3 rows and CHANGELOG
+  entries but were never added to the §2 `pub enum Provider` code sketch, so
+  the normative enum drifted from the shipped declaration order (the three
+  variants sat before/after `Razorpay`/`Vercel` in the code but were absent
+  from the spec). The sketch now lists all 49 variants (48 named + `Custom`)
+  in the same order as `src/providers/mod.rs`. Doc-only change; no behavior,
+  headers, or verification semantics affected.
+- **Agent docs: the provider count claim in `AGENTS.md` was stale (46 vs.
+  49).** The intro paragraph lagged the three provider additions above;
+  updated to match the crate's `Provider` enum and the README provider table.
+  Repo-internal doc-only change, excluded from the crates.io tarball.
 - **RFC 3339 leap second: a local `23:59:60` with a non-zero UTC offset is
   no longer silently normalized into a replayable instant.** The shared
   `parse_rfc3339_timestamp` parser (used by PayPal, Twitch, Zendesk, and Box)
