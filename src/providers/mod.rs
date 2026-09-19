@@ -16,6 +16,7 @@ mod custom;
 mod discord;
 mod docusign;
 mod dropbox;
+mod expo;
 mod fintoc;
 mod github;
 mod hubspot;
@@ -112,6 +113,15 @@ pub enum Provider {
     /// SHA-1: the HMAC is keyed with the shared secret, which is immune to
     /// SHA-1's collision attacks.
     Intercom,
+    /// Expo EAS (`expo-signature`, `sha1=`-prefixed hex HMAC-SHA1 over the
+    /// raw body, keyed by the webhook signing secret; no timestamp).
+    ///
+    /// Covers EAS Build and EAS Submit webhook deliveries: the header value is
+    /// `sha1=` + lowercase hex of `HMAC-SHA1(secret, raw_body)` — the same
+    /// shape as Intercom's `X-Hub-Signature`. Expo, like Twilio and Intercom,
+    /// still legitimately mandates SHA-1: the HMAC is keyed with the shared
+    /// secret, which is immune to SHA-1's collision attacks.
+    Expo,
     /// Meta (`X-Hub-Signature-256`, HMAC-SHA256 over the raw body, `sha256=`
     /// prefix; no timestamp).
     ///
@@ -391,8 +401,9 @@ pub enum Provider {
     /// Integration Secret (integration webhooks), both used verbatim as UTF-8
     /// bytes. Vercel signs no timestamp, so `max_age` has no effect. This is
     /// the built-in providers' only bare-hex raw-body SHA-1 scheme — the
-    /// crate's other built-in SHA-1 schemes are Twilio (URL + form params)
-    /// and Intercom (raw body behind a `sha1=` prefix). A `CustomScheme`
+    /// crate's other built-in SHA-1 schemes are Twilio (URL + form params),
+    /// Intercom (raw body behind a `sha1=` prefix), and Expo EAS (raw body
+    /// behind a `sha1=` prefix). A `CustomScheme`
     /// configured with [`HashAlg::Sha1`], [`Encoding::Hex`], no prefix, and
     /// the identity signed-string can reproduce the same bare-hex shape
     /// (`spec.md` §3, §2.2).
@@ -437,6 +448,7 @@ impl fmt::Display for Provider {
             Provider::Bitbucket => f.write_str("Bitbucket"),
             Provider::Box => f.write_str("Box"),
             Provider::Intercom => f.write_str("Intercom"),
+            Provider::Expo => f.write_str("Expo"),
             Provider::Meta => f.write_str("Meta"),
             Provider::HubSpot => f.write_str("HubSpot"),
             Provider::Klaviyo => f.write_str("Klaviyo"),
@@ -523,6 +535,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("bitbucket") => Ok(Provider::Bitbucket),
             n if n.eq_ignore_ascii_case("box") => Ok(Provider::Box),
             n if n.eq_ignore_ascii_case("intercom") => Ok(Provider::Intercom),
+            n if n.eq_ignore_ascii_case("expo") => Ok(Provider::Expo),
             n if n.eq_ignore_ascii_case("meta") => Ok(Provider::Meta),
             n if n.eq_ignore_ascii_case("hubspot")
                 || n.eq_ignore_ascii_case("hub spot")
@@ -625,7 +638,7 @@ pub struct ProviderParseError;
 impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
-            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
+            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `x` (or `twitter`), \
@@ -664,6 +677,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
             box_webhooks::SIGNATURE_ALGORITHM_HEADER,
         ],
         Provider::Intercom => vec![intercom::SIGNATURE_HEADER],
+        Provider::Expo => vec![expo::SIGNATURE_HEADER],
         Provider::Meta => vec![meta::SIGNATURE_HEADER],
         Provider::HubSpot => {
             vec![hubspot::SIGNATURE_HEADER, hubspot::TIMESTAMP_HEADER]
@@ -810,6 +824,7 @@ pub(crate) fn verify_ref(
         Provider::Bitbucket => bitbucket::verify(headers, raw_body, secret, options),
         Provider::Box => box_webhooks::verify(headers, raw_body, secret, options),
         Provider::Intercom => intercom::verify(headers, raw_body, secret, options),
+        Provider::Expo => expo::verify(headers, raw_body, secret, options),
         Provider::Meta => meta::verify(headers, raw_body, secret, options),
         Provider::HubSpot => hubspot::verify(headers, raw_body, secret, options),
         Provider::Klaviyo => klaviyo::verify(headers, raw_body, secret, options),
@@ -1410,6 +1425,7 @@ mod tests {
         assert_eq!(Provider::GitHub.to_string(), "GitHub");
         assert_eq!(Provider::Bitbucket.to_string(), "Bitbucket");
         assert_eq!(Provider::Intercom.to_string(), "Intercom");
+        assert_eq!(Provider::Expo.to_string(), "Expo");
         assert_eq!(Provider::HubSpot.to_string(), "HubSpot");
         assert_eq!(Provider::Klaviyo.to_string(), "Klaviyo");
         assert_eq!(Provider::Mandrill.to_string(), "Mandrill");
@@ -1488,6 +1504,7 @@ mod tests {
             ("github", Provider::GitHub),
             ("bitbucket", Provider::Bitbucket),
             ("intercom", Provider::Intercom),
+            ("expo", Provider::Expo),
             ("meta", Provider::Meta),
             ("hubspot", Provider::HubSpot),
             ("klaviyo", Provider::Klaviyo),
@@ -1657,6 +1674,7 @@ mod tests {
                 ],
             ),
             (Provider::Intercom, &[intercom::SIGNATURE_HEADER]),
+            (Provider::Expo, &[expo::SIGNATURE_HEADER]),
             (Provider::Meta, &[meta::SIGNATURE_HEADER]),
             (
                 Provider::HubSpot,
@@ -1833,13 +1851,14 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 47] {
+    fn provider_list() -> [Provider; 48] {
         [
             Provider::Stripe,
             Provider::GitHub,
             Provider::Bitbucket,
             Provider::Box,
             Provider::Intercom,
+            Provider::Expo,
             Provider::Meta,
             Provider::HubSpot,
             Provider::Klaviyo,

@@ -42,6 +42,7 @@ pub enum Provider {
     Bitbucket,
     Box,
     Intercom,
+    Expo,
     Meta,
     HubSpot,
     Klaviyo,
@@ -459,6 +460,47 @@ alongside a sample delivery.
   documented construction (`sha1=` + lowercase hex of
   `HMAC-SHA1(client_secret, raw_body)`), cross-checked with `openssl dgst`
   and Python's `hmac` module. Replace them if Intercom ever publishes fixed
+  vectors.
+
+### Expo (EAS)
+
+Source: <https://docs.expo.dev/eas/webhooks/> (Expo's official EAS webhooks
+page, source in the `expo/expo` repo at `docs/pages/eas/webhooks.mdx`): the
+`expo-signature` header, the raw-body signing rule ("the signature is a
+hex-encoded HMAC-SHA1 digest of the request body, using your webhook secret as
+the HMAC key"), the 16-character secret minimum, and the reference constant-time
+verification sample — which compares the header against `sha1=${hmac.digest('hex')}`,
+i.e. the `sha1=` prefix is part of the wire value.
+
+- Header: `expo-signature: sha1=<hex_hmac>` — the sample's `<hash>` is
+  `sha1=${hmac.digest('hex')}` over the raw body, so the value is the literal
+  `sha1=` followed by the lowercase hex digest. Expo does **not** sign a
+  timestamp, so replay protection cannot be provided at the signature layer
+  (`max_age` has no effect).
+- Signed string: the raw request body bytes, unmodified — the reference sample
+  feeds the exact body text (`bodyParser.text({ type: '*/*' })` then
+  `hmac.update(req.body)`) into a constant-time comparison, so any
+  reformatting or re-encoding of the payload changes the signature. Callers
+  must pass the untouched request bytes.
+- Algorithm: HMAC-SHA1, hex-encoded (lowercase hex from Expo; decoding here is
+  case-insensitive, matching every other hex provider). Expo, like Intercom and
+  Twilio, still legitimately mandates SHA-1 — the HMAC is keyed with the shared
+  webhook secret, which HMAC's keyed use makes immune to SHA-1's collision
+  attacks.
+- Key: the webhook signing secret chosen with `eas webhook:create` (at least 16
+  characters per the docs) as its UTF-8 bytes verbatim.
+- The `sha1=` prefix is matched case-sensitively, exactly like Intercom's
+  `X-Hub-Signature` and GitHub's/Bitbucket's `sha256=`: Expo's docs and sample
+  emit only the literal lowercase form, and an unknown scheme fails closed as
+  `MalformedHeader` rather than silently mis-verifying.
+- Covers EAS Build and EAS Submit webhook deliveries (the only two events EAS
+  signs).
+- Test-vector provenance: Expo documents the construction and ships a
+  reference verification sample, but publishes no byte-exact example signature
+  (the sample's secret is operator-chosen), so the vectors are locally
+  constructed over exactly the documented construction (`sha1=` + lowercase
+  hex of `HMAC-SHA1(secret, raw_body)`), cross-checked with `openssl dgst`
+  and Python's `hmac` module. Replace them if Expo ever publishes fixed
   vectors.
 
 ### Meta
@@ -1818,12 +1860,12 @@ an explicit constant-time comparison).
   prefix and no timestamp; the reference code compares `digest('hex')` output
   directly against the header value. Same shape as Dropbox, Razorpay, and
   Lemon Squeezy, but keyed with **SHA-1** rather than the SHA-256 most
-  providers use. Vercel, Twilio, and Intercom are the built-in providers'
-  three HMAC-SHA1 schemes; Twilio signs a different construction (URL + form
-  params) and Intercom delivers its raw-body digest behind a `sha1=` prefix,
-  so Vercel's bare-hex raw-body header is the only one of the three without a
-  prefix. Covers requests from Webhooks, Log Drains, and integration webhooks
-  alike.
+  providers use. Vercel, Twilio, Intercom, and Expo (EAS) are the built-in
+  providers' four HMAC-SHA1 schemes; Twilio signs a different construction
+  (URL + form params) and both Intercom and Expo deliver their raw-body digest
+  behind a `sha1=` prefix, so Vercel's bare-hex raw-body header is the only one
+  of the four without a prefix. Covers requests from Webhooks, Log Drains, and
+  integration webhooks alike.
 - Signed string: raw request body bytes, unmodified — Vercel's docs verify
   the signature *before* `JSON.parse`, and warn that URL-encoded or
   re-encoded bodies break the HMAC.
