@@ -88,8 +88,9 @@ for CI to catch you — apply them while writing the diff:
 3. Implement `src/providers/<name>.rs`:
    - A private function building the exact signed-string/bytes per the
      spec entry.
-   - Reuse the shared `hmac_verify()` / `ed25519_verify()` helpers in
-     `src/core/crypto.rs` rather than calling `hmac`/`sha2`/`ed25519-dalek`
+- Reuse the shared `verify_hmac_sha256`/`verify_hmac_sha1`/
+      `verify_hmac_sha512` / `verify_ed25519` helpers in
+      `src/core/crypto.rs` rather than calling `hmac`/`sha2`/`ed25519-dalek`
      directly — this keeps the constant-time and error-handling guarantees
      in one audited place.
    - Wire it into the `Provider` enum and the `verify()` dispatch.
