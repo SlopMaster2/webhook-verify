@@ -1792,6 +1792,43 @@ an explicit constant-time comparison).
   SHA-256-length reject case pins the 20-byte digest shape). Replace them if
   Vercel ever publishes fixed vectors.
 
+### X (formerly Twitter)
+
+Source: <https://docs.x.com/x-api/account-activity/guides/account-activity-webhooks>
+("Securing webhooks" — HMAC-SHA256 over the request body keyed by the
+consumer secret, with reference implementations in Python and Ruby) and its
+API docs for the delivery payloads ("Webhook payloads"; includes the
+Challenge-Response Check and sample event payloads).
+
+- Header: `x-twitter-webhooks-signature: sha256=<base64_hmac>`
+- Signed string: the raw request body bytes, unmodified — X's reference code
+  hashes the request body verbatim and their docs warn that re-encoding or
+  deserializing the body breaks the signature. The same scheme (and prefix)
+  backs the Challenge-Response Check's `response_token`, HMAC'd over the
+  `crc_token` — a response the caller computes for inbound GETs, not an
+  inbound delivery signature, and out of scope (this crate verifies
+  deliveries only; §4 "no network calls").
+- Algorithm: HMAC-SHA256 keyed with the **consumer secret** (the "API secret
+  key" of the app — never the bearer token or an access token) as its UTF-8
+  bytes, **base64**-encoded (standard alphabet, padded), with a literal
+  `sha256=` prefix. The prefix is matched case-sensitively, exactly like
+  GitHub (`§3`): X's docs and reference code emit only the literal lowercase
+  form.
+- No timestamp in the signature scheme (`max_age` has no effect); X
+  recommends deduping from event payloads rather than signing time.
+- Test-vector provenance: X's docs describe the scheme, ship reference
+  HMAC code, and document sample payloads, but publish no byte-exact example
+  signature, so the implementation is validated against locally constructed,
+  deterministic vectors over exactly the documented construction (the primary
+  vector's body mirrors the shape of X's documented `tweet_create_event`
+  example; all vectors cross-checked with Python's `hmac` and `openssl`).
+  Replace them if X ever publishes fixed vectors.
+- Naming: the provider is `Provider::X` (this is the current brand, and the
+  crate documents it as "X (formerly Twitter)"); `from_str` also accepts the
+  legacy spellings `"twitter"`, `"x twitter"`, `"x-twitter"` (all
+  case-insensitive), analogous to Mailchimp Transactional's `"mailchimp"`
+  alias — X's own docs still use the pre-rebrand header name.
+
 ### Standard Webhooks spec
 
 Source: <https://www.standardwebhooks.com> and the canonical spec at

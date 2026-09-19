@@ -24,6 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   working; `"custom"` still requires a `CustomScheme` and is rejected as a bare
   name.
 
+- **New provider: X (formerly Twitter)** (`Provider::X`): base64
+  HMAC-SHA256 over the exact request body, keyed by the app's **consumer
+  secret** (the "API secret key" — never the bearer or access token) as its
+  UTF-8 bytes and delivered in `x-twitter-webhooks-signature` behind a
+  literal `sha256=` prefix, mirroring GitHub's prefix handling. X's docs warn
+  that re-encoding or deserializing the body breaks the signature, so the
+  crate hashes `raw_body` verbatim. No timestamp is signed, so `max_age` has
+  no effect; the Challenge-Response Check's `response_token` shares the exact
+  same construction over `crc_token` (a response the caller computes, so this
+  crate covers the delivery header only). `from_str` accepts `"x"` plus the
+  legacy pre-rebrand spellings `"twitter"`, `"x twitter"`, and `"x-twitter"`
+  (case-insensitive). X documents the scheme and ships reference HMAC code but
+  publishes no byte-exact example signature, so the vectors are locally
+  constructed over exactly the documented recipe, cross-checked with OpenSSL
+  and Python's `hmac`; the primary vector's body mirrors the shape of X's
+  documented `tweet_create_event` example. Source:
+  <https://docs.x.com/x-api/account-activity/guides/account-activity-webhooks>
+  ("Securing webhooks").
+
 - **New provider: LINE Messaging API** (`Provider::Line`): **base64**
   HMAC-SHA256 over the exact request body, keyed by the channel secret as its
   UTF-8 bytes and delivered in `x-line-signature`. LINE's docs are explicit
