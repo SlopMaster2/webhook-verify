@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now accepts the hyphenated and space-separated
+  multi-word spellings** operators write in config files and the current
+  brand name of the formerly-Mandrill provider:
+  `"hub-spot"`/`"hub spot"` → `HubSpot`,
+  `"launch-darkly"`/`"launch darkly"` → `LaunchDarkly`,
+  `"lemon-squeezy"` → `LemonSqueezy`,
+  `"pager-duty"`/`"pager duty"` → `PagerDuty`,
+  `"woo-commerce"`/`"woo commerce"` → `WooCommerce`,
+  `"standard-webhooks"` → `StandardWebhooks`, and
+  `"mailchimp"`/`"mailchimp-transactional"`/`"mailchimp transactional"` →
+  `Mandrill` (Mailchimp Transactional is the name this crate's docs/README
+  use for that provider). Parsing stays case-insensitive and the original compact forms (`"hubspot"`, `"standardwebhooks"`, ...) keep
+  working; `"custom"` still requires a `CustomScheme` and is rejected as a bare
+  name.
+
 - **New provider: LINE Messaging API** (`Provider::Line`): **base64**
   HMAC-SHA256 over the exact request body, keyed by the channel secret as its
   UTF-8 bytes and delivered in `x-line-signature`. LINE's docs are explicit
