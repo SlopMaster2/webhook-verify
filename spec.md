@@ -46,6 +46,7 @@ pub enum Provider {
     HubSpot,
     Klaviyo,
     Mandrill,
+    Line,
     Shopify,
     Slack,
     Square,
