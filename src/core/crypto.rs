@@ -7,7 +7,7 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
-use sha2::{Sha256, Sha512};
+use sha2::{Digest, Sha256, Sha512};
 use subtle::ConstantTimeEq;
 
 #[cfg(feature = "sendgrid")]
@@ -16,8 +16,6 @@ use p256::ecdsa::signature::hazmat::PrehashVerifier;
 use p256::ecdsa::{Signature as EcdsaSignature, VerifyingKey as EcdsaVerifyingKey};
 #[cfg(feature = "sendgrid")]
 use p256::pkcs8::DecodePublicKey;
-#[cfg(feature = "sendgrid")]
-use sha2::Digest;
 
 #[cfg(feature = "paypal")]
 use crate::core::error::VerifyError;
@@ -112,6 +110,21 @@ pub(crate) fn verify_hmac_sha512(
     mac.update(signed_string);
     let expected = mac.finalize().into_bytes();
     expected.as_slice().ct_eq(provided_signature).into()
+}
+
+/// Computes the lowercase hex SHA-256 digest of `bytes`.
+///
+/// Used by Ripple's scheme (`spec.md` §3), which signs
+/// `{timestamp}.<sha256_hex(body)>` — a **plain digest** of the raw body,
+/// folded into the HMAC input — rather than an HMAC of the body directly.
+/// Hashes exactly the `raw_body` bytes the provider passes, untouched
+/// (`spec.md` §4). Providers must call this helper instead of reaching for
+/// `sha2` directly, keeping all digest construction in the audited module.
+#[must_use]
+pub(crate) fn sha256_hexdigest(bytes: &[u8]) -> alloc::string::String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
 }
 
 /// Verifies an Ed25519 `signature` over `message` against a 32-byte
@@ -502,6 +515,30 @@ mod tests {
             b"what do ya want for nothing?",
             &sig
         ));
+    }
+
+    #[test]
+    fn sha256_hexdigest_matches_known_vector() {
+        // Cross-checked with `printf 'abc' | sha256sum` (FIPS 180-4 test case).
+        assert_eq!(
+            super::sha256_hexdigest(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        // Empty input (the FIPS 180-4 empty-message case) — Ripple's scheme
+        // must hash an empty body the same as any other raw-body digest.
+        assert_eq!(
+            super::sha256_hexdigest(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        // Byte-exactness: whitespace and case changes alter the digest.
+        assert_ne!(
+            super::sha256_hexdigest(b"abc"),
+            super::sha256_hexdigest(b"ABC")
+        );
+        assert_ne!(
+            super::sha256_hexdigest(b"abc"),
+            super::sha256_hexdigest(b" abc")
+        );
     }
 
     #[test]

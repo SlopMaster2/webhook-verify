@@ -1,0 +1,4 @@
+X-Webhook-Signature:t=1700000000123,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e
+X-Webhook-Timestamp:1700000000123
+
+{"event_type":"payment.completed","data":{"id":"0220000000000000000000001","amount":"1.00","currency":"USD"}}
