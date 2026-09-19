@@ -541,6 +541,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Fuzz seed-corpus doc comment now enumerates the Box and Vercel seeds.** The
+  `parse_and_verify` target's seed list (`fuzz/fuzz_targets/parse_and_verify.rs`)
+  documented every committed corpus seed, but the `box-two-signature-delivery`
+  and `vercel-hex-signature` seeds shipped with the Box (#97) and Vercel (#92)
+  providers were never added to the enumeration — the comment claimed to cover
+  the corpus yet listed 43 of its 45 files. Both entries are now documented
+  with the same rationale style as the rest (same drift class as the missing
+  DocuSign/Paystack and LINE seeds fixed in #91/#101). Comment-only; no
+  behavior, seed bytes, or crate code affected.
 - **Docs: Twilio rows now name the base64 encoding, and Vercel's SHA-1
   "only" claim is scoped to the built-in providers.** The crate-level and
   README provider tables described Twilio's scheme only as "HMAC-SHA1 over

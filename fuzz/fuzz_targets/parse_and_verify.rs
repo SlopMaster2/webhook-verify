@@ -23,6 +23,13 @@
 //! - `bitbucket-hub-signature` — Bitbucket Cloud's documented worked example
 //!   (support.atlassian.com), reaching the `X-Hub-Signature` `sha256=` prefix,
 //!   hex decode, 32-byte gate, and constant-time HMAC comparison.
+//! - `box-two-signature-delivery` — Box's two-signature delivery shape
+//!   (`BOX-SIGNATURE-PRIMARY`/`BOX-SIGNATURE-SECONDARY` bare base64,
+//!   `BOX-DELIVERY-TIMESTAMP` in the `-07:00`-offset RFC 3339 spelling, plus
+//!   the optional `BOX-SIGNATURE-VERSION`/`BOX-SIGNATURE-ALGORITHM` metadata),
+//!   reaching the RFC 3339 timestamp parse, both base64 decodes and 32-byte
+//!   gates, the `{raw_body}{timestamp}` concatenation HMAC comparison, and
+//!   the optional metadata validation.
 //! - `intercom-hub-signature` — intercom's documented `X-Hub-Signature`
 //!   construction (`sha1=` prefix, hex HMAC over the raw body), reaching the
 //!   prefix, hex decode, 20-byte gate, and constant-time HMAC comparison.
@@ -147,6 +154,10 @@
 //! - `sendgrid-ecdsa-delivery` — SendGrid's official test vector (two-header
 //!   shape, `{timestamp}{body}` message, P-256 key from the provider's own
 //!   suite), reaching DER/SPKI parsing and ECDSA verification.
+//! - `vercel-hex-signature` — Vercel's `x-vercel-signature` bare-hex
+//!   HMAC-SHA1 shape over the raw body (no prefix, no timestamp — the only
+//!   built-in bare-hex raw-body SHA-1 digest), reaching hex decode, the
+//!   40-hex-char / 20-byte gate, and HMAC comparison.
 //! - `header-garbage-without-body-separator` — an adversarial malformed input
 //!   with no `\n\n` separator, anchoring the parser's fail-closed paths.
 
