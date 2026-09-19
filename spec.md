@@ -65,6 +65,7 @@ pub enum Provider {
     Notion,
     Zoom,
     Cloudflare,
+    CircleCi,
     Coinbase,
     Dropbox,
     DocuSign,
@@ -1397,6 +1398,48 @@ Cloudflare has other webhook schemes (e.g. the legacy Apps
   vector's `time` and `secret` mirror the docs' own examples; the docs'
   example header itself is replayed as a well-formed-but-mismatching input).
   Replace them if Cloudflare ever publishes fixed vectors.
+
+### CircleCI
+
+Source: <https://circleci.com/docs/guides/integration/outbound-webhooks>
+("Outbound webhooks", "Signature Verification" and "Test Event" sections).
+Covers CircleCI's **outbound** webhooks (pipeline, workflow, job, and project
+events). Events are sent to the webhook's configured endpoint with a
+`circleci-signature` header.
+
+- Header: `circleci-signature: v1=<hex_hmac>[,v2=...][,v3=...]` — a
+  comma-separated list of *versioned* signatures (`v1=`, `v2=`, ...).
+  CircleCI's docs describe the value as "a comma-separated list of signatures"
+  and direct integrators to check only the **latest signature type**, since
+  each signature type is checked against the event in the order they are
+  listed and the latest one is the current scheme.
+- Version policy: this crate verifies the `v1` signature only — the docs name
+  `v1` as the current scheme (HMAC-SHA256 over the raw body, hex-encoded) and
+  instruct integrators to "only check the latest signature type" to prevent
+  downgrade attacks. Unknown versions (`v2`, `v3`, ...) and non-versioned
+  elements are ignored for forward compatibility, matching the docs' example
+  header which shows several versions at once.
+- Duplicate `v1` fields are rejected as ambiguous — never first-wins,
+  following the crate-wide rule that malformed/ambiguous signing material
+  fails closed rather than defaulting to valid (the reference Python
+  implementation overwrites on duplicate keys; this crate does not).
+- Keys are compared after trimming surrounding whitespace, so the comma-space
+  spelling `v1=..., v2=...` (produced by proxy header-folding) parses like the
+  canonical form. Values are never trimmed — the hex signature must be exact.
+- Signed bytes: the raw request body, unmodified.
+- Algorithm: HMAC-SHA256 over the raw body, hex-encoded
+- Key: the webhook's signing secret (set in the CircleCI webhook
+  configuration) as a plain UTF-8 string, matching the docs' reference
+  implementations (`hmac.new(bytes(secret, 'utf-8'), bytes(body, 'utf-8'), 'sha256')`).
+- Replay protection: CircleCI signs **no timestamp**, so the shared `max_age`
+  window has no effect for this provider — the docs recommend rate limiting
+  and idempotency handling at the application level for exactly this reason.
+- Test-vector provenance: CircleCI's docs publish byte-exact signed values for
+  200-level and non-200-level test events; both the 200-level published pair
+  (`body: "hello world"`, `signing_key: "secret"`) and the "non-200-level"
+  pair are replayed verbatim, plus an added pair for coverage. The docs'
+  example header format (`v1=...,v2=...,v3=...`) is used for the
+  additional-versions tests.
 
 ### Coinbase
 

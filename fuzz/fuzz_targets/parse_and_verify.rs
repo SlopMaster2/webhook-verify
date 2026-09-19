@@ -97,6 +97,10 @@
 //! - `coinbase-t-v0-delivery` — Coinbase's combined `t=...,v0=...` header (the
 //!   shape also carries optional `h=`/`v1=` fields), reaching timestamp and
 //!   `v0` comparison parsing.
+//! - `circleci-v1-signature` — CircleCI's `circleci-signature` header with a
+//!   single `v1=<hex>` signature (the current, only documented version),
+//!   reaching `v1` version-selection, hex decode, the 32-byte gate, and HMAC
+//!   comparison over the raw body (no timestamp).
 //! - `mux-t-v1-signature` — Mux's combined `t=...,v1=...` header with a
 //!   `v1=` rotation list, reaching the comma-split, timestamp parse, hex
 //!   decode, and multi-element HMAC comparison.
@@ -274,6 +278,11 @@ const IMPLEMENTED: &[Provider] = &[
     // and empty-header rejection, and a well-formed-shaped attempt below
     // reaches its hex-decode/comparison paths too.
     Provider::Cloudflare,
+    // CircleCi needs a combined `v1=<hex>[,v2=...]` header to reach its
+    // signature path; arbitrary bytes exercise the comma/key=value splitting,
+    // version-selection, and empty-header rejection, and a well-formed-shaped
+    // attempt below reaches its hex-decode/comparison paths too.
+    Provider::CircleCi,
     // Coinbase (CDP) needs a combined `t=...,v0=...` header to reach its
     // signature path; arbitrary bytes exercise the comma/key-value splitting
     // and empty-header rejection, and a well-formed-shaped attempt below
@@ -681,6 +690,22 @@ fuzz_target!(|data: &[u8]| {
             "Webhook-Signature".to_string(),
             "time=1700000000,sig1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
                 .to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // CircleCi: a well-formed-shaped `circleci-signature` header (a single
+    // valid-hex 64-char `v1=` signature, the current documented version) lets
+    // arbitrary body bytes reach the `v1` version-selection, 32-byte length
+    // gate, and HMAC comparison; the docs' `v2=`/`v3=` example elements
+    // exercise the version-discard path in the arbitrary-bytes loop above.
+    attempt(
+        Provider::CircleCi,
+        &[(
+            "circleci-signature".to_string(),
+            "v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

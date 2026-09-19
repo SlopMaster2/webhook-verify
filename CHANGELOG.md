@@ -496,6 +496,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"standard webhooks"` (both case-insensitive, like every name). These match
   the product names operators see in `spec.md`/`README.md`, so a
   config-driven `"Lemon Squeezy".parse::<Provider>()` no longer fails.
+- **New provider: CircleCI outbound webhooks** (`Provider::CircleCi`):
+  HMAC-SHA256 over the raw request body, **hex**-encoded, delivered in the
+  `circleci-signature` header as a comma-separated list of **versioned**
+  signatures (`v1=<hex>[,v2=...][,v3=...]`). The signing key is the webhook's
+  configured secret token, used verbatim as its UTF-8 bytes. The docs name
+  `v1` as the latest (and only) signature version and direct integrators to
+  check only the latest signature type to prevent downgrade attacks, so this
+  provider verifies the `v1` element only and discards unknown versions and
+  non-versioned elements for forward compatibility; a duplicate `v1` is
+  rejected as ambiguous (`spec.md` §4.4) rather than last-wins like the
+  reference Python verifier's dict literal. No timestamp is signed, so the
+  shared `max_age` replay window has no effect (the docs recommend
+  application-level deduplication on the payload `id`). Source:
+  <https://circleci.com/docs/guides/integration/outbound-webhooks>
+  ("Validate outbound webhooks"). The test vectors are the byte-exact
+  body/secret/signature pairs CircleCI publishes in that section (the 200 and
+  non-200 examples plus the extra pairs its `True`/`False` walkthrough signs),
+  all cross-checked with OpenSSL; the boundary vectors are locally constructed
+  over the same documented recipe. `Provider::from_str` also accepts
+  `"circleci"` (plus the `"circle ci"` and `"circle-ci"` spellings).
 
 ### Changed
 

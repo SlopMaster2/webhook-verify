@@ -80,6 +80,7 @@
 //! | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` |
 //! | Zoom | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Cloudflare (Stream) | HMAC-SHA256 over `time.body`, hex, `Webhook-Signature` |
+//! | CircleCI (outbound webhooks) | HMAC-SHA256 over raw body, hex, `v1=` prefix, `circleci-signature` (versioned signature list, no timestamp) |
 //! | Coinbase (CDP) | HMAC-SHA256 over `t.body`, hex, `X-Hook0-Signature` + tolerance window |
 //! | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` |
 //! | DocuSign (Connect) | HMAC-SHA256 over raw body, base64, `X-Docusign-Signature-1` (first configured key, no timestamp) |
