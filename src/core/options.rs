@@ -116,12 +116,14 @@ pub struct VerifyOptions {
     pub clock: Option<Arc<dyn Clock>>,
     /// Full URL of the receiving endpoint, required by providers whose
     /// signature incorporates it (currently Square, whose scheme signs the
-    /// notification URL followed by the raw body, Twilio, which signs the
-    /// full request URL, and HubSpot's v3 scheme, which signs the request
-    /// method + full request URI + body + timestamp). The value must match the
-    /// URL configured with the provider **exactly** — a differing trailing
-    /// slash or scheme makes every signature fail. Providers whose scheme does
-    /// not sign the URL document that this option has no effect on them.
+    /// notification URL followed by the raw body; Twilio, which signs the full
+    /// request URL; HubSpot's v3 scheme, which signs the request method + full
+    /// request URI + body + timestamp; and Mailchimp Transactional (Mandrill),
+    /// which signs the webhook URL followed by the sorted form params). The
+    /// value must match the URL configured with the provider **exactly** — a
+    /// differing trailing slash or scheme makes every signature fail.
+    /// Providers whose scheme does not sign the URL document that this option
+    /// has no effect on them.
     ///
     /// HubSpot itself **URL-decodes certain characters** in the URI when
     /// computing its signature (the list is in `spec.md` §3, HubSpot row).
@@ -140,13 +142,14 @@ pub struct VerifyOptions {
     /// actually sent for the delivery. Providers whose scheme does not sign
     /// the method document that this option has no effect on them.
     pub request_method: Option<String>,
-    /// Parsed `application/x-www-form-urlencoded` fields, required by Twilio:
-    /// its signature covers the request URL concatenated with the sorted
-    /// form-field names/values, not the raw body. Pass **every** field as
-    /// received — Twilio's own docs warn against verifying against a hardcoded
-    /// subset, since providers may add parameters without notice. Sorting is
-    /// applied here (it is part of the signing scheme), so callers pass fields
-    /// in any order. A duplicate field name keeps its received relative order.
+    /// Parsed `application/x-www-form-urlencoded` fields, required by Twilio and
+    /// Mailchimp Transactional (Mandrill): their signatures cover the request
+    /// URL concatenated with the sorted form-field names/values, not the raw
+    /// body. Pass **every** field as received — Twilio's own docs warn against
+    /// verifying against a hardcoded subset, since providers may add
+    /// parameters without notice. Sorting is applied here (it is part of the
+    /// signing scheme), so callers pass fields in any order. A duplicate field
+    /// name keeps its received relative order.
     ///
     /// An explicitly empty list is meaningful (Twilio's JSON-body variant signs
     /// the URL alone); omitting the option entirely fails closed with

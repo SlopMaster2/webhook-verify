@@ -541,6 +541,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **VerifyOptions docs: `request_url`'s and `form_params`'s provider lists
+  omitted Mailchimp Transactional (Mandrill).** The `request_url` field doc
+  enumerated "Square, Twilio, HubSpot" and `form_params` only "Twilio", but
+  Mandrill's scheme is URL-scoped and signs the sorted form fields exactly
+  like Twilio (`spec.md` §3, Mandrill row) — the same list the
+  `with_form_params` builder doc already names ("currently Twilio and
+  Mandrill"). The field docs now list all four URL-scoped providers and both
+  form-field-signing providers, matching `spec.md` §2's field sketch.
+  Doc-only change; no behavior, headers, or verification semantics affected.
 - **Fuzz seed-corpus doc comment now enumerates the Box and Vercel seeds.** The
   `parse_and_verify` target's seed list (`fuzz/fuzz_targets/parse_and_verify.rs`)
   documented every committed corpus seed, but the `box-two-signature-delivery`
