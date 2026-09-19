@@ -2030,6 +2030,38 @@ vector.
   shape), cross-checked with Python's `hashlib`/`hmac` and `openssl`.
   Replace them if Ripple ever publishes fixed vectors.
 
+### Tally (form webhooks)
+
+Source: <https://tally.so/help/webhooks> (Tally's official webhook help page:
+"Add a signing secret" describes the `Tally-Signature` header and the base64
+HMAC-SHA256 construction, and includes the published example webhook event).
+
+- Header: `Tally-Signature: <base64_hmac>` — the SHA256 hash of the webhook
+  payload, base64-encoded (standard alphabet with padding), no `sha256=`
+  prefix and no timestamp; same shape as Shopify, Xero, and WooCommerce
+- Signed string: the raw request body bytes, unmodified. Tally's own example
+  hashes `JSON.stringify(webhookPayload)` after the runtime has parsed the
+  body — a re-serialization round-trip that reproduces the received bytes only
+  when the parser preserves key order and whitespace. This crate hashes
+  `raw_body` verbatim (\`spec.md\` §4), which matches the signer's actual wire
+  bytes and avoids the re-encoding failure class; callers must pass the
+  untouched request body.
+- Algorithm: HMAC-SHA256, base64-encoded. Key: the per-webhook signing secret
+  (optional — if no secret is set, Tally sends unsigned requests) as its
+  UTF-8 bytes, matching the docs' reference construction
+  (`createHmac('sha256', secret).update(payload).digest('base64')`)
+- No timestamp in the signature scheme (`max_age` has no effect); Tally signs
+  on submission-time and retries deliveries with a back-off schedule, so
+  callers dedupe from the payload's own `eventId` field, which is outside this
+  crate's scope (payload parsing is a non-goal, §1)
+- Test-vector provenance: Tally's docs describe the construction and publish
+  an example event but no byte-exact example signature (the signing secret is
+  endpoint-specific and shown only once at creation), so the implementation
+  is validated against locally constructed, deterministic vectors over the
+  documented construction using a body mirroring the published example event,
+  cross-checked with Python's `hashlib`/`hmac` and `openssl`. Replace them if
+  Tally ever publishes fixed vectors.
+
 ### Standard Webhooks spec
 
 Source: <https://www.standardwebhooks.com> and the canonical spec at

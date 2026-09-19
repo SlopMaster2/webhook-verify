@@ -51,6 +51,7 @@ mod slack;
 mod square;
 mod standard_webhooks;
 mod stripe;
+mod tally;
 mod twilio;
 mod twitch;
 mod typeform;
@@ -179,6 +180,16 @@ pub enum Provider {
     Slack,
     /// Square (HMAC-SHA256 over notification URL + body, base64).
     Square,
+    /// Tally (`Tally-Signature`, base64-encoded HMAC-SHA256 over the raw
+    /// body).
+    ///
+    /// Tally (form webhooks) signs the request body with the per-webhook
+    /// signing secret — used verbatim as its UTF-8 bytes — behind a bare
+    /// base64 digest, the same shape as Shopify, Xero, and WooCommerce. The
+    /// signing secret is optional: when none is set, Tally sends unsigned
+    /// requests (`spec.md` §3). Tally signs no timestamp, so `max_age` has no
+    /// effect for this provider.
+    Tally,
     /// Twilio (HMAC-SHA1 over full URL + sorted form params; needs
     /// `VerifyOptions::request_url` and `VerifyOptions::form_params`).
     Twilio,
@@ -462,6 +473,7 @@ impl fmt::Display for Provider {
             Provider::Shopify => f.write_str("Shopify"),
             Provider::Slack => f.write_str("Slack"),
             Provider::Square => f.write_str("Square"),
+            Provider::Tally => f.write_str("Tally"),
             Provider::Twilio => f.write_str("Twilio"),
             Provider::Twitch => f.write_str("Twitch"),
             Provider::Typeform => f.write_str("Typeform"),
@@ -561,6 +573,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("shopify") => Ok(Provider::Shopify),
             n if n.eq_ignore_ascii_case("slack") => Ok(Provider::Slack),
             n if n.eq_ignore_ascii_case("square") => Ok(Provider::Square),
+            n if n.eq_ignore_ascii_case("tally") => Ok(Provider::Tally),
             n if n.eq_ignore_ascii_case("twilio") => Ok(Provider::Twilio),
             n if n.eq_ignore_ascii_case("twitch") => Ok(Provider::Twitch),
             n if n.eq_ignore_ascii_case("typeform") => Ok(Provider::Typeform),
@@ -646,7 +659,7 @@ impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
-             `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
+             `slack`, `square`, `tally`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `nylas`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
@@ -695,6 +708,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Shopify => vec![shopify::SIGNATURE_HEADER],
         Provider::Slack => vec![slack::SIGNATURE_HEADER, slack::TIMESTAMP_HEADER],
         Provider::Square => vec![square::SIGNATURE_HEADER],
+        Provider::Tally => vec![tally::SIGNATURE_HEADER],
         Provider::Twilio => vec![twilio::SIGNATURE_HEADER],
         Provider::Twitch => vec![
             twitch::MESSAGE_ID_HEADER,
@@ -846,6 +860,7 @@ pub(crate) fn verify_ref(
         Provider::Shopify => shopify::verify(headers, raw_body, secret, options),
         Provider::Slack => slack::verify(headers, raw_body, secret, options),
         Provider::Square => square::verify(headers, raw_body, secret, options),
+        Provider::Tally => tally::verify(headers, raw_body, secret, options),
         Provider::Stripe => stripe::verify(headers, raw_body, secret, options),
         Provider::StandardWebhooks => standard_webhooks::verify(headers, raw_body, secret, options),
         Provider::Twilio => twilio::verify(headers, raw_body, secret, options),
@@ -1703,6 +1718,7 @@ mod tests {
                 &[slack::SIGNATURE_HEADER, slack::TIMESTAMP_HEADER],
             ),
             (Provider::Square, &[square::SIGNATURE_HEADER]),
+            (Provider::Tally, &[tally::SIGNATURE_HEADER]),
             (Provider::Twilio, &[twilio::SIGNATURE_HEADER]),
             (
                 Provider::Twitch,
@@ -1863,7 +1879,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 49] {
+    fn provider_list() -> [Provider; 50] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1879,6 +1895,7 @@ mod tests {
             Provider::Shopify,
             Provider::Slack,
             Provider::Square,
+            Provider::Tally,
             Provider::Twilio,
             Provider::Twitch,
             Provider::Typeform,

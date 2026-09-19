@@ -64,6 +64,7 @@
 //! | Shopify | HMAC-SHA256, base64, `X-Shopify-Hmac-Sha256` |
 //! | Slack | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Square | HMAC-SHA256 over notification URL + body, base64 |
+//! | Tally | HMAC-SHA256 over raw body, base64, `Tally-Signature` (no timestamp) |
 //! | Twilio | HMAC-SHA1 (base64) over URL + sorted form params, `X-Twilio-Signature` |
 //! | Mandrill (Mailchimp Transactional) | HMAC-SHA1 (base64) over URL + sorted form params, `X-Mandrill-Signature` |
 //! | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) |
