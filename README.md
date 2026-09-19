@@ -117,6 +117,7 @@ hand-copied signing-string logic to get wrong.
 | Coinbase (CDP webhooks) | HMAC-SHA256 over `t.body`, hex, `v0` scheme in a combined `X-Hook0-Signature` header + timestamp tolerance | ✅ |
 | Dropbox | HMAC-SHA256, `X-Dropbox-Signature` | ✅ |
 | DocuSign (Connect webhooks) | HMAC-SHA256 over raw body, base64, `X-Docusign-Signature-1` (first configured key, no timestamp) | ✅ |
+| Fintoc | HMAC-SHA256 over `t.body`, hex, `Fintoc-Signature` (`t=,v1=` list) + replay window | ✅ |
 | Razorpay | HMAC-SHA256 over raw body, hex, `X-Razorpay-Signature` (no timestamp) | ✅ |
 | Lemon Squeezy | HMAC-SHA256, `X-Signature` (bare hex, no prefix, no timestamp) | ✅ |
 | Xero | HMAC-SHA256, base64, `x-xero-signature` | ✅ |

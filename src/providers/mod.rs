@@ -16,6 +16,7 @@ mod custom;
 mod discord;
 mod docusign;
 mod dropbox;
+mod fintoc;
 mod github;
 mod hubspot;
 mod intercom;
@@ -286,6 +287,18 @@ pub enum Provider {
     /// single-header model reads `-1` only (`spec.md` §3). DocuSign signs no
     /// timestamp, so `max_age` has no effect for this provider.
     DocuSign,
+    /// Fintoc (`Fintoc-Signature`, HMAC-SHA256 over `{t}.{raw_body}`, hex,
+    /// `t=...,v1=...`).
+    ///
+    /// Covers Fintoc account webhooks (links, subscriptions, moves): the `t`
+    /// and `v1` fields ride inside the single `Fintoc-Signature` header, the
+    /// signed string reuses the `t` value *exactly as sent*, a literal dot,
+    /// then the raw body, hex-encoded. The timestamp is HMAC-covered, so the
+    /// shared `max_age` replay window applies (Fintoc's docs recommend a
+    /// five-minute tolerance, matching the crate default). The webhook
+    /// endpoint secret keys the HMAC verbatim as UTF-8; Fintoc's docs define
+    /// exactly one `v1` element and no rotation list.
+    Fintoc,
     /// Razorpay (`X-Razorpay-Signature`, HMAC-SHA256 over the raw body, bare
     /// hex — no `sha256=` prefix, no timestamp).
     Razorpay,
@@ -438,6 +451,7 @@ impl fmt::Display for Provider {
             Provider::Coinbase => f.write_str("Coinbase"),
             Provider::Dropbox => f.write_str("Dropbox"),
             Provider::DocuSign => f.write_str("DocuSign"),
+            Provider::Fintoc => f.write_str("Fintoc"),
             Provider::Razorpay => f.write_str("Razorpay"),
             Provider::LemonSqueezy => f.write_str("LemonSqueezy"),
             Provider::Xero => f.write_str("Xero"),
@@ -548,6 +562,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("coinbase") => Ok(Provider::Coinbase),
             n if n.eq_ignore_ascii_case("dropbox") => Ok(Provider::Dropbox),
             n if n.eq_ignore_ascii_case("docusign") => Ok(Provider::DocuSign),
+            n if n.eq_ignore_ascii_case("fintoc") => Ok(Provider::Fintoc),
             n if n.eq_ignore_ascii_case("razorpay") => Ok(Provider::Razorpay),
             n if n.eq_ignore_ascii_case("lemonsqueezy")
                 || n.eq_ignore_ascii_case("lemon squeezy")
@@ -597,7 +612,7 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
-             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
+             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
@@ -663,6 +678,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Coinbase => vec![coinbase::SIGNATURE_HEADER],
         Provider::Dropbox => vec![dropbox::SIGNATURE_HEADER],
         Provider::DocuSign => vec![docusign::SIGNATURE_HEADER],
+        Provider::Fintoc => vec![fintoc::SIGNATURE_HEADER],
         Provider::Razorpay => vec![razorpay::SIGNATURE_HEADER],
         Provider::LemonSqueezy => vec![lemonsqueezy::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
@@ -800,6 +816,7 @@ pub(crate) fn verify_ref(
         Provider::Coinbase => coinbase::verify(headers, raw_body, secret, options),
         Provider::Dropbox => dropbox::verify(headers, raw_body, secret, options),
         Provider::DocuSign => docusign::verify(headers, raw_body, secret, options),
+        Provider::Fintoc => fintoc::verify(headers, raw_body, secret, options),
         Provider::Razorpay => razorpay::verify(headers, raw_body, secret, options),
         Provider::LemonSqueezy => lemonsqueezy::verify(headers, raw_body, secret, options),
         Provider::Xero => xero::verify(headers, raw_body, secret, options),
@@ -1402,6 +1419,7 @@ mod tests {
         assert_eq!(Provider::Coinbase.to_string(), "Coinbase");
         assert_eq!(Provider::Dropbox.to_string(), "Dropbox");
         assert_eq!(Provider::DocuSign.to_string(), "DocuSign");
+        assert_eq!(Provider::Fintoc.to_string(), "Fintoc");
         assert_eq!(Provider::Razorpay.to_string(), "Razorpay");
         assert_eq!(Provider::LemonSqueezy.to_string(), "LemonSqueezy");
         assert_eq!(Provider::Xero.to_string(), "Xero");
@@ -1479,6 +1497,7 @@ mod tests {
             ("coinbase", Provider::Coinbase),
             ("dropbox", Provider::Dropbox),
             ("docusign", Provider::DocuSign),
+            ("fintoc", Provider::Fintoc),
             ("razorpay", Provider::Razorpay),
             ("lemonsqueezy", Provider::LemonSqueezy),
             ("lemon squeezy", Provider::LemonSqueezy),
@@ -1659,6 +1678,7 @@ mod tests {
             (Provider::Coinbase, &[coinbase::SIGNATURE_HEADER]),
             (Provider::Dropbox, &[dropbox::SIGNATURE_HEADER]),
             (Provider::DocuSign, &[docusign::SIGNATURE_HEADER]),
+            (Provider::Fintoc, &[fintoc::SIGNATURE_HEADER]),
             (Provider::Razorpay, &[razorpay::SIGNATURE_HEADER]),
             (Provider::LemonSqueezy, &[lemonsqueezy::SIGNATURE_HEADER]),
             (Provider::Xero, &[xero::SIGNATURE_HEADER]),
@@ -1790,7 +1810,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 45] {
+    fn provider_list() -> [Provider; 46] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1824,6 +1844,7 @@ mod tests {
             Provider::Coinbase,
             Provider::Dropbox,
             Provider::DocuSign,
+            Provider::Fintoc,
             Provider::Razorpay,
             Provider::LemonSqueezy,
             Provider::Xero,

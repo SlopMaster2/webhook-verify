@@ -613,6 +613,55 @@ and the base64 encoding), <https://developers.docusign.com/platform/webhooks/con
   module); the 32-byte digest shape is pinned by the length-reject case.
   Replace them if DocuSign ever publishes fixed vectors.
 
+### Fintoc
+
+Source: <https://docs.fintoc.com/docs/webhooks-validating> ("Validate webhook
+signatures": the `Fintoc-Signature` header format, the
+`f"{timestamp}.{request.body}"` signed-string construction, the HMAC-SHA256
+recipe, the example header `t=1620870928,v1=4df951e0...f567f6d`, and the
+example signed message `1626102791.{"id":"evt_DyzYBwdC07ao5MqG",...}`),
+corroborated by the official `fintoc-node`/`fintoc-python` SDKs'
+`WebhookSignature` verifiers
+(<https://github.com/fintoc-com/fintoc-node>,
+<https://github.com/fintoc-com/fintoc-python>).
+
+- Header: `Fintoc-Signature: t=<unix_ts>,v1=<hex_hmac>` — a comma-separated
+  `key=value` list. `t` is the integer Unix-seconds value set by the server;
+  `v1` is the HMAC-SHA256 signature over `{t}.{raw_body}` and is the only
+  scheme the docs define.
+- Signed string: `"{t}.{raw_body}"` — the `t` value exactly as it appears in
+  the header, a literal dot, then the raw request body bytes, unmodified (the
+  docs' reference code builds `f"{timestamp}.{request.get_data()}"` and warns
+  that re-parsing the JSON payload before verification can alter the string
+  and break the signature).
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded, carried bare in
+  the header (no `sha256=` prefix).
+- Key: the webhook endpoint's secret as a plain UTF-8 string (never decoded),
+  matching the docs' reference `hmac.new(secret, ...)`.
+- Timestamp validation routes through the shared pure-ASCII-digit parser:
+  sign-prefixed (`t=+1626102791`), whitespace-padded, empty, or overflowing
+  values fail closed as `MalformedHeader`.
+- Duplicate `t` or `v1` elements are rejected as ambiguous (`spec.md` §4.4) —
+  never last-wins like the docs' reference code. Fintoc's docs define exactly
+  one signature element and no rotation window, so a second `v1=` is treated
+  as malformed rather than rotation (matching the Calendly/WorkOS/Coinbase
+  treatment of their single signature fields). Unknown elements are discarded
+  for forward compatibility.
+- Replay protection: Fintoc's docs recommend a five-minute tolerance ("Use
+  five minutes as the default tolerance"), so the shared symmetric
+  `|now - t| > max_age` semantics apply; the crate default is 300s, matching
+  the documented zone exactly. The future-dated half of the symmetry is
+  stricter than the docs' phrasing but cannot reject legitimate deliveries.
+- Test-vector provenance: Fintoc publishes the example header
+  (`t=1620870928,v1=4df951e0...f567f6d`) and the example signed message
+  (`1626102791.{"id":"evt_DyzYBwdC07ao5MqG",...}`) as separate examples with
+  no signing key, so the implementation is validated against locally
+  constructed, deterministic vectors over exactly the documented
+  construction — the primary vector's body and timestamp are the docs' own
+  example message — cross-checked across OpenSSL and Python. The docs'
+  published example header is replayed as a well-formed-but-mismatching
+  input. Replace them if Fintoc ever publishes fixed vectors.
+
 ### Lemon Squeezy
 
 Source: <https://docs.lemonsqueezy.com/help/webhooks/signing-requests> (Lemon
