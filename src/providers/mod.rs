@@ -40,6 +40,7 @@ mod paypal;
 mod paystack;
 mod pusher;
 mod razorpay;
+mod ripple;
 #[cfg(feature = "sendgrid")]
 mod sendgrid;
 mod sentry;
@@ -302,6 +303,18 @@ pub enum Provider {
     /// Razorpay (`X-Razorpay-Signature`, HMAC-SHA256 over the raw body, bare
     /// hex — no `sha256=` prefix, no timestamp).
     Razorpay,
+    /// Ripple (Collections) webhooks (`X-Webhook-Signature`, HMAC-SHA256 with
+    /// timestamp replay protection).
+    ///
+    /// Ripple signals Collections webhook deliveries with two headers —
+    /// `X-Webhook-Signature: t=<timestamp>,v1=<hex_hmac_sha256>` and
+    /// `X-Webhook-Timestamp: <epoch_ms>` — and both must match verbatim. The
+    /// signed string is a **double-hash**: `{timestamp}.{sha256_hex(raw_body)}`
+    /// HMAC-SHA256 keyed by the base64-decoded `signature_verification_key`
+    /// (`spec.md` §3). The timestamp is HMAC-covered, so the shared `max_age`
+    /// replay window applies after the millisecond value is floored to whole
+    /// seconds (as with WorkOS and HubSpot).
+    Ripple,
     /// Lemon Squeezy (`X-Signature`, HMAC-SHA256 over the raw body, bare hex —
     /// no `sha256=` prefix, no timestamp).
     LemonSqueezy,
@@ -453,6 +466,7 @@ impl fmt::Display for Provider {
             Provider::DocuSign => f.write_str("DocuSign"),
             Provider::Fintoc => f.write_str("Fintoc"),
             Provider::Razorpay => f.write_str("Razorpay"),
+            Provider::Ripple => f.write_str("Ripple"),
             Provider::LemonSqueezy => f.write_str("LemonSqueezy"),
             Provider::Xero => f.write_str("Xero"),
             Provider::Sentry => f.write_str("Sentry"),
@@ -564,6 +578,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("docusign") => Ok(Provider::DocuSign),
             n if n.eq_ignore_ascii_case("fintoc") => Ok(Provider::Fintoc),
             n if n.eq_ignore_ascii_case("razorpay") => Ok(Provider::Razorpay),
+            n if n.eq_ignore_ascii_case("ripple") => Ok(Provider::Ripple),
             n if n.eq_ignore_ascii_case("lemonsqueezy")
                 || n.eq_ignore_ascii_case("lemon squeezy")
                 || n.eq_ignore_ascii_case("lemon-squeezy") =>
@@ -612,7 +627,7 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
-             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
+             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
@@ -680,6 +695,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::DocuSign => vec![docusign::SIGNATURE_HEADER],
         Provider::Fintoc => vec![fintoc::SIGNATURE_HEADER],
         Provider::Razorpay => vec![razorpay::SIGNATURE_HEADER],
+        Provider::Ripple => vec![ripple::SIGNATURE_HEADER, ripple::TIMESTAMP_HEADER],
         Provider::LemonSqueezy => vec![lemonsqueezy::SIGNATURE_HEADER],
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Sentry => vec![sentry::SIGNATURE_HEADER],
@@ -818,6 +834,7 @@ pub(crate) fn verify_ref(
         Provider::DocuSign => docusign::verify(headers, raw_body, secret, options),
         Provider::Fintoc => fintoc::verify(headers, raw_body, secret, options),
         Provider::Razorpay => razorpay::verify(headers, raw_body, secret, options),
+        Provider::Ripple => ripple::verify(headers, raw_body, secret, options),
         Provider::LemonSqueezy => lemonsqueezy::verify(headers, raw_body, secret, options),
         Provider::Xero => xero::verify(headers, raw_body, secret, options),
         Provider::Sentry => sentry::verify(headers, raw_body, secret, options),
@@ -1421,6 +1438,7 @@ mod tests {
         assert_eq!(Provider::DocuSign.to_string(), "DocuSign");
         assert_eq!(Provider::Fintoc.to_string(), "Fintoc");
         assert_eq!(Provider::Razorpay.to_string(), "Razorpay");
+        assert_eq!(Provider::Ripple.to_string(), "Ripple");
         assert_eq!(Provider::LemonSqueezy.to_string(), "LemonSqueezy");
         assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::Sentry.to_string(), "Sentry");
@@ -1499,6 +1517,7 @@ mod tests {
             ("docusign", Provider::DocuSign),
             ("fintoc", Provider::Fintoc),
             ("razorpay", Provider::Razorpay),
+            ("ripple", Provider::Ripple),
             ("lemonsqueezy", Provider::LemonSqueezy),
             ("lemon squeezy", Provider::LemonSqueezy),
             ("xero", Provider::Xero),
@@ -1680,6 +1699,10 @@ mod tests {
             (Provider::DocuSign, &[docusign::SIGNATURE_HEADER]),
             (Provider::Fintoc, &[fintoc::SIGNATURE_HEADER]),
             (Provider::Razorpay, &[razorpay::SIGNATURE_HEADER]),
+            (
+                Provider::Ripple,
+                &[ripple::SIGNATURE_HEADER, ripple::TIMESTAMP_HEADER],
+            ),
             (Provider::LemonSqueezy, &[lemonsqueezy::SIGNATURE_HEADER]),
             (Provider::Xero, &[xero::SIGNATURE_HEADER]),
             (Provider::Sentry, &[sentry::SIGNATURE_HEADER]),
@@ -1810,7 +1833,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 46] {
+    fn provider_list() -> [Provider; 47] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1846,6 +1869,7 @@ mod tests {
             Provider::DocuSign,
             Provider::Fintoc,
             Provider::Razorpay,
+            Provider::Ripple,
             Provider::LemonSqueezy,
             Provider::Xero,
             Provider::Sentry,

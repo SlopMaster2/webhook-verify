@@ -24,6 +24,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   working; `"custom"` still requires a `CustomScheme` and is rejected as a bare
   name.
 
+- **New provider: Ripple (Collections)** (`Provider::Ripple`): hex
+  HMAC-SHA256 over a **double-hash** signed string —
+  `{timestamp}.{sha256(raw_body)}` — where `timestamp` is the
+  `X-Webhook-Timestamp` epoch-milliseconds value reused *verbatim* as the `t=`
+  element of the `X-Webhook-Signature` header (the docs require both to match
+  verbatim, and `t` must equal the timestamp header byte-for-byte or the
+  request is rejected as malformed). The key is Ripple's
+  `signature_verification_key`, **base64-decoded** once with a single strict
+  standard-base64 decode before keying the HMAC (a double-base64-encoded
+  secret is Ripple's documented first signature-mismatch pitfall). The
+  timestamp is HMAC-covered and routes through the shared `max_age` replay
+  window after the documented millisecond floored-to-seconds step (`> 1e12`
+  → divide by 1000, exactly as Ripple's reference verifier does). Ripple
+  documents the recipe and ships a reference Python verifier but publishes no
+  byte-exact example signature, so the vectors are locally constructed over
+  exactly the documented construction (a Collections-style `payment.completed`
+  body mirroring the docs' event shape), cross-checked with OpenSSL and
+  Python's `hashlib`/`hmac`. Source:
+  <https://docs.ripple.com/products/collections/guides/verifying-webhooks>
+  ("Verifying Webhooks").
+
 - **New provider: X (formerly Twitter)** (`Provider::X`): base64
   HMAC-SHA256 over the exact request body, keyed by the app's **consumer
   secret** (the "API secret key" — never the bearer or access token) as its

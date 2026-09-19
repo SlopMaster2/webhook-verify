@@ -1878,6 +1878,69 @@ Challenge-Response Check and sample event payloads).
   case-insensitive), analogous to Mailchimp Transactional's `"mailchimp"`
   alias — X's own docs still use the pre-rebrand header name.
 
+### Ripple
+
+Source: <https://docs.ripple.com/products/collections/guides/verifying-webhooks>
+("Verifying Webhooks" — the header reference, the signed-string recipe, and
+the reference Python verifier; Collections is Ripple's financial webhook
+product) and the associated Collections API webhook reference. Ripple
+publishes no byte-exact example signature, so there is no official fixed
+vector.
+
+- Headers: `X-Webhook-Signature: t=<timestamp>,v1=<hex_hmac_sha256>` **and**
+  `X-Webhook-Timestamp: <epoch_ms>`. The timestamp rides in **both** places:
+  `t` inside the signature header and as the separate
+  `X-Webhook-Timestamp` header value, and the docs' pitfall table requires
+  them to "match verbatim" ("Ensure they match verbatim"). The reference
+  verifier (`signature_verification_key` → decode, then
+  `parts.get("t") != timestamp` → `False`) rejects a mismatch *before*
+  computing any HMAC, so this crate surfaces a mismatch as `MalformedHeader`
+  rather than `SignatureMismatch`.
+- Signed string: `"{timestamp}.{sha256_raw_body_hex}"` — the
+  `X-Webhook-Timestamp` value exactly as sent, a literal dot, then the
+  **lowercase hex SHA-256 digest of the raw request body**. This is a
+  double-hash scheme (body is SHA-256-digested, and *that hex digest* is what
+  the HMAC covers), unique among the built-in providers; the docs warn that
+  any transform of body or timestamp breaks verification.
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded (bare — no
+  prefix).
+- Secret/key: the `signature_verification_key` Ripple exposes at subscription
+  creation is **base64**-encoded ("This value is a base64-encoded symmetric
+  secret"). It is decoded with a single strict standard-base64 decode
+  (padding required), matching the reference verifier's
+  `base64.b64decode(secret, validate=True)`, and the **decoded** bytes key
+  the HMAC. "Secret double-base64 encoded" is the docs' first listed
+  signature-mismatch pitfall; an undecodable or empty decoded key fails
+  closed with `InvalidSecret`. The secret bytes themselves never enter any
+  signed string, logging, or error output.
+- Replay protection: `X-Webhook-Timestamp` is epoch **milliseconds**, and the
+  reference verifier floors ms values to whole seconds
+  (`if ts_int > 1_000_000_000_000: ts_int //= 1000`) before its freshness
+  comparison. This crate applies the identical floor to the parsed value
+  before the shared symmetric `|now - t| > max_age` (default 300s) check —
+  the same ms→s treatment as WorkOS and HubSpot. The docs' example passes
+  `max_age_seconds=300`, matching the crate default.
+- Header parsing: the signature header is a comma-separated `key=value` list
+  split on the literal `,`. The `t` and `v1` keys are matched after trimming
+  surrounding whitespace (the `t=..., v1=...` comma-space spelling must not
+  drop a recognized key); values are never trimmed — the timestamp is reused
+  verbatim and the signature is hex-decoded as sent. Unknown fields
+  (including a hypothetical future scheme) are discarded; duplicate `t=` or
+  `v1=` elements are rejected as ambiguous (§4.4) since the docs define
+  exactly one signature element and no rotation window. Non-hex or
+  non-32-byte signatures are `BadEncoding`.
+- Replay/verification ordering: the timestamp header is shape-validated
+  first (`parse_millis`), then `t` ↔ `X-Webhook-Timestamp` verbatim agreement,
+  then the HMAC — so a forged header pair fails closed at the earliest
+  distinguishable step.
+- Test-vector provenance: no official vector exists (Ripple publishes the
+  recipe, the reference verifier, and a docs note that "There is no exact,
+  public test signature"). The implementation is validated against locally
+  constructed, deterministic vectors over exactly the documented construction
+  (a Collections-style `payment.completed` body mirroring the docs' event
+  shape), cross-checked with Python's `hashlib`/`hmac` and `openssl`.
+  Replace them if Ripple ever publishes fixed vectors.
+
 ### Standard Webhooks spec
 
 Source: <https://www.standardwebhooks.com> and the canonical spec at

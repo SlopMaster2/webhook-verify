@@ -146,6 +146,12 @@
 //!   `Klaviyo-Signature` + IMF-fixdate `Klaviyo-Timestamp`), reaching the
 //!   RFC 1123 timestamp parse and the `{raw_body}{timestamp}` concatenation
 //!   HMAC comparison.
+//! - `ripple-t-v1-delivery` — Ripple's two-header shape
+//!   (`X-Webhook-Signature` with matching `t=<epoch_ms>`, `v1=<hex>` +
+//!   `X-Webhook-Timestamp` echoing `t` verbatim), reaching the ms timestamp
+//!   parse, the verbatim t↔timestamp agreement gate, the `{t}.{sha256(body)}`
+//!   double-hash signed-string construction, and the base64-keyed HMAC
+//!   comparison.
 //! - `twilio-base64-signature` — Twilio's documented example signature
 //!   (`X-Twilio-Signature`, sha1 base64 over the request URL + sorted form
 //!   fields), reaching base64 decode, the 20-byte gate, and the HMAC comparison
@@ -1163,6 +1169,30 @@ fuzz_target!(|data: &[u8]| {
             (
                 "Klaviyo-Timestamp".to_string(),
                 "Thu, 04 Jan 2024 18:05:25 GMT".to_string(),
+            ),
+        ],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Ripple: a well-formed-shaped two-header delivery (`X-Webhook-Signature`
+    // with matching `t=<epoch_ms>`,`v1=<hex>` + `X-Webhook-Timestamp` echoing
+    // the `t` value verbatim) lets arbitrary body bytes reach the ms timestamp
+    // parse, the verbatim t↔timestamp agreement gate, the `{t}.{sha256(body)}`
+    // double-hash signed-string construction, and the base64-keyed HMAC
+    // comparison; without it the loop above mostly fails earlier on
+    // malformed/missing header fields.
+    attempt(
+        Provider::Ripple,
+        &[
+            (
+                "X-Webhook-Signature".to_string(),
+                "t=1700000000123,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            ),
+            (
+                "X-Webhook-Timestamp".to_string(),
+                "1700000000123".to_string(),
             ),
         ],
         body,
