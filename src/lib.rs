@@ -79,6 +79,7 @@
 //! | Linear | HMAC-SHA256, `linear-signature` |
 //! | LaunchDarkly | HMAC-SHA256 over raw body, hex, `X-LD-Signature` (no timestamp) |
 //! | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` |
+//! | Nylas | HMAC-SHA256 over raw body, bare hex, `x-nylas-signature` (no timestamp) |
 //! | Zoom | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Cloudflare (Stream) | HMAC-SHA256 over `time.body`, hex, `Webhook-Signature` |
 //! | CircleCI (outbound webhooks) | HMAC-SHA256 over raw body, hex, `v1=` prefix, `circleci-signature` (versioned signature list, no timestamp) |
