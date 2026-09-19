@@ -263,6 +263,14 @@ const IMPLEMENTED: &[Provider] = &[
     // empty-header rejection, and a well-formed-shaped attempt below reaches
     // its timestamp parse, hex decode, 32-byte gate, and HMAC comparison.
     Provider::Fintoc,
+    // Ripple needs two headers (`X-Webhook-Signature` with matching
+    // `t=<epoch_ms>`,`v1=<hex>` + `X-Webhook-Timestamp` echoing `t`) to reach
+    // its signature path; arbitrary bytes exercise the comma/key-value
+    // splitting, the verbatim t↔timestamp agreement gate, the ms timestamp
+    // parse, and the base64 key-decode, and a well-formed-shaped attempt below
+    // reaches the `{t}.{sha256(body)}` double-hash signed-string construction
+    // and HMAC comparison.
+    Provider::Ripple,
     // Razorpay is a single-header raw-body HMAC (bare hex, no prefix, no
     // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
     // gate, and a well-formed-shaped attempt below reaches HMAC comparison.

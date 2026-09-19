@@ -623,6 +623,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Fuzz target: Ripple was missing from the `IMPLEMENTED` coverage list.**
+  The Ripple provider (#111) added a well-formed-shaped `attempt` but was
+  never added to the `parse_and_verify` target's `IMPLEMENTED` array, so its
+  header parser and combined `t=...,v1=...` parser never received arbitrary
+  fuzz bytes and never ran through the `verify_any` rotation loop —
+  `spec.md` §5.6 requires every provider's parsing path in the shared target.
+  Adding `Provider::Ripple` to `IMPLEMENTED` restores both; the target
+  rebuilds and runs clean.
 - **VerifyOptions docs: `request_url`'s and `form_params`'s provider lists
   omitted Mailchimp Transactional (Mandrill).** The `request_url` field doc
   enumerated "Square, Twilio, HubSpot" and `form_params` only "Twilio", but
