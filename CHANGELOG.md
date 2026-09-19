@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   working; `"custom"` still requires a `CustomScheme` and is rejected as a bare
   name.
 
+- **New provider: Expo (EAS)** (`Provider::Expo`): hex **HMAC-SHA1** over the
+  exact request body, keyed by the webhook signing secret (the `--secret`
+  value chosen with `eas webhook:create`, which Expo requires to be at least
+  16 characters) as its UTF-8 bytes, delivered in `expo-signature` behind a
+  literal `sha1=` prefix — the same `sha1=`-prefixed shape as Intercom's
+  `X-Hub-Signature`. Covers EAS Build and EAS Submit webhook deliveries.
+  Expo's reference verification sample feeds the exact body text
+  (`bodyParser.text({ type: '*/*' })` then `hmac.update(req.body)`) into a
+  constant-time comparison, so the crate hashes `raw_body` verbatim. No
+  timestamp is signed, so `max_age` has no effect. Like Twilio, Intercom, and
+  Vercel, Expo still legitimately mandates SHA-1: the HMAC is keyed with the
+  shared secret, which is immune to SHA-1's collision attacks. Expo documents
+  the construction and ships reference verification code but publishes no
+  byte-exact example signature, so the vectors are locally constructed over
+  exactly the documented recipe (the primary vector's body mirrors the shape
+  of the docs' build-payload example), cross-checked with OpenSSL and Python's
+  `hmac`. Source:
+  <https://docs.expo.dev/eas/webhooks/> (source: `expo/expo`,
+  `docs/pages/eas/webhooks.mdx`).
+
 - **New provider: Ripple (Collections)** (`Provider::Ripple`): hex
   HMAC-SHA256 over a **double-hash** signed string —
   `{timestamp}.{sha256(raw_body)}` — where `timestamp` is the
@@ -159,10 +179,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   secret shown when creating an account webhook, or the Integration Secret
   (Client Secret) for integration webhooks, used verbatim as its UTF-8 bytes.
   Covers requests from Webhooks, Log Drains, and integration webhooks alike.
-  Vercel is the built-in providers' third SHA-1 scheme after Twilio and
-  Intercom, and the only bare-hex raw-body one — like Twilio and Intercom, the
-  HMAC is keyed with the shared secret, which is immune to SHA-1's collision
-  attacks. No timestamp is
+  Vercel is one of the built-in providers' four SHA-1 schemes (with Twilio,
+  Intercom, and Expo EAS), and the only bare-hex raw-body one — like Twilio
+  and Intercom, the HMAC is keyed with the shared secret, which is immune to
+  SHA-1's collision attacks. No timestamp is
   signed, so the shared `max_age` replay window has no effect. Sources:
   <https://vercel.com/docs/webhooks/webhooks-api> ("Securing webhooks") and
   <https://vercel.com/docs/headers/request-headers#x-vercel-signature> (the
