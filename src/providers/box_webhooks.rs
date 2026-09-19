@@ -385,10 +385,9 @@ mod tests {
     #[test]
     fn rejects_tampered_signature() {
         // Flip the leading base64 character of the primary signature.
-        let flipped = if PRIMARY_SIGNATURE.starts_with('6') {
-            "7".to_string() + &PRIMARY_SIGNATURE[1..]
-        } else {
-            "6".to_string() + &PRIMARY_SIGNATURE[1..]
+        let flipped = match PRIMARY_SIGNATURE.strip_prefix('6') {
+            Some(rest) => "7".to_string() + rest,
+            None => "6".to_string() + &PRIMARY_SIGNATURE[1..],
         };
         assert_eq!(
             verify_with(

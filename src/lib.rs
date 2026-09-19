@@ -54,19 +54,19 @@
 //! |---|---|
 //! | Stripe | HMAC-SHA256 over `timestamp.body`, tolerance window |
 //! | GitHub | HMAC-SHA256, `X-Hub-Signature-256` |
-//! | Bitbucket | HMAC-SHA256, `X-Hub-Signature` |
+//! | Bitbucket | HMAC-SHA256, `sha256=` prefix, `X-Hub-Signature` |
 //! | Box | HMAC-SHA256 over `{raw_body}{delivery_timestamp}`, base64, `BOX-SIGNATURE-PRIMARY`/`BOX-SIGNATURE-SECONDARY` (rotation-safe) + RFC 3339 timestamp tolerance window |
 //! | Intercom | HMAC-SHA1, `sha1=` prefix, `X-Hub-Signature` |
 //! | Meta (Graph API, Messenger, Instagram, WhatsApp Cloud API) | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Hub-Signature-256` (App Secret key, no timestamp) |
 //! | HubSpot | HMAC-SHA256 over `{method}{uri}{body}{timestamp}` (epoch ms), base64, `X-HubSpot-Signature-V3` + tolerance window |
 //! | Klaviyo | HMAC-SHA256 over `{raw_body}{timestamp}`, hex, `Klaviyo-Signature` + `Klaviyo-Timestamp` (IMF-fixdate) replay window |
-//! | Shopify | HMAC-SHA256, base64 |
+//! | Shopify | HMAC-SHA256, base64, `X-Shopify-Hmac-Sha256` |
 //! | Slack | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Square | HMAC-SHA256 over notification URL + body, base64 |
 //! | Twilio | HMAC-SHA1 (base64) over URL + sorted form params, `X-Twilio-Signature` |
 //! | Mandrill (Mailchimp Transactional) | HMAC-SHA1 (base64) over URL + sorted form params, `X-Mandrill-Signature` |
 //! | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) |
-//! | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp tolerance window |
+//! | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp tolerance window |
 //! | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` |
 //! | Discord | Ed25519 public-key signatures (no shared secret) |
 //! | PayPal | RSASSA-PKCS1-v1_5 SHA-256, X.509 cert + webhook ID |
