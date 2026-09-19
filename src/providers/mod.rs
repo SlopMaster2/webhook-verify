@@ -440,10 +440,17 @@ impl fmt::Display for Provider {
 ///
 /// Parsing is case-insensitive and accepts exactly the canonical
 /// [`fmt::Display`] spelling of each provider (e.g. `"github"`, `"GitHub"`,
-/// `"GITHUB"`), plus the space-separated human-readable forms for the two
-/// providers whose Display name runs words together (`"lemon squeezy"` ↔
-/// `Provider::LemonSqueezy`, `"standard webhooks"` ↔
-/// `Provider::StandardWebhooks`).
+/// `"GITHUB"`), plus the space-separated and hyphenated human-readable forms
+/// for the providers whose brand name runs several words together:
+/// `"lemon squeezy"`/`"lemon-squeezy"` ↔ [`Provider::LemonSqueezy`,
+/// `"standard webhooks"`/`"standard-webhooks"` ↔
+/// [`Provider::StandardWebhooks`], `"hub spot"`/`"hub-spot"` ↔
+/// [`Provider::HubSpot`], etc. — the spellings operators actually write in
+/// config files.
+/// [`Provider::Mandrill`] additionally accepts its current documented brand
+/// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
+/// (Mailchimp Transactional is the name the docs/README use for the
+/// formerly-Mandrill provider).
 /// [`Provider::Custom`] cannot be parsed from a bare name — constructing one
 /// requires a [`CustomScheme`] — so `"custom"` is rejected like any unknown
 /// name.
@@ -458,9 +465,20 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("box") => Ok(Provider::Box),
             n if n.eq_ignore_ascii_case("intercom") => Ok(Provider::Intercom),
             n if n.eq_ignore_ascii_case("meta") => Ok(Provider::Meta),
-            n if n.eq_ignore_ascii_case("hubspot") => Ok(Provider::HubSpot),
+            n if n.eq_ignore_ascii_case("hubspot")
+                || n.eq_ignore_ascii_case("hub spot")
+                || n.eq_ignore_ascii_case("hub-spot") =>
+            {
+                Ok(Provider::HubSpot)
+            }
             n if n.eq_ignore_ascii_case("klaviyo") => Ok(Provider::Klaviyo),
-            n if n.eq_ignore_ascii_case("mandrill") => Ok(Provider::Mandrill),
+            n if n.eq_ignore_ascii_case("mandrill")
+                || n.eq_ignore_ascii_case("mailchimp")
+                || n.eq_ignore_ascii_case("mailchimp transactional")
+                || n.eq_ignore_ascii_case("mailchimp-transactional") =>
+            {
+                Ok(Provider::Mandrill)
+            }
             n if n.eq_ignore_ascii_case("line") => Ok(Provider::Line),
             n if n.eq_ignore_ascii_case("shopify") => Ok(Provider::Shopify),
             n if n.eq_ignore_ascii_case("slack") => Ok(Provider::Slack),
@@ -473,10 +491,20 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("sendgrid") => Ok(Provider::SendGrid),
             n if n.eq_ignore_ascii_case("paystack") => Ok(Provider::Paystack),
             n if n.eq_ignore_ascii_case("paddle") => Ok(Provider::Paddle),
-            n if n.eq_ignore_ascii_case("pagerduty") => Ok(Provider::PagerDuty),
+            n if n.eq_ignore_ascii_case("pagerduty")
+                || n.eq_ignore_ascii_case("pager duty")
+                || n.eq_ignore_ascii_case("pager-duty") =>
+            {
+                Ok(Provider::PagerDuty)
+            }
             n if n.eq_ignore_ascii_case("pusher") => Ok(Provider::Pusher),
             n if n.eq_ignore_ascii_case("linear") => Ok(Provider::Linear),
-            n if n.eq_ignore_ascii_case("launchdarkly") => Ok(Provider::LaunchDarkly),
+            n if n.eq_ignore_ascii_case("launchdarkly")
+                || n.eq_ignore_ascii_case("launch darkly")
+                || n.eq_ignore_ascii_case("launch-darkly") =>
+            {
+                Ok(Provider::LaunchDarkly)
+            }
             n if n.eq_ignore_ascii_case("notion") => Ok(Provider::Notion),
             n if n.eq_ignore_ascii_case("zoom") => Ok(Provider::Zoom),
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
@@ -485,7 +513,8 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("docusign") => Ok(Provider::DocuSign),
             n if n.eq_ignore_ascii_case("razorpay") => Ok(Provider::Razorpay),
             n if n.eq_ignore_ascii_case("lemonsqueezy")
-                || n.eq_ignore_ascii_case("lemon squeezy") =>
+                || n.eq_ignore_ascii_case("lemon squeezy")
+                || n.eq_ignore_ascii_case("lemon-squeezy") =>
             {
                 Ok(Provider::LemonSqueezy)
             }
@@ -495,11 +524,17 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("mux") => Ok(Provider::Mux),
             n if n.eq_ignore_ascii_case("zendesk") => Ok(Provider::Zendesk),
             n if n.eq_ignore_ascii_case("workos") => Ok(Provider::WorkOS),
-            n if n.eq_ignore_ascii_case("woocommerce") => Ok(Provider::WooCommerce),
+            n if n.eq_ignore_ascii_case("woocommerce")
+                || n.eq_ignore_ascii_case("woo commerce")
+                || n.eq_ignore_ascii_case("woo-commerce") =>
+            {
+                Ok(Provider::WooCommerce)
+            }
             n if n.eq_ignore_ascii_case("calendly") => Ok(Provider::Calendly),
             n if n.eq_ignore_ascii_case("vercel") => Ok(Provider::Vercel),
             n if n.eq_ignore_ascii_case("standardwebhooks")
-                || n.eq_ignore_ascii_case("standard webhooks") =>
+                || n.eq_ignore_ascii_case("standard webhooks")
+                || n.eq_ignore_ascii_case("standard-webhooks") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -521,7 +556,8 @@ impl fmt::Display for ProviderParseError {
              `launchdarkly`, `notion`, `zoom`, `cloudflare`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, \
              or `standardwebhooks` (or `standard webhooks`) \
-             (case-insensitive); `custom` requires a `CustomScheme` and must be built directly",
+             (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
+             `mailchimp-transactional` are also accepted); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1417,6 +1453,34 @@ mod tests {
             );
             let mixed = format!("{}{}", name[..1].to_ascii_uppercase(), &name[1..]);
             assert_eq!(Provider::from_str(&mixed), Ok(expected), "mixed `{mixed}`");
+        }
+    }
+
+    #[test]
+    fn provider_from_str_accepts_multiword_and_rebrand_aliases() {
+        use core::str::FromStr;
+
+        // The space-separated and hyphenated spellings operators write in
+        // config files, plus the current documented brand name for the
+        // formerly-Mandrill provider. Verbatim (no trim), case-insensitive.
+        let cases = [
+            ("hub spot", Provider::HubSpot),
+            ("hub-spot", Provider::HubSpot),
+            ("HUB SPOT", Provider::HubSpot),
+            ("launch darkly", Provider::LaunchDarkly),
+            ("launch-darkly", Provider::LaunchDarkly),
+            ("lemon-squeezy", Provider::LemonSqueezy),
+            ("pager duty", Provider::PagerDuty),
+            ("pager-duty", Provider::PagerDuty),
+            ("woo commerce", Provider::WooCommerce),
+            ("woo-commerce", Provider::WooCommerce),
+            ("standard-webhooks", Provider::StandardWebhooks),
+            ("mailchimp", Provider::Mandrill),
+            ("mailchimp transactional", Provider::Mandrill),
+            ("mailchimp-transactional", Provider::Mandrill),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(Provider::from_str(name), Ok(expected), "alias `{name}`");
         }
     }
 
