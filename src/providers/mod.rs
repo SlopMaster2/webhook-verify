@@ -34,6 +34,7 @@ mod mandrill;
 mod meta;
 mod mux;
 mod notion;
+mod nylas;
 mod paddle;
 mod pagerduty;
 #[cfg(feature = "paypal")]
@@ -252,6 +253,10 @@ pub enum Provider {
     /// `sha256=` prefix). The signing key is the subscription's
     /// `verification_token` from the one-time handshake.
     Notion,
+    /// Nylas (`x-nylas-signature`, HMAC-SHA256 over the raw body, bare hex —
+    /// no `sha256=` prefix, no timestamp). The signing key is the endpoint's
+    /// `webhook_secret`, generated after the `challenge` handshake.
+    Nylas,
     /// Zoom (`x-zm-signature`, HMAC-SHA256 with timestamp).
     Zoom,
     /// Cloudflare (`Webhook-Signature`, HMAC-SHA256 over `time.body`).
@@ -470,6 +475,7 @@ impl fmt::Display for Provider {
             Provider::Linear => f.write_str("Linear"),
             Provider::LaunchDarkly => f.write_str("LaunchDarkly"),
             Provider::Notion => f.write_str("Notion"),
+            Provider::Nylas => f.write_str("Nylas"),
             Provider::Zoom => f.write_str("Zoom"),
             Provider::Cloudflare => f.write_str("Cloudflare"),
             Provider::CircleCi => f.write_str("CircleCI"),
@@ -578,6 +584,7 @@ impl core::str::FromStr for Provider {
                 Ok(Provider::LaunchDarkly)
             }
             n if n.eq_ignore_ascii_case("notion") => Ok(Provider::Notion),
+            n if n.eq_ignore_ascii_case("nylas") => Ok(Provider::Nylas),
             n if n.eq_ignore_ascii_case("zoom") => Ok(Provider::Zoom),
             n if n.eq_ignore_ascii_case("cloudflare") => Ok(Provider::Cloudflare),
             n if n.eq_ignore_ascii_case("circleci")
@@ -640,7 +647,7 @@ impl fmt::Display for ProviderParseError {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
-             `launchdarkly`, `notion`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
+             `launchdarkly`, `notion`, `nylas`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
@@ -702,6 +709,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Linear => vec![linear::SIGNATURE_HEADER],
         Provider::LaunchDarkly => vec![launchdarkly::SIGNATURE_HEADER],
         Provider::Notion => vec![notion::SIGNATURE_HEADER],
+        Provider::Nylas => vec![nylas::SIGNATURE_HEADER],
         Provider::Cloudflare => vec![cloudflare::SIGNATURE_HEADER],
         Provider::CircleCi => vec![circleci::SIGNATURE_HEADER],
         Provider::Coinbase => vec![coinbase::SIGNATURE_HEADER],
@@ -833,6 +841,7 @@ pub(crate) fn verify_ref(
         Provider::Linear => linear::verify(headers, raw_body, secret, options),
         Provider::LaunchDarkly => launchdarkly::verify(headers, raw_body, secret, options),
         Provider::Notion => notion::verify(headers, raw_body, secret, options),
+        Provider::Nylas => nylas::verify(headers, raw_body, secret, options),
         Provider::Zoom => zoom::verify(headers, raw_body, secret, options),
         Provider::Shopify => shopify::verify(headers, raw_body, secret, options),
         Provider::Slack => slack::verify(headers, raw_body, secret, options),
@@ -1446,6 +1455,7 @@ mod tests {
         assert_eq!(Provider::Linear.to_string(), "Linear");
         assert_eq!(Provider::LaunchDarkly.to_string(), "LaunchDarkly");
         assert_eq!(Provider::Notion.to_string(), "Notion");
+        assert_eq!(Provider::Nylas.to_string(), "Nylas");
         assert_eq!(Provider::Zoom.to_string(), "Zoom");
         assert_eq!(Provider::Cloudflare.to_string(), "Cloudflare");
         assert_eq!(Provider::CircleCi.to_string(), "CircleCI");
@@ -1526,6 +1536,7 @@ mod tests {
             ("linear", Provider::Linear),
             ("launchdarkly", Provider::LaunchDarkly),
             ("notion", Provider::Notion),
+            ("nylas", Provider::Nylas),
             ("zoom", Provider::Zoom),
             ("cloudflare", Provider::Cloudflare),
             ("circleci", Provider::CircleCi),
@@ -1710,6 +1721,7 @@ mod tests {
             (Provider::Linear, &[linear::SIGNATURE_HEADER]),
             (Provider::LaunchDarkly, &[launchdarkly::SIGNATURE_HEADER]),
             (Provider::Notion, &[notion::SIGNATURE_HEADER]),
+            (Provider::Nylas, &[nylas::SIGNATURE_HEADER]),
             (Provider::Cloudflare, &[cloudflare::SIGNATURE_HEADER]),
             (Provider::CircleCi, &[circleci::SIGNATURE_HEADER]),
             (Provider::Coinbase, &[coinbase::SIGNATURE_HEADER]),
@@ -1851,7 +1863,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 48] {
+    fn provider_list() -> [Provider; 49] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1880,6 +1892,7 @@ mod tests {
             Provider::Linear,
             Provider::LaunchDarkly,
             Provider::Notion,
+            Provider::Nylas,
             Provider::Zoom,
             Provider::Cloudflare,
             Provider::CircleCi,

@@ -64,6 +64,7 @@ pub enum Provider {
     Linear,
     LaunchDarkly,
     Notion,
+    Nylas,
     Zoom,
     Cloudflare,
     CircleCi,
@@ -838,6 +839,49 @@ introduced v5.23.0; matches the server-side delivery code
   the signature reproduced from that construction (independently with
   `openssl dgst`) matches the documented sample byte-for-byte. Boundary-vector
   bodies are locally constructed over the same documented recipe.
+
+### Nylas
+
+Source: <https://developer.nylas.com/docs/v3/notifications/> (Nylas "Using
+webhooks with Nylas" — "Secure a webhook" and "Respond to webhook
+notifications": the `x-nylas-signature`/`X-Nylas-Signature` header format, the
+raw-body signing rule, the `webhook_secret` keying, and the compressed-delivery
+caveat) and the signed-delivery cookbook
+(<https://developer.nylas.com/docs/cookbook/use-cases/build/verify-webhook-signatures/>,
+with reference Node/Python verification code and an official CLI
+`nylas webhook verify` oracle).
+
+- Header: `x-nylas-signature: <hex_hmac>` — a bare lowercase hex digest, no
+  prefix and no timestamp. The docs state the header arrives as either
+  `x-nylas-signature` or `X-Nylas-Signature` (capitalization depends on the
+  sending SDK); header lookup is case-insensitive, so either spelling works.
+  Same shape as LaunchDarkly, Dropbox, Razorpay, and Lemon Squeezy.
+- Signed string: raw body bytes, unmodified — the docs stress the signature is
+  for "the exact content of the request body" ("signature is for the exact
+  content of the request body, so make sure that your processing code doesn't
+  modify the body before checking the signature"); re-serializing or otherwise
+  re-encoding the body breaks verification.
+- Algorithm: HMAC-SHA256, hex-encoded. Key: the endpoint's `webhook_secret`,
+  generated automatically after the endpoint passes Nylas's initial `challenge`
+  query-parameter handshake, as its UTF-8 bytes verbatim — matching the
+  documented construction
+  (`crypto.createHmac("sha256", secret).update(rawBody).digest("hex")`).
+- Compressed delivery: when `compressed_delivery` is enabled, Nylas
+  gzip-compresses the notification and the HMAC is computed **over the
+  compressed bytes**. `verify()` hashes `raw_body` exactly as received, so the
+  caller passes the compressed wire bytes straight through; decompressing
+  before verification would break it (the docs call this the single most
+  common integration bug).
+- No timestamp in the signature scheme (`max_age` has no effect), mirroring
+  GitHub, Bitbucket, Intercom, Expo, Meta, LaunchDarkly, and the other
+  bare-hex raw-body providers.
+- Test-vector provenance: Nylas documents the construction and ships reference
+  verification code plus a CLI verifier, but publishes no byte-exact example
+  signature (the `webhook_secret` is endpoint-specific and generated at
+  handshake time), so the vectors are locally constructed over exactly the
+  documented construction (hex of `HMAC-SHA256(webhook_secret, raw_body)`),
+  cross-checked with `openssl dgst` and Python's `hmac` module. Replace them
+  if Nylas ever publishes fixed vectors.
 
 ### Slack
 

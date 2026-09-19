@@ -130,6 +130,9 @@
 //!   prefix, no timestamp).
 //! - `launchdarkly-hex-signature` — LaunchDarkly's bare hex HMAC-SHA256
 //!   signature (no prefix, no timestamp).
+//! - `nylas-hex-signature` — Nylas's `x-nylas-signature` bare hex HMAC-SHA256
+//!   signature over the raw body (no prefix, no timestamp), reaching hex
+//!   decode, the 32-byte gate, and the constant-time HMAC comparison.
 //! - `shopify-base64-signature` — Shopify's base64 HMAC-SHA256 signature (no
 //!   prefix, no timestamp).
 //! - `line-base64-signature` — LINE's official byte-exact example
@@ -309,6 +312,10 @@ const IMPLEMENTED: &[Provider] = &[
     // well-formed-shaped attempt below reaches its 32-byte gate and HMAC
     // comparison.
     Provider::Notion,
+    // Nylas is a single-header raw-body HMAC (bare hex, no prefix, no
+    // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
+    // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
+    Provider::Nylas,
     // Cloudflare needs a combined `time=...,sig1=...` header to reach its
     // signature path; arbitrary bytes exercise the comma/key-value splitting
     // and empty-header rejection, and a well-formed-shaped attempt below
@@ -1253,6 +1260,20 @@ fuzz_target!(|data: &[u8]| {
         Provider::LaunchDarkly,
         &[(
             "X-LD-Signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Nylas: a well-formed-shaped `x-nylas-signature` (valid hex sig,
+    // no prefix, no timestamp) lets arbitrary body bytes reach the 32-byte
+    // length gate and HMAC comparison.
+    attempt(
+        Provider::Nylas,
+        &[(
+            "x-nylas-signature".to_string(),
             "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,

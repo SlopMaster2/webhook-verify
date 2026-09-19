@@ -599,6 +599,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over the same documented recipe. `Provider::from_str` also accepts
   `"circleci"` (plus the `"circle ci"` and `"circle-ci"` spellings).
 
+- **New provider: Nylas** (`Provider::Nylas`): **hex** HMAC-SHA256 over the
+  exact request body, keyed by the endpoint's `webhook_secret` (generated
+  automatically after the endpoint passes Nylas's `challenge` handshake) as
+  its UTF-8 bytes and delivered in the `x-nylas-signature` header — a bare
+  lowercase hex digest, no prefix and no timestamp (the same bare-hex shape as
+  LaunchDarkly, Dropbox, Razorpay, and Lemon Squeezy). Nylas's docs state the
+  header arrives as either `x-nylas-signature` or `X-Nylas-Signature`, and
+  header lookup is case-insensitive so both spellings work. The docs stress
+  the signature is for "the exact content of the request body", so the crate
+  hashes `raw_body` verbatim. With `compressed_delivery` enabled Nylas
+  gzip-compresses the payload and signs the *compressed* bytes — callers pass
+  the raw wire bytes straight through and verify before decompressing. No
+  timestamp is signed, so `max_age` has no effect. Nylas documents the scheme
+  and ships reference verification code plus a CLI `nylas webhook verify`
+  oracle, but publishes no byte-exact example signature (the secret is
+  endpoint-specific), so the vectors are locally constructed over exactly the
+  documented recipe — the primary vector's body mirrors the shape of Nylas's
+  documented `message.created` notification, including the always-included
+  `id`/`grant_id`/`application_id` fields — cross-checked with OpenSSL and
+  Python's `hmac`. Source:
+  <https://developer.nylas.com/docs/v3/notifications/> ("Secure a webhook")
+  and
+  <https://developer.nylas.com/docs/cookbook/use-cases/build/verify-webhook-signatures/>.
+
 ### Changed
 
 - **Lint: `missing_debug_implementations`** — all public types are now

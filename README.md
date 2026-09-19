@@ -112,6 +112,7 @@ hand-copied signing-string logic to get wrong.
 | Linear | HMAC-SHA256, `linear-signature` | ✅ |
 | LaunchDarkly | HMAC-SHA256 over raw body, hex, `X-LD-Signature` (no timestamp) | ✅ |
 | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` (verification-token key) | ✅ |
+| Nylas | HMAC-SHA256 over raw body, bare hex, `x-nylas-signature` (webhook-secret key, no timestamp) | ✅ |
 | Zoom | HMAC-SHA256, `v0=` scheme, `x-zm-signature` + timestamp + replay window | ✅ |
 | Cloudflare (Stream webhooks) | HMAC-SHA256 over `time.body`, hex, in a combined `Webhook-Signature` header + timestamp tolerance | ✅ |
 | CircleCI (outbound webhooks) | HMAC-SHA256 over raw body, hex, `v1=` prefix in a comma-separated versioned `circleci-signature` header (no timestamp; other versions discarded) | ✅ |
