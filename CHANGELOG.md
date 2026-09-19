@@ -623,6 +623,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **RFC 3339 leap second: a local `23:59:60` with a non-zero UTC offset is
+  no longer silently normalized into a replayable instant.** The shared
+  `parse_rfc3339_timestamp` parser (used by PayPal, Twitch, Zendesk, and Box)
+  gated RFC 3339's second-`60` leap-second value on the *local* clock
+  position only, so a value like `2024-05-16T23:59:60+02:00` passed the gate
+  but normalized to UTC `22:00:00` — an instant where no leap second exists.
+  A leap second is only ever held at UTC `23:59:60`, so the parser now
+  requires the offset-normalized instant to sit on that UTC day boundary and
+  rejects the shifted spellings fail-closed (`23:59:60+02:00`,
+  `23:59:60-05:00`); `23:59:60Z`/`23:59:60+00:00` still parse to the same
+  instant they always did. Impact on real deliveries is nil — the four
+  consumers HMAC-cover the timestamp and providers emit `Z`-suffixed values
+  — but the parser is now stricter than before, matching the crate's
+  fail-closed stance on timestamp shapes providers never emit.
 - **Fuzz target: Ripple was missing from the `IMPLEMENTED` coverage list.**
   The Ripple provider (#111) added a well-formed-shaped `attempt` but was
   never added to the `parse_and_verify` target's `IMPLEMENTED` array, so its
