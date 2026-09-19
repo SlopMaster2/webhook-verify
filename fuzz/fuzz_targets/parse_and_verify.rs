@@ -138,6 +138,10 @@
 //! - `calendly-t-v1-signature` — Calendly's combined `t=...,v1=...`
 //!   `Calendly-Webhook-Signature` header, reaching the comma-split, timestamp
 //!   parse, hex decode, 32-byte gate, and HMAC comparison over `{t}.{body}`.
+//! - `fintoc-t-v1-signature` — Fintoc's combined `t=...,v1=...`
+//!   `Fintoc-Signature` header with the docs' own example event body, reaching
+//!   the comma-split, timestamp parse, hex decode, 32-byte gate, and HMAC
+//!   comparison over `{t}.{body}`.
 //! - `klaviyo-timestamp-delivery` — Klaviyo's two-header shape (bare hex
 //!   `Klaviyo-Signature` + IMF-fixdate `Klaviyo-Timestamp`), reaching the
 //!   RFC 1123 timestamp parse and the `{raw_body}{timestamp}` concatenation
@@ -248,6 +252,11 @@ const IMPLEMENTED: &[Provider] = &[
     // base64-decode and 32-byte gate, and a well-formed-shaped attempt below
     // reaches HMAC comparison.
     Provider::DocuSign,
+    // Fintoc needs a combined `t=...,v1=...` header to reach its signature
+    // path; arbitrary bytes exercise the comma/key-value splitting and
+    // empty-header rejection, and a well-formed-shaped attempt below reaches
+    // its timestamp parse, hex decode, 32-byte gate, and HMAC comparison.
+    Provider::Fintoc,
     // Razorpay is a single-header raw-body HMAC (bare hex, no prefix, no
     // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
     // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
@@ -1226,6 +1235,22 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "x-twitter-webhooks-signature".to_string(),
             "sha256=wKAeP9GiJsaFuQJdxOljWIpG7W4b0IJshW59aJtfNZ0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Fintoc: a well-formed-shaped `Fintoc-Signature` (digit t, valid-hex
+    // 32-byte v1) lets arbitrary body bytes reach the 32-byte length gate and
+    // HMAC comparison; without it the loop above mostly fails earlier on
+    // malformed/missing header fields.
+    attempt(
+        Provider::Fintoc,
+        &[(
+            "Fintoc-Signature".to_string(),
+            "t=1700000000,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
+                .to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

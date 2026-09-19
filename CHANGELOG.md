@@ -43,6 +43,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   <https://docs.x.com/x-api/account-activity/guides/account-activity-webhooks>
   ("Securing webhooks").
 
+- **New provider: Fintoc** (`Provider::Fintoc`): **hex** HMAC-SHA256 over the
+  raw request body prefixed by a literal dot and the `t` Unix-seconds value
+  *exactly as sent* — `{t}.{raw_body}` — with the `t`/`v1` fields riding in
+  the single `Fintoc-Signature` header (`t=...,v1=...` comma list). Fintoc's
+  docs are explicit that the raw, unparsed request body must be used
+  ("Libraries can represent parsed JSON differently"), so the crate hashes
+  `raw_body` verbatim. The timestamp is HMAC-covered and routes through the
+  shared `max_age` replay window, matching Fintoc's documented five-minute
+  tolerance. Fintoc documents the scheme and publishes an example header
+  (`t=1620870928,v1=4df951e0...f567f6d`) and an example signed message
+  (`1626102791.{"id":"evt_DyzYBwdC07ao5MqG",...}`) but no byte-exact
+  signature, so the vectors are locally constructed over exactly the
+  documented recipe — the primary vector's body and timestamp are the docs'
+  own example message — cross-checked with OpenSSL and Python's `hmac`; the
+  docs' published example header is replayed as a well-formed-but-mismatching
+  input. Sources:
+  <https://docs.fintoc.com/docs/webhooks-validating> ("Validate webhook
+  signatures") and the official
+  [fintoc-node](https://github.com/fintoc-com/fintoc-node) /
+  [fintoc-python](https://github.com/fintoc-com/fintoc-python) SDKs'
+  `WebhookSignature` verifiers.
+
 - **New provider: LINE Messaging API** (`Provider::Line`): **base64**
   HMAC-SHA256 over the exact request body, keyed by the channel secret as its
   UTF-8 bytes and delivered in `x-line-signature`. LINE's docs are explicit
