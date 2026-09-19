@@ -1,0 +1,3 @@
+x-twitter-webhooks-signature:sha256=wKAeP9GiJsaFuQJdxOljWIpG7W4b0IJshW59aJtfNZ0=
+
+{"for_user_id":"1234567890123456789","tweet_create_events":[{"id":"118139294120500103","text":"Hello world!","user":{"id":"1234567890123456789","screen_name":"slopmaster"}}]}

@@ -162,6 +162,10 @@
 //!   HMAC-SHA1 shape over the raw body (no prefix, no timestamp — the only
 //!   built-in bare-hex raw-body SHA-1 digest), reaching hex decode, the
 //!   40-hex-char / 20-byte gate, and HMAC comparison.
+//! - `x-twitter-sha256-prefix-signature` — X's documented
+//!   `x-twitter-webhooks-signature` shape (`sha256=` prefixed base64
+//!   HMAC-SHA256 over the raw body, no timestamp), reaching the prefix match,
+//!   base64 decode, the 32-byte gate, and HMAC comparison.
 //! - `header-garbage-without-body-separator` — an adversarial malformed input
 //!   with no `\n\n` separator, anchoring the parser's fail-closed paths.
 
@@ -365,6 +369,11 @@ const IMPLEMENTED: &[Provider] = &[
     // exercise its hex-decode and 20-byte gate, and a well-formed-shaped
     // attempt below reaches HMAC comparison.
     Provider::Vercel,
+    // X is a single-header raw-body HMAC (`sha256=` prefixed *base64*, no
+    // timestamp); arbitrary header bytes exercise its prefix-strip and
+    // base64-decode paths, and a well-formed-shaped attempt below reaches its
+    // 32-byte gate and HMAC comparison.
+    Provider::X,
 ];
 
 /// A well-formed secret for each provider's scheme, so the fuzzer reaches the
@@ -1202,6 +1211,21 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "x-xero-signature".to_string(),
             "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // X: a well-formed-shaped `x-twitter-webhooks-signature` (valid base64
+    // sig behind the `sha256=` prefix, no timestamp) lets arbitrary body
+    // bytes reach the prefix-match, 32-byte length gate, and HMAC
+    // comparison.
+    attempt(
+        Provider::X,
+        &[(
+            "x-twitter-webhooks-signature".to_string(),
+            "sha256=wKAeP9GiJsaFuQJdxOljWIpG7W4b0IJshW59aJtfNZ0=".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

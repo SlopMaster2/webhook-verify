@@ -53,6 +53,7 @@ mod typeform;
 mod vercel;
 mod woocommerce;
 mod workos;
+mod x_twitter;
 mod xero;
 mod zendesk;
 mod zoom;
@@ -370,6 +371,20 @@ pub enum Provider {
     /// the identity signed-string can reproduce the same bare-hex shape
     /// (`spec.md` §3, §2.2).
     Vercel,
+    /// X (formerly Twitter) webhook signatures
+    /// (`x-twitter-webhooks-signature`, HMAC-SHA256 over the raw body, base64,
+    /// `sha256=` prefix; no timestamp).
+    ///
+    /// Covers delivery POSTs from X's webhook APIs, which register and
+    /// secure the endpoint through the Challenge-Response Check (CRC) and
+    /// then sign every delivery with HMAC-SHA256 keyed by the app's
+    /// **consumer secret** (the API secret key, never the bearer or access
+    /// token). The header value is `sha256=` + a base64 encoding of the
+    /// digest over the exact raw body. The scheme signs no timestamp, so
+    /// `max_age` has no effect. The CRC `response_token` uses the same
+    /// primitive over the `crc_token` but is a response the caller computes
+    /// (out of scope: this crate verifies inbound deliveries only).
+    X,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -434,6 +449,7 @@ impl fmt::Display for Provider {
             Provider::WooCommerce => f.write_str("WooCommerce"),
             Provider::Calendly => f.write_str("Calendly"),
             Provider::Vercel => f.write_str("Vercel"),
+            Provider::X => f.write_str("X"),
             Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -553,6 +569,13 @@ impl core::str::FromStr for Provider {
             }
             n if n.eq_ignore_ascii_case("calendly") => Ok(Provider::Calendly),
             n if n.eq_ignore_ascii_case("vercel") => Ok(Provider::Vercel),
+            n if n.eq_ignore_ascii_case("x")
+                || n.eq_ignore_ascii_case("twitter")
+                || n.eq_ignore_ascii_case("x twitter")
+                || n.eq_ignore_ascii_case("x-twitter") =>
+            {
+                Ok(Provider::X)
+            }
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks")
                 || n.eq_ignore_ascii_case("standard-webhooks") =>
@@ -575,7 +598,7 @@ impl fmt::Display for ProviderParseError {
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `razorpay`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, \
+             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted); `custom` requires a `CustomScheme` and must be built directly",
@@ -651,6 +674,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::WooCommerce => vec![woocommerce::SIGNATURE_HEADER],
         Provider::Calendly => vec![calendly::SIGNATURE_HEADER],
         Provider::Vercel => vec![vercel::SIGNATURE_HEADER],
+        Provider::X => vec![x_twitter::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -787,6 +811,7 @@ pub(crate) fn verify_ref(
         Provider::WooCommerce => woocommerce::verify(headers, raw_body, secret, options),
         Provider::Calendly => calendly::verify(headers, raw_body, secret, options),
         Provider::Vercel => vercel::verify(headers, raw_body, secret, options),
+        Provider::X => x_twitter::verify(headers, raw_body, secret, options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, options),
         #[cfg(not(feature = "paypal"))]
@@ -1388,6 +1413,7 @@ mod tests {
         assert_eq!(Provider::WooCommerce.to_string(), "WooCommerce");
         assert_eq!(Provider::Calendly.to_string(), "Calendly");
         assert_eq!(Provider::Vercel.to_string(), "Vercel");
+        assert_eq!(Provider::X.to_string(), "X");
         assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1465,6 +1491,7 @@ mod tests {
             ("woocommerce", Provider::WooCommerce),
             ("calendly", Provider::Calendly),
             ("vercel", Provider::Vercel),
+            ("x", Provider::X),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1502,6 +1529,9 @@ mod tests {
             ("circle ci", Provider::CircleCi),
             ("circle-ci", Provider::CircleCi),
             ("standard-webhooks", Provider::StandardWebhooks),
+            ("twitter", Provider::X),
+            ("x twitter", Provider::X),
+            ("x-twitter", Provider::X),
             ("mailchimp", Provider::Mandrill),
             ("mailchimp transactional", Provider::Mandrill),
             ("mailchimp-transactional", Provider::Mandrill),
@@ -1646,6 +1676,7 @@ mod tests {
             (Provider::WooCommerce, &[woocommerce::SIGNATURE_HEADER]),
             (Provider::Calendly, &[calendly::SIGNATURE_HEADER]),
             (Provider::Vercel, &[vercel::SIGNATURE_HEADER]),
+            (Provider::X, &[x_twitter::SIGNATURE_HEADER]),
             (
                 Provider::Zoom,
                 &[zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
@@ -1759,7 +1790,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 44] {
+    fn provider_list() -> [Provider; 45] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1804,6 +1835,7 @@ mod tests {
             Provider::WooCommerce,
             Provider::Calendly,
             Provider::Vercel,
+            Provider::X,
             Provider::StandardWebhooks,
         ]
     }
