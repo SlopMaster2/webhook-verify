@@ -114,12 +114,12 @@ pub struct VerifyOptions {  // #[non_exhaustive]: configure via Default + the
     /// Clock used for "now", injectable for deterministic tests.
     pub clock: Option<Arc<dyn Clock>>,
     /// Full URL of the receiving endpoint, for URL-scoped schemes
-    /// (currently Square, Twilio, HubSpot, Mandrill). See §3.
+    /// (currently Square, Twilio, HubSpot, Contentful, Mandrill). See §3.
     pub request_url: Option<String>,
     /// HTTP request method (uppercase, e.g. `POST`), for schemes that sign
-    /// the method into their source string (currently HubSpot's v3 scheme).
-    /// Must match the method the provider actually sent for the delivery.
-    /// No effect on providers that do not sign the method. See §3.
+    /// the method into their source string (currently HubSpot's v3 scheme
+    /// and Contentful). Must match the method the provider actually sent for
+    /// the delivery. No effect on providers that do not sign the method. See §3.
     pub request_method: Option<String>,
     /// Parsed `application/x-www-form-urlencoded` fields, required by
     /// schemes that sign form fields rather than the raw body
@@ -625,8 +625,9 @@ reproduces byte-for-byte.
 - Algorithm: HMAC-SHA256, base64-encoded (standard alphabet, padded)
 - Key: the app's "App secret", used as its UTF-8 bytes verbatim
 - Caller-supplied context required: `VerifyOptions::request_method` **and**
-  `VerifyOptions::request_url` (this is the only scheme that signs the HTTP
-  method; the method must match what the provider actually sent). Missing or
+  `VerifyOptions::request_url` (one of the two schemes that sign the HTTP
+  method into their source string — Contentful's canonical string also leads
+  with it; the method must match what the provider actually sent). Missing or
   empty either fails closed with `MissingContext`. The URI must match the
   exact string HubSpot signed for the delivery; HubSpot documents that *when
   computing the signature* it decodes certain URL-encoded characters
