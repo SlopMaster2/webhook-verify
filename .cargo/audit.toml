@@ -38,7 +38,7 @@ ignore = [
     # crate's MSRV 1.85 (spec.md §6, AGENTS.md §6), and time is only pulled
     # in transitively by the actix-web adapter stack (dev-dependency and the
     # optional `actix` feature) — the core verification path never parses
-    # dates. Revist on the next MSRV bump or actix release where h2/time can
+    # dates. Revisit on the next MSRV bump or actix release where h2/time can
     # both move.
     "RUSTSEC-2026-0009",
 
