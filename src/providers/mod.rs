@@ -549,6 +549,11 @@ impl fmt::Display for Provider {
 /// [`Provider::StandardWebhooks`], `"hub spot"`/`"hub-spot"` ↔
 /// [`Provider::HubSpot`], etc. — the spellings operators actually write in
 /// config files.
+/// [`Provider::StandardWebhooks`] additionally accepts the brand names of the
+/// signers that serve it: `"svix"` and `"resend"` both parse to it. (Svix is
+/// the reference implementation whose scheme StandardWebhooks implements;
+/// Resend signs every delivery with the same `svix-signature` construction and
+/// Svix-form secret, per its official docs.)
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -655,7 +660,9 @@ impl core::str::FromStr for Provider {
             }
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks")
-                || n.eq_ignore_ascii_case("standard-webhooks") =>
+                || n.eq_ignore_ascii_case("standard-webhooks")
+                || n.eq_ignore_ascii_case("svix")
+                || n.eq_ignore_ascii_case("resend") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1630,6 +1637,8 @@ mod tests {
             ("circle ci", Provider::CircleCi),
             ("circle-ci", Provider::CircleCi),
             ("standard-webhooks", Provider::StandardWebhooks),
+            ("svix", Provider::StandardWebhooks),
+            ("resend", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),

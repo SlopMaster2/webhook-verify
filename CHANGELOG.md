@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"resend"` and `"svix"`** for
+  [`Provider::StandardWebhooks`], matching the brand names of two of its
+  biggest signers (Resend and Svix both deliver via the Standard Webhooks /
+  `svix-*` construction with a `whsec_`-shaped secret). Config files that
+  name the provider by its signer's brand — `provider: resend` /
+  `provider: svix` — now parse instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling; the original
+  `"standardwebhooks"` / `"standard webhooks"` spellings are unchanged.)
 - **New provider: `Contentful`** (webhooks with a configured signing secret).
   Verifies the hex HMAC-SHA256 in `x-contentful-signature`, reconstructed over
   Contentful's documented canonical string
