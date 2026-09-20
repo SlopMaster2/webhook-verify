@@ -121,11 +121,12 @@ pub(crate) fn verify(
         .ok_or(VerifyError::MissingHeader {
             header: SIGNATURE_HEADER,
         })?;
-    let signed_headers_value = headers
-        .get(SIGNED_HEADERS_HEADER)
-        .ok_or(VerifyError::MissingHeader {
-            header: SIGNED_HEADERS_HEADER,
-        })?;
+    let signed_headers_value =
+        headers
+            .get(SIGNED_HEADERS_HEADER)
+            .ok_or(VerifyError::MissingHeader {
+                header: SIGNED_HEADERS_HEADER,
+            })?;
     let timestamp_raw = headers
         .get(TIMESTAMP_HEADER)
         .ok_or(VerifyError::MissingHeader {
@@ -164,11 +165,7 @@ pub(crate) fn verify(
 
     let request_path = normalized_request_path(request_url);
     let mut canonical = Vec::with_capacity(
-        request_method.len()
-            + request_path.len()
-            + signed_headers_value.len()
-            + raw_body.len()
-            + 2,
+        request_method.len() + request_path.len() + signed_headers_value.len() + raw_body.len() + 2,
     );
     canonical.extend_from_slice(request_method.as_bytes());
     canonical.push(b'\n');
@@ -292,10 +289,12 @@ fn append_signed_headers_segment(
         // Presence of every listed name was already validated.
         match headers.get(name) {
             Some(value) => canonical.extend_from_slice(value.as_bytes()),
-            None => return Err(VerifyError::MalformedHeader {
-                header: SIGNED_HEADERS_HEADER,
-                reason: "lists a header that is not present in the request",
-            }),
+            None => {
+                return Err(VerifyError::MalformedHeader {
+                    header: SIGNED_HEADERS_HEADER,
+                    reason: "lists a header that is not present in the request",
+                });
+            }
         }
     }
     Ok(())
@@ -385,17 +384,20 @@ mod tests {
     /// The topic/type headers Contentful sends on a signed delivery.
     fn delivery_headers(signature: &str) -> Vec<(String, String)> {
         vec![
-            (
-                SIGNATURE_HEADER.to_string(),
-                signature.to_string(),
-            ),
+            (SIGNATURE_HEADER.to_string(), signature.to_string()),
             (
                 SIGNED_HEADERS_HEADER.to_string(),
                 "content-type,x-contentful-timestamp,x-contentful-topic".to_string(),
             ),
             (TIMESTAMP_HEADER.to_string(), TIMESTAMP_MS.to_string()),
-            ("X-Contentful-Topic".to_string(), "ContentManagement.Entry.publish".to_string()),
-            ("Content-Type".to_string(), "application/vnd.contentful.management.v1+json".to_string()),
+            (
+                "X-Contentful-Topic".to_string(),
+                "ContentManagement.Entry.publish".to_string(),
+            ),
+            (
+                "Content-Type".to_string(),
+                "application/vnd.contentful.management.v1+json".to_string(),
+            ),
         ]
     }
 
@@ -520,11 +522,20 @@ mod tests {
         let result = verify(
             crate::Provider::Contentful,
             &[
-                ("X-CONTENTFUL-SIGNATURE", "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129"),
-                ("X-CONTENTFUL-SIGNED-HEADERS", "Content-Type,X-Contentful-Timestamp,X-Contentful-Topic"),
+                (
+                    "X-CONTENTFUL-SIGNATURE",
+                    "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
+                ),
+                (
+                    "X-CONTENTFUL-SIGNED-HEADERS",
+                    "Content-Type,X-Contentful-Timestamp,X-Contentful-Topic",
+                ),
                 ("X-Contentful-Timestamp", TIMESTAMP_MS),
                 ("x-contentful-topic", "ContentManagement.Entry.publish"),
-                ("content-type", "application/vnd.contentful.management.v1+json"),
+                (
+                    "content-type",
+                    "application/vnd.contentful.management.v1+json",
+                ),
             ],
             BODY,
             &Secret::new(SECRET),
@@ -543,9 +554,7 @@ mod tests {
         assert_ne!(tampered, BODY);
         let result = verify(
             crate::Provider::Contentful,
-            &delivery_headers(
-                "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
-            ),
+            &delivery_headers("1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129"),
             tampered,
             &Secret::new(SECRET),
             clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300)))
@@ -571,9 +580,7 @@ mod tests {
     fn wrong_secret_fails() {
         let result = verify(
             crate::Provider::Contentful,
-            &delivery_headers(
-                "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
-            ),
+            &delivery_headers("1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129"),
             BODY,
             &Secret::new("a-different-secret-not-matching-anything"),
             clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300)))
@@ -730,9 +737,7 @@ mod tests {
     fn missing_request_method_fails_closed() {
         let result = verify(
             crate::Provider::Contentful,
-            &delivery_headers(
-                "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
-            ),
+            &delivery_headers("1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129"),
             BODY,
             &Secret::new(SECRET),
             VerifyOptions::default().with_request_url(URL),
@@ -747,9 +752,7 @@ mod tests {
         // An explicitly-empty method is treated the same as absent.
         let result = verify(
             crate::Provider::Contentful,
-            &delivery_headers(
-                "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
-            ),
+            &delivery_headers("1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129"),
             BODY,
             &Secret::new(SECRET),
             VerifyOptions::default()
@@ -768,9 +771,7 @@ mod tests {
     fn missing_request_url_fails_closed() {
         let result = verify(
             crate::Provider::Contentful,
-            &delivery_headers(
-                "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
-            ),
+            &delivery_headers("1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129"),
             BODY,
             &Secret::new(SECRET),
             VerifyOptions::default().with_request_method(METHOD),
@@ -784,9 +785,7 @@ mod tests {
 
         let result = verify(
             crate::Provider::Contentful,
-            &delivery_headers(
-                "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
-            ),
+            &delivery_headers("1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129"),
             BODY,
             &Secret::new(SECRET),
             VerifyOptions::default()
@@ -947,10 +946,7 @@ mod tests {
         assert_eq!(upper, Ok(()));
 
         // Empty signed-headers list.
-        let empty_list = verify_with_headers(&[(
-            SIGNED_HEADERS_HEADER,
-            String::new(),
-        )]);
+        let empty_list = verify_with_headers(&[(SIGNED_HEADERS_HEADER, String::new())]);
         assert_eq!(
             empty_list,
             Err(VerifyError::MalformedHeader {
@@ -960,12 +956,10 @@ mod tests {
         );
 
         // List containing an empty name (`.., ,..`).
-        let empty_name = verify_with_headers(&[
-            (
-                SIGNED_HEADERS_HEADER,
-                "content-type,,x-contentful-topic".to_string(),
-            ),
-        ]);
+        let empty_name = verify_with_headers(&[(
+            SIGNED_HEADERS_HEADER,
+            "content-type,,x-contentful-topic".to_string(),
+        )]);
         assert_eq!(
             empty_name,
             Err(VerifyError::MalformedHeader {
@@ -975,12 +969,10 @@ mod tests {
         );
 
         // One-off: a list with a signed name that IS present verifies.
-        let minimal = verify_with_headers(&[
-            (
-                SIGNED_HEADERS_HEADER,
-                "content-type,x-contentful-topic".to_string(),
-            ),
-        ]);
+        let minimal = verify_with_headers(&[(
+            SIGNED_HEADERS_HEADER,
+            "content-type,x-contentful-topic".to_string(),
+        )]);
         assert_eq!(minimal, Ok(()));
     }
 
@@ -1030,8 +1022,14 @@ mod tests {
         for (value, reason) in [
             ("", "header is empty"),
             ("not-a-number", "timestamp is not valid epoch milliseconds"),
-            ("-1753660800000", "timestamp is not valid epoch milliseconds"),
-            ("99999999999999999999999", "timestamp overflows epoch milliseconds"),
+            (
+                "-1753660800000",
+                "timestamp is not valid epoch milliseconds",
+            ),
+            (
+                "99999999999999999999999",
+                "timestamp overflows epoch milliseconds",
+            ),
         ] {
             let mut headers = delivery_headers(
                 "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
@@ -1065,9 +1063,7 @@ mod tests {
     fn empty_secret_fails_distinctly() {
         let result = verify(
             crate::Provider::Contentful,
-            &delivery_headers(
-                "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
-            ),
+            &delivery_headers("1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129"),
             BODY,
             &Secret::new(""),
             clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300)))
