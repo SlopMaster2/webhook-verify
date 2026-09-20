@@ -51,6 +51,7 @@ pub enum Provider {
     Shopify,
     Slack,
     Square,
+    Tally,
     Twilio,
     Twitch,
     Typeform,
