@@ -709,6 +709,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ProviderParseError` message now names the rebrand/signer aliases
+  `FromStr` accepts.** `"mailchimp"` (→ Mandrill) and `"svix"`/`"resend"`
+  (→ StandardWebhooks) were parseable but absent from the error message that
+  is meant to guide operators back to a parseable spelling, so a rejected
+  alias-typed spelling was not echoed back. The message's trailing note now
+  lists all three aliases (alongside the existing canonical and
+  multi-word/hyphenated spellings), and the display guard test pins them so
+  message/`FromStr` drift fails CI.
 - **Spec: `Provider` enum sketch in §2 missed the Fintoc, Ripple, and X
   variants.** The Fintoc (#110), Ripple (#111), and X (formerly Twitter,
   #109) providers all shipped with their `spec.md` §3 rows and CHANGELOG
