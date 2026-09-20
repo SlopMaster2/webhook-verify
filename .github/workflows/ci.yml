@@ -89,9 +89,10 @@ jobs:
       - uses: actions/checkout@v4
       # spec.md §6 / §4.3: the `Secret` type's redacted Debug/Display are the
       # primary defense; this grep is the backstop. src/ must contain no
-      # printing or logging macros at all — if you genuinely need one, it goes
-      # behind #[cfg(test)] in test modules only, so extend the allowlist here
-      # deliberately rather than weakening src/.
+      # printing or logging macros at all — the grep covers all of `src/`,
+      # including `#[cfg(test)]` test modules, and there is deliberately no
+      # allowlist (spec.md §6: the only acceptable releases are the
+      # Secret/VerifyError/VerifyOptions redaction impls themselves).
       - name: Fail on printing/logging macros in src/
         run: |
           if grep -RInE '(println|print|eprintln|eprint|dbg)!|(log|tracing)::' src/; then

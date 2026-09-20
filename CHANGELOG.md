@@ -1031,6 +1031,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   style. The job now runs `cargo fmt --manifest-path fuzz/Cargo.toml -- --check`
   after the root check (rustfmt needs no nightly/libfuzzer build), and the
   target is reformatted. No behavior, seed bytes, or crate code affected.
+- `secret-leak-grep` CI job comment now matches the actual gate: it falsely
+  implied a fixture allowlist exists ("extend the allowlist here
+  deliberately") where spec.md §6 states there is *no* allowlist and the grep
+  covers all of `src/`, including `#[cfg(test)]` test modules. Comment-only
+  change; the grep pattern and the jobs it gates are unchanged.
+- `.cargo/audit.toml`: fixed "Revist" → "Revisit" in the `time` advisory's
+  re-evaluation-trigger note. Comment-only change.
 
 ## [0.1.0] - Unreleased
 
