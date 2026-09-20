@@ -423,6 +423,15 @@ the SDK and reference examples disambiguate its details.
   whichever order) it names is what was signed. Every name it lists must be
   present in the request; a list referencing an absent header fails closed as
   `MalformedHeader`.
+- Ambiguity scan carve-out: because the signed-header list is self-describing,
+  the framework adapters' duplicate-ambiguity scan (§4.4) statically covers
+  only the three fixed headers (`x-contentful-signature`,
+  `x-contentful-signed-headers`, `x-contentful-timestamp`). Additional headers
+  the list names at delivery time are read first-match and folded into the
+  canonical string; duplicate-conflicting values in *those* are not detected
+  by the adapter — the same carve-out granted to `CustomScheme`'s closure-read
+  headers. Verification always uses the first value, matching what
+  `http`/`actix` handlers read via `.get()`.
 - Path encoding: the docs' pseudo-code url-encodes only the *query* portion
   (`query = urlEncode(query)`), with the pathname used as its UTF-8 bytes.
   The crate implements exactly that: the query's percent-encoding uses
@@ -2180,10 +2189,21 @@ ambiguity).
    `tower` and `actix` features) check the raw header map against the
    provider's scheme-relevant signature headers before verifying; identical
    repeats are not ambiguous and verify normally. For built-in providers the
-   scan covers every header the scheme declares; for `Custom` providers the
-   scan covers only `signature_header` and `timestamp_header` — if the
-   user's `signed_string` closure reads additional headers, duplicates in
-   those are **not** detected (see `CustomScheme` docs).
+   scan covers every header the scheme declares — with one exception:
+   Contentful's signed-header list (`x-contentful-signed-headers`) is
+   **self-describing** and arrives with the request, so the additional
+   headers it names at delivery time (e.g. `content-type`,
+   `x-contentful-topic`) cannot be known statically and are not
+   ambiguity-scanned. Duplicate-conflicting values in those
+   dynamically-named headers are folded into the signed string first-match
+   and are **not** detected by the adapter — the same carve-out `Custom`
+   schemes below get, and the reason the Contentful row (§3) documents it
+   (Contentful's signer always emits the list, and an attacker who can forge
+   a fresh signature over the first value already controls the request
+   stream). For `Custom` providers the scan covers only `signature_header` and
+   `timestamp_header` — if the user's `signed_string` closure reads
+   additional headers, duplicates in those are **not** detected (see
+   `CustomScheme` docs).
 5. **No panics on attacker-controlled input.** Every parsing path
    (`base64::decode`, `hex::decode`, header splitting, integer parsing of
    timestamps) must return `Result`, not `unwrap()`/`expect()`, and this is

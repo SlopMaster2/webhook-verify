@@ -709,6 +709,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Spec: Contentful's self-describing signed-header list is documented as
+  outside the adapters' duplicate-ambiguity scan.** The `spec.md` §4.4 rule
+  claimed built-in providers' schemes are fully ambiguity-scanned, but
+  Contentful's `x-contentful-signed-headers` list names additional signed
+  headers at delivery time that cannot be known statically, so the tower/actix
+  scan covers only the three fixed headers. The carve-out (identical to the
+  one already documented for `CustomScheme`'s closure-read headers) is now
+  stated in `spec.md` §4.4 and the Contentful row, and in the provider module
+  docs. Doc-only change; the adapter scan was always correct — verification
+  reads these headers first-match, matching handlers' `.get()`.
 - **`ProviderParseError` message now names the rebrand/signer aliases
   `FromStr` accepts.** `"mailchimp"` (→ Mandrill) and `"svix"`/`"resend"`
   (→ StandardWebhooks) were parseable but absent from the error message that

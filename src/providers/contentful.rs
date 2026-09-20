@@ -53,6 +53,19 @@
 //! request; a list referencing an absent header fails closed
 //! (`MalformedHeader` on `x-contentful-signed-headers`).
 //!
+//! # Ambiguity-scan carve-out
+//!
+//! Because the signed-header list is self-describing, the framework adapters'
+//! duplicate-ambiguity scan (`spec.md` §4.4) statically covers only the three
+//! fixed headers [`SIGNATURE_HEADER`], [`SIGNED_HEADERS_HEADER`], and
+//! [`TIMESTAMP_HEADER`]. Additional headers the list names at delivery time
+//! (Contentful's own signer emits `content-type` and `x-contentful-topic`) are
+//! read first-match and folded into the canonical string; duplicate-conflicting
+//! values in *those* are not detected by the adapter — the same carve-out
+//! granted to the headers a [`crate::CustomScheme`]'s `signed_string` closure
+//! reads. Verification always uses the first value, which is what
+//! `http`/`actix` handlers read via `.get()`.
+//!
 //! # Replay protection
 //!
 //! Like HubSpot, Contentful delivers the signing timestamp in **epoch
