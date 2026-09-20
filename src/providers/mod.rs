@@ -685,7 +685,8 @@ impl fmt::Display for ProviderParseError {
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
-             `mailchimp-transactional` are also accepted); `custom` requires a `CustomScheme` and must be built directly",
+             `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
+             `svix`, and `resend` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1698,6 +1699,16 @@ mod tests {
             assert!(
                 message.contains(&name),
                 "error message should list `{name}` so operators can recover"
+            );
+        }
+        // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
+        // ↔ Mandrill; `svix`/`resend` ↔ StandardWebhooks); the message names
+        // them too so an operator who typed a rejected alias sees it echoed
+        // back, instead of only the canonical spellings.
+        for alias in ["mailchimp", "svix", "resend"] {
+            assert!(
+                message.contains(&format!("`{alias}`")),
+                "error message should list the `{alias}` alias so operators can recover"
             );
         }
     }
