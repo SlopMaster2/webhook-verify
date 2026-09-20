@@ -397,6 +397,25 @@ mod tests {
     }
 
     #[test]
+    fn max_age_has_no_effect_for_mandrill() {
+        // Mailchimp Transactional signs no timestamp: even a zero-second
+        // tolerance must not reject a validly signed delivery. Pins the
+        // documented behavior.
+        let options = VerifyOptions::default()
+            .with_request_url(CHECK_URL)
+            .with_form_params(CHECK_PARAMS.iter().copied())
+            .with_max_age(Some(std::time::Duration::ZERO));
+        let result = verify(
+            crate::Provider::Mandrill,
+            &mandrill_headers(CHECK_SIGNATURE),
+            b"unused: not a raw-body scheme",
+            &Secret::new(CHECK_KEY),
+            options,
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
     fn missing_context_fails_closed() {
         let headers = mandrill_headers(CHECK_SIGNATURE);
 
