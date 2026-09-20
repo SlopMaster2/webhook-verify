@@ -159,11 +159,20 @@ impl Default for VerifyOptions {
 impl core::str::FromStr for Provider {
     type Err = ProviderParseError;
     // Case-insensitive match on the canonical Display name of each variant
-    // ("github", "GitHub", "GITHUB", ...), plus the space-separated
-    // human-readable forms for the multi-word-name variants
-    // ("lemon squeezy" → LemonSqueezy, "standard webhooks" →
-    // StandardWebhooks). `custom` is rejected: a
-    // CustomScheme requires configuration and must be built directly.
+    // ("github", "GitHub", "GITHUB", ...), plus the space-separated and
+    // hyphenated human-readable forms for the multi-word-name variants
+    // ("lemon squeezy"/"lemon-squeezy" → LemonSqueezy,
+    // "standard webhooks"/"standard-webhooks" → StandardWebhooks,
+    // "hub spot"/"hub-spot" → HubSpot, "pager duty"/"pager-duty" →
+    // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
+    // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
+    // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
+    // takes "svix"/"resend" (adopters that sign deliveries with the same
+    // scheme), Mandrill takes "mailchimp"/"mailchimp transactional"/
+    // "mailchimp-transactional" (its current brand name), and X takes
+    // "twitter"/"x twitter"/"x-twitter" (its pre-rebrand name, per §3).
+    // `custom` is rejected: a CustomScheme requires configuration and
+    // must be built directly.
 }
 
 pub trait HeaderMap {
