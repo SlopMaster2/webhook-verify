@@ -1,0 +1,7 @@
+x-contentful-signature:1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129
+x-contentful-signed-headers:content-type,x-contentful-timestamp,x-contentful-topic
+x-contentful-timestamp:1753660800000
+Content-Type:application/vnd.contentful.management.v1+json
+X-Contentful-Topic:ContentManagement.Entry.publish
+
+{"sys":{"id":"2PTzng4EfC2gU2qkqc2kUY","type":"Entry","contentType":{"sys":{"type":"Link","linkType":"ContentType","id":"landingPage"}}},"fields":{"title":{"en-US":"Q3 launch"}},"metadata":{"tags":[]}}

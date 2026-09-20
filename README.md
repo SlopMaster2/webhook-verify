@@ -88,6 +88,7 @@ hand-copied signing-string logic to get wrong.
 | Stripe | HMAC-SHA256 over `timestamp.body`, tolerance window | ✅ |
 | GitHub | HMAC-SHA256, `X-Hub-Signature-256` | ✅ |
 | Bitbucket | HMAC-SHA256, `sha256=` prefix, `X-Hub-Signature` | ✅ |
+| Contentful | Hex HMAC-SHA256 of `[method, path, signedHeaders, body].join('\n')`, `x-contentful-signature` (signed headers self-described by `x-contentful-signed-headers`) + `x-contentful-timestamp` (epoch ms) replay window (needs `VerifyOptions::request_method` + `request_url`; only the query portion is URL-encoded, per Contentful's docs) | ✅ |
 | Box | HMAC-SHA256 over `{raw_body}{delivery_timestamp}`, base64, `BOX-SIGNATURE-PRIMARY`/`BOX-SIGNATURE-SECONDARY` (rotation-safe — either key matches) + RFC 3339 timestamp replay window | ✅ |
 | Intercom | HMAC-SHA1, `sha1=` prefix, `X-Hub-Signature` (raw body, keyed by the app's `client_secret`; no timestamp) | ✅ |
 | Expo (EAS Build/Submit webhooks) | HMAC-SHA1, `sha1=` prefix, `expo-signature` (raw body, keyed by the webhook signing secret; no timestamp) | ✅ |

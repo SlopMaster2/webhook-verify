@@ -12,6 +12,7 @@ mod calendly;
 mod circleci;
 mod cloudflare;
 mod coinbase;
+mod contentful;
 mod custom;
 mod discord;
 mod docusign;
@@ -98,6 +99,17 @@ pub enum Provider {
     /// Bitbucket Cloud (`X-Hub-Signature`, HMAC-SHA256 over the raw body,
     /// `sha256=` prefix; no timestamp).
     Bitbucket,
+    /// Contentful (`x-contentful-signature`, hex HMAC-SHA256 of
+    /// `[method, requestPath, signedHeaders, body].join('\n')`, where the
+    /// signed headers are named by the self-describing
+    /// `x-contentful-signed-headers` list; `x-contentful-timestamp` carries an
+    /// epoch-**milliseconds** signing instant with a tolerance window).
+    ///
+    /// Callers pass the delivery's method and URL via
+    /// [`VerifyOptions::request_method`] / [`VerifyOptions::request_url`] —
+    /// without them verification fails closed with [`VerifyError::MissingContext`]
+    /// (see the Contentful module docs).
+    Contentful,
     /// Box (`BOX-SIGNATURE-PRIMARY` / `BOX-SIGNATURE-SECONDARY`,
     /// base64-encoded HMAC-SHA256 over `{raw_body}{BOX-DELIVERY-TIMESTAMP}`).
     ///
@@ -462,6 +474,7 @@ impl fmt::Display for Provider {
             Provider::Stripe => f.write_str("Stripe"),
             Provider::GitHub => f.write_str("GitHub"),
             Provider::Bitbucket => f.write_str("Bitbucket"),
+            Provider::Contentful => f.write_str("Contentful"),
             Provider::Box => f.write_str("Box"),
             Provider::Intercom => f.write_str("Intercom"),
             Provider::Expo => f.write_str("Expo"),
@@ -551,6 +564,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("stripe") => Ok(Provider::Stripe),
             n if n.eq_ignore_ascii_case("github") => Ok(Provider::GitHub),
             n if n.eq_ignore_ascii_case("bitbucket") => Ok(Provider::Bitbucket),
+            n if n.eq_ignore_ascii_case("contentful") => Ok(Provider::Contentful),
             n if n.eq_ignore_ascii_case("box") => Ok(Provider::Box),
             n if n.eq_ignore_ascii_case("intercom") => Ok(Provider::Intercom),
             n if n.eq_ignore_ascii_case("expo") => Ok(Provider::Expo),
@@ -658,7 +672,7 @@ pub struct ProviderParseError;
 impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
-            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
+            "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `contentful`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `tally`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `nylas`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `x` (or `twitter`), \
@@ -689,6 +703,11 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Stripe => vec![stripe::SIGNATURE_HEADER],
         Provider::GitHub => vec![github::SIGNATURE_HEADER],
         Provider::Bitbucket => vec![bitbucket::SIGNATURE_HEADER],
+        Provider::Contentful => vec![
+            contentful::SIGNATURE_HEADER,
+            contentful::SIGNED_HEADERS_HEADER,
+            contentful::TIMESTAMP_HEADER,
+        ],
         Provider::Box => vec![
             box_webhooks::PRIMARY_SIGNATURE_HEADER,
             box_webhooks::SECONDARY_SIGNATURE_HEADER,
@@ -844,6 +863,7 @@ pub(crate) fn verify_ref(
         Provider::Discord => discord::verify(headers, raw_body, secret, options),
         Provider::GitHub => github::verify(headers, raw_body, secret, options),
         Provider::Bitbucket => bitbucket::verify(headers, raw_body, secret, options),
+        Provider::Contentful => contentful::verify(headers, raw_body, secret, options),
         Provider::Box => box_webhooks::verify(headers, raw_body, secret, options),
         Provider::Intercom => intercom::verify(headers, raw_body, secret, options),
         Provider::Expo => expo::verify(headers, raw_body, secret, options),
@@ -1690,6 +1710,14 @@ mod tests {
             (Provider::GitHub, &[github::SIGNATURE_HEADER]),
             (Provider::Bitbucket, &[bitbucket::SIGNATURE_HEADER]),
             (
+                Provider::Contentful,
+                &[
+                    contentful::SIGNATURE_HEADER,
+                    contentful::SIGNED_HEADERS_HEADER,
+                    contentful::TIMESTAMP_HEADER,
+                ],
+            ),
+            (
                 Provider::Box,
                 &[
                     box_webhooks::PRIMARY_SIGNATURE_HEADER,
@@ -1879,11 +1907,12 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 50] {
+    fn provider_list() -> [Provider; 51] {
         [
             Provider::Stripe,
             Provider::GitHub,
             Provider::Bitbucket,
+            Provider::Contentful,
             Provider::Box,
             Provider::Intercom,
             Provider::Expo,
