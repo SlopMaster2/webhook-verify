@@ -118,8 +118,10 @@ pub struct VerifyOptions {
     /// signature incorporates it (currently Square, whose scheme signs the
     /// notification URL followed by the raw body; Twilio, which signs the full
     /// request URL; HubSpot's v3 scheme, which signs the request method + full
-    /// request URI + body + timestamp; and Mailchimp Transactional (Mandrill),
-    /// which signs the webhook URL followed by the sorted form params). The
+    /// request URI + body + timestamp; Contentful, which signs the request path
+    /// derived from this URL as the second element of its canonical string; and
+    /// Mailchimp Transactional (Mandrill), which signs the webhook URL followed
+    /// by the sorted form params). The
     /// value must match the URL configured with the provider **exactly** — a
     /// differing trailing slash or scheme makes every signature fail.
     /// Providers whose scheme does not sign the URL document that this option
@@ -138,7 +140,8 @@ pub struct VerifyOptions {
     pub request_url: Option<String>,
     /// HTTP request method (uppercase, e.g. `POST`), required by providers
     /// whose scheme signs it (currently HubSpot's v3 scheme, which signs
-    /// `{method}{uri}{raw_body}{timestamp}`). Must match the method HubSpot
+    /// `{method}{uri}{raw_body}{timestamp}`, and Contentful, whose canonical
+    /// string leads with the method). Must match the method the provider
     /// actually sent for the delivery. Providers whose scheme does not sign
     /// the method document that this option has no effect on them.
     pub request_method: Option<String>,
@@ -203,7 +206,8 @@ impl VerifyOptions {
     }
 
     /// Sets [`VerifyOptions::request_method`], the HTTP request method
-    /// (uppercase) for schemes that sign it (currently HubSpot's v3 scheme).
+    /// (uppercase) for schemes that sign it (currently HubSpot's v3 scheme
+    /// and Contentful).
     pub fn with_request_method(mut self, method: impl Into<String>) -> Self {
         self.request_method = Some(method.into());
         self
