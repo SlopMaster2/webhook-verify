@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: `Contentful`** (webhooks with a configured signing secret).
+  Verifies the hex HMAC-SHA256 in `x-contentful-signature`, reconstructed over
+  Contentful's documented canonical string
+  `[method, requestPath, signedHeaders, body].join('\n')` where the signed
+  header names/order come from the self-describing `x-contentful-signed-headers`
+  list, with replay protection over the epoch-milliseconds
+  `x-contentful-timestamp`. Requires `VerifyOptions::request_method` and
+  `request_url`. Scheme and test-vector provenance linked to
+  <https://www.contentful.com/developers/docs/webhooks/request-verification/>,
+  `@contentful/node-apps-toolkit`, and
+  contentful-labs/request-verification-examples in `spec.md` §3.
+
 - **`Provider::from_str` now accepts the hyphenated and space-separated
   multi-word spellings** operators write in config files and the current
   brand name of the formerly-Mandrill provider:

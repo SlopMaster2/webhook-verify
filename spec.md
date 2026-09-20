@@ -40,6 +40,7 @@ pub enum Provider {
     Stripe,
     GitHub,
     Bitbucket,
+    Contentful,
     Box,
     Intercom,
     Expo,
@@ -387,6 +388,63 @@ validation" worked example) and the webhooks-security overview
   signature that the implementation reproduces byte-for-byte. Boundary-vector
   bodies are locally constructed over the same documented recipe, cross-checked
   with `openssl dgst`.
+
+### Contentful
+
+Source: <https://www.contentful.com/developers/docs/webhooks/request-verification/>
+("Webhook request verification", the canonical-string pseudo-code and the
+"Can be used to ensure a TTL" guidance for the timestamp), the canonicalizing
+helpers in Contentful's official reference SDK
+(<https://github.com/contentful/node-apps-toolkit>,
+`src/requests/sign-request.ts` and `verify-request.ts`), and Contentful's
+official request-verification examples
+(<https://github.com/contentful-labs/request-verification-examples>,
+`rust/src/main.rs`). The docs page's pseudo-code is the normative contract;
+the SDK and reference examples disambiguate its details.
+
+- Headers: `x-contentful-signature` (`<hex_hmac>`), `x-contentful-signed-headers`
+  (comma-separated list of the header names included in the signature),
+  `x-contentful-timestamp` (unix epoch **milliseconds**). All three are present
+  on every signed delivery; a space without a configured webhook signing secret
+  sends none, so `verify()` reports `MissingHeader`.
+- Signed string: `[method, requestPath, headers, requestBody].join('\n')`.
+  `headers` is, for each name in `x-contentful-signed-headers` in list order,
+  `{lowercase_name}:{value_as_sent}`, joined by `;`. The list is
+  **self-describing** — it arrives with the request, and whatever (and
+  whichever order) it names is what was signed. Every name it lists must be
+  present in the request; a list referencing an absent header fails closed as
+  `MalformedHeader`.
+- Path encoding: the docs' pseudo-code url-encodes only the *query* portion
+  (`query = urlEncode(query)`), with the pathname used as its UTF-8 bytes.
+  The crate implements exactly that: the query's percent-encoding uses
+  JavaScript's `encodeURIComponent` unescaped set (`A-Z a-z 0-9 - _ . ! ~ * '
+  ( )`), each other byte as `%XX` uppercase, applied exactly once. The
+  scheme/`userinfo`/host of a full `request_url` never enter the signed string;
+  a bare path (`/webhooks/...`) is used verbatim. `#fragment` is dropped.
+  (Deliberately *not* replicated: the reference SDK's double-encode corner
+  when the caller passes an already percent-encoded query.)
+- Algorithm: HMAC-SHA256, hex-encoded (lowercase). Key: the space's
+  64-character webhook signing secret, used as its UTF-8 bytes verbatim.
+  Documented secret class: `^[0-9a-zA-Z+/=_-]+$`, 64 characters.
+- Context: `request_method` and `request_url` are required
+  (`VerifyOptions`); omitting either fails closed as `MissingContext` — the
+  method and request path are the first two elements of the canonical string.
+- Replay protection: `x-contentful-timestamp`, epoch **milliseconds**, is
+  recency-checked through the shared symmetric `max_age` window with the
+  sub-second remainder dropped (`millis / 1000`, as the SDK's integer division
+  does). Contentful's own `verifyRequest` SDK defaults to a 30s TTL; the crate
+  applies the shared default 300s window unless `max_age` is tightened.
+  Contentful's signer includes the timestamp among the signed headers, making
+  that window HMAC-covered; if a delivery's list omits the timestamp header
+  the window is best-effort rather than cryptographic (same documented caveat
+  as `CustomScheme`), and the timestamp is still recency-checked.
+- Test-vector provenance: Contentful publishes no frozen numeric signature
+  example. The vectors in the provider tests are locally constructed over the
+  documented recipe above, produced by an independent implementation (Python
+  `hmac` reimplementing the docs' pseudo-code and the SDK's canonical
+  construction) — see the module docs. The canonical string shapes in the
+  reference examples (`rust/src/main.rs`) were reproduced first to pin the
+  recipe.
 
 ### Box
 

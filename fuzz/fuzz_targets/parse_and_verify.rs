@@ -23,6 +23,13 @@
 //! - `bitbucket-hub-signature` — Bitbucket Cloud's documented worked example
 //!   (support.atlassian.com), reaching the `X-Hub-Signature` `sha256=` prefix,
 //!   hex decode, 32-byte gate, and constant-time HMAC comparison.
+//! - `contentful-signed-delivery` — Contentful's three-header signed delivery
+//!   shape (`x-contentful-signature` hex HMAC over
+//!   `[method, path, signedHeaders, body].join('\n')`, the self-describing
+//!   `x-contentful-signed-headers` list, and the epoch-ms
+//!   `x-contentful-timestamp`), reaching the signed-list parse, the
+//!   canonical-string construction, hex decode, the 32-byte gate, and the
+//!   epoch-ms replay path.
 //! - `box-two-signature-delivery` — Box's two-signature delivery shape
 //!   (`BOX-SIGNATURE-PRIMARY`/`BOX-SIGNATURE-SECONDARY` bare base64,
 //!   `BOX-DELIVERY-TIMESTAMP` in the `-07:00`-offset RFC 3339 spelling, plus
@@ -215,6 +222,13 @@ const IMPLEMENTED: &[Provider] = &[
     // and 32-byte gate, and a well-formed-shaped attempt below reaches HMAC
     // comparison.
     Provider::Bitbucket,
+    // Contentful needs the method + URL context and three self-describing
+    // signature headers (hex signature, signed-headers list, epoch-ms
+    // timestamp) to reach its canonical-string construction; arbitrary header
+    // bytes exercise its list parse, MissingContext fail-closed paths, and
+    // the path percent-encoding, and a well-formed-shaped attempt below
+    // reaches hex decode, the 32-byte gate, and HMAC comparison.
+    Provider::Contentful,
     // Box needs four headers (two base64 signature values + RFC 3339 delivery
     // timestamp, with optional version/algorithm metadata) to reach its
     // signature path; a well-formed-shaped attempt below reaches its RFC 3339
@@ -781,6 +795,41 @@ fuzz_target!(|data: &[u8]| {
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,
+    );
+
+    // Contentful: a well-formed-shaped three-header delivery (valid bare-hex
+    // signature, a signed-headers list whose names the request actually
+    // carries, epoch-ms timestamp) with method+URL context lets arbitrary body
+    // bytes reach the signed-list parse, the canonical-string construction
+    // (including the query percent-encoding), hex decode, the 32-byte length
+    // gate, and HMAC comparison; without it the loop above mostly fails
+    // earlier on malformed/missing list entries or context.
+    let contentful_options = VerifyOptions::default()
+        .with_request_method("POST")
+        .with_request_url("https://example.com/webhook");
+    attempt(
+        Provider::Contentful,
+        &[
+            (
+                "x-contentful-signature".to_string(),
+                "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            ),
+            (
+                "x-contentful-signed-headers".to_string(),
+                "content-type,x-contentful-timestamp".to_string(),
+            ),
+            (
+                "x-contentful-timestamp".to_string(),
+                "1700000000000".to_string(),
+            ),
+            (
+                "content-type".to_string(),
+                "application/vnd.contentful.management.v1+json".to_string(),
+            ),
+        ],
+        body,
+        WELL_FORMED_SECRET,
+        &contentful_options,
     );
 
     // Box: a well-formed-shaped three-header delivery (base64 signature plus

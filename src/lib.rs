@@ -55,6 +55,7 @@
 //! | Stripe | HMAC-SHA256 over `timestamp.body`, tolerance window |
 //! | GitHub | HMAC-SHA256, `X-Hub-Signature-256` |
 //! | Bitbucket | HMAC-SHA256, `sha256=` prefix, `X-Hub-Signature` |
+//! | Contentful | hex HMAC-SHA256 of `[method, path, signedHeaders, body].join('\n')`, `x-contentful-signature` (headers and order self-described by `x-contentful-signed-headers`) + `x-contentful-timestamp` (epoch ms) replay window |
 //! | Box | HMAC-SHA256 over `{raw_body}{delivery_timestamp}`, base64, `BOX-SIGNATURE-PRIMARY`/`BOX-SIGNATURE-SECONDARY` (rotation-safe) + RFC 3339 timestamp tolerance window |
 //! | Intercom | HMAC-SHA1, `sha1=` prefix, `X-Hub-Signature` |
 //! | Expo (EAS) | HMAC-SHA1, `sha1=` prefix, `expo-signature` |
