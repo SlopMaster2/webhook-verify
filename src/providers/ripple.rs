@@ -594,9 +594,7 @@ mod tests {
             );
             assert_eq!(
                 result,
-                Err(VerifyError::InvalidSecret {
-                    reason: reason.into()
-                }),
+                Err(VerifyError::InvalidSecret { reason }),
                 "secret: {secret:?}"
             );
         }
@@ -613,7 +611,7 @@ mod tests {
         assert_eq!(
             result,
             Err(VerifyError::InvalidSecret {
-                reason: "verification key is empty".into()
+                reason: "verification key is empty"
             })
         );
     }

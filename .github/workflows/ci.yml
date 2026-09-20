@@ -61,7 +61,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Stable-only on purpose: lint sets differ between toolchains, and the
       # bar this repo holds itself to (AGENTS.md §6) is defined against stable.
-      - run: cargo clippy --all-features -- -D warnings
+      # --all-targets: without it clippy lints only lib+bins and test-only
+      # modules escape the gate (the class that shipped useless `&str` `.into()`
+      # conversions in ripple.rs's tests).
+      - run: cargo clippy --all-features --all-targets -- -D warnings
 
   fmt:
     name: format
