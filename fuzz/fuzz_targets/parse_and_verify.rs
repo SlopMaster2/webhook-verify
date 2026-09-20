@@ -142,6 +142,9 @@
 //! - `woocommerce-base64-signature` — WooCommerce's `X-WC-Webhook-Signature`
 //!   base64 HMAC-SHA256 signature over the raw body (no prefix, no timestamp),
 //!   reaching base64 decode, the 32-byte gate, and HMAC comparison.
+//! - `tally-base64-signature` — Tally's `Tally-Signature` base64 HMAC-SHA256
+//!   signature over the raw body (no prefix, no timestamp), reaching base64
+//!   decode, the 32-byte gate, and HMAC comparison.
 //! - `calendly-t-v1-signature` — Calendly's combined `t=...,v1=...`
 //!   `Calendly-Webhook-Signature` header, reaching the comma-split, timestamp
 //!   parse, hex decode, 32-byte gate, and HMAC comparison over `{t}.{body}`.
@@ -348,6 +351,11 @@ const IMPLEMENTED: &[Provider] = &[
     // Square needs VerifyOptions::request_url to get past its context check
     // and into the signature path.
     Provider::Square,
+    // Tally is a single-header raw-body HMAC (bare base64, no prefix, no
+    // timestamp, verbatim string key); arbitrary header bytes exercise its
+    // base64-decode and 32-byte gate, and a well-formed-shaped attempt below
+    // reaches HMAC comparison.
+    Provider::Tally,
     Provider::StandardWebhooks,
     // Discord's secret is a hex public key; the arbitrary-secret loop below
     // exercises its InvalidSecret decoding paths, and a dedicated valid-key
@@ -1169,6 +1177,20 @@ fuzz_target!(|data: &[u8]| {
         Provider::WooCommerce,
         &[(
             "X-WC-Webhook-Signature".to_string(),
+            "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Tally: a well-formed-shaped `Tally-Signature` (valid base64 sig, no
+    // prefix, no timestamp) lets arbitrary body bytes reach the 32-byte length
+    // gate and HMAC comparison.
+    attempt(
+        Provider::Tally,
+        &[(
+            "Tally-Signature".to_string(),
             "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
         )],
         body,

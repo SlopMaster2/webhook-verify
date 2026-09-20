@@ -623,6 +623,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and
   <https://developer.nylas.com/docs/cookbook/use-cases/build/verify-webhook-signatures/>.
 
+- **New provider: Tally** (`Provider::Tally`): base64 HMAC-SHA256 over the
+  exact request body, keyed by the per-webhook signing secret as its UTF-8
+  bytes and delivered in the `Tally-Signature` header — a bare base64 digest
+  (standard alphabet with padding), no `sha256=` prefix and no timestamp (the
+  same shape as Shopify, Xero, and WooCommerce). The signing secret is
+  optional: when none is configured, Tally sends unsigned requests, so this
+  variant only verifies the signed case (an absent header fails closed with
+  `MissingHeader`). Tally's official example hashes `JSON.stringify(payload)`
+  after the body has already been parsed, a re-serialization round-trip that
+  reproduces the wire bytes only when the parser preserves key order and
+  whitespace; the crate hashes `raw_body` verbatim (spec §4), which is the
+  signer's actual wire bytes. No timestamp is signed, so `max_age` has no
+  effect; Tally retries failed deliveries on a back-off schedule and
+  recommends deduplicating on the payload's `eventId`. Tally's docs describe
+  the construction and publish an example event but no byte-exact signature
+  (the signing secret is endpoint-specific and shown only once), so the
+  vectors are locally constructed over exactly the documented recipe — the
+  primary vector's body mirrors Tally's published example event — cross-checked
+  with OpenSSL and Python's `hmac`. Source:
+  <https://tally.so/help/webhooks> ("Add a signing secret"). `Provider::from_str`
+  also accepts `"tally"`.
+
 ### Changed
 
 - **Lint: `missing_debug_implementations`** — all public types are now
