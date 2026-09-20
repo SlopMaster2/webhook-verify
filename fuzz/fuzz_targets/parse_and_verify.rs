@@ -818,7 +818,10 @@ fuzz_target!(|data: &[u8]| {
                 "x-contentful-signed-headers".to_string(),
                 "content-type,x-contentful-timestamp".to_string(),
             ),
-            ("x-contentful-timestamp".to_string(), "1700000000000".to_string()),
+            (
+                "x-contentful-timestamp".to_string(),
+                "1700000000000".to_string(),
+            ),
             (
                 "content-type".to_string(),
                 "application/vnd.contentful.management.v1+json".to_string(),
