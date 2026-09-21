@@ -99,7 +99,7 @@ for CI to catch you — apply them while writing the diff:
    categories present, even if some feel repetitive — they cover distinct
    failure modes.
 5. Update the provider table in `README.md`.
-6. Run `cargo test --all-features`, `cargo clippy --all-features -- -D warnings`,
+6. Run `cargo test --all-features`, `cargo clippy --all-features --all-targets -- -D warnings`,
    `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps`,
    `cargo test --no-default-features --features sendgrid,paypal`, and
    `cargo test --no-default-features --features http` (spec §6: the
@@ -128,7 +128,7 @@ shouldn't verify does" report as security-relevant until proven otherwise:
 - [ ] `README.md` provider table updated if the provider list changed
 - [ ] All five test categories present for any new/changed provider
       (official vector, negative, tamper, replay, malformed-header)
-- [ ] `cargo test --all-features`, `cargo clippy --all-features -- -D warnings`,
+- [ ] `cargo test --all-features`, `cargo clippy --all-features --all-targets -- -D warnings`,
       `cargo test --no-default-features --features sendgrid,paypal`, and
       `cargo test --no-default-features --features http` pass locally
 - [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps` passes

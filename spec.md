@@ -2262,7 +2262,10 @@ A provider implementation is not mergeable until it has:
 ## 6. CI requirements
 
 - `cargo test --all-features` on stable, MSRV, and beta.
-- `cargo clippy --all-features -- -D warnings`.
+- `cargo clippy --all-features --all-targets -- -D warnings` — the
+  `--all-targets` flag holds test, bench, and example modules to the same
+  bar as the library itself (test-only code otherwise escapes the gate; the
+  ripple.rs `.into()` drift it caught shipped only in tests, PR #124).
 - `cargo test --no-default-features --features sendgrid,paypal` on stable, so
   the `no_std + alloc` paths (the wall-clock fallback in [`Clock::now`], the
   `std::error::Error`-less [`VerifyError`], and the `no_std` re-exports) are
