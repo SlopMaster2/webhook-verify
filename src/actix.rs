@@ -820,7 +820,6 @@ mod tests {
         let res = aw_test::call_service(&good_app, req).await;
         assert_eq!(res.status(), StatusCode::OK);
     }
-    // mapping of that error class to 500 lives in core::adapter_utils tests.
     #[cfg(not(feature = "paypal"))]
     #[actix_web::test]
     async fn unsupported_provider_maps_to_internal_server_error() {
