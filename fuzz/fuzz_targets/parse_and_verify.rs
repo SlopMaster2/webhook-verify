@@ -444,6 +444,11 @@ const IMPLEMENTED: &[Provider] = &[
     // base64-decode paths, and a well-formed-shaped attempt below reaches its
     // 32-byte gate and HMAC comparison.
     Provider::X,
+    // Tailscale needs a combined `t=...,v1=...` header to reach its signature
+    // path; arbitrary bytes exercise the comma/key-value splitting and
+    // empty-header rejection, and a well-formed-shaped attempt below reaches
+    // its timestamp parse, hex decode, 32-byte gate, and HMAC comparison.
+    Provider::Tailscale,
 ];
 
 /// A well-formed secret for each provider's scheme, so the fuzzer reaches the
@@ -1398,6 +1403,22 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "x-twitter-webhooks-signature".to_string(),
             "sha256=wKAeP9GiJsaFuQJdxOljWIpG7W4b0IJshW59aJtfNZ0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Tailscale: a well-formed-shaped `Tailscale-Webhook-Signature` (digit t,
+    // valid-hex 32-byte v1) lets arbitrary body bytes reach the 32-byte length
+    // gate and HMAC comparison; without it the loop above mostly fails earlier
+    // on malformed/missing header fields.
+    attempt(
+        Provider::Tailscale,
+        &[(
+            "Tailscale-Webhook-Signature".to_string(),
+            "t=1700000000,v1=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e"
+                .to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

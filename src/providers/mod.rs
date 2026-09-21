@@ -52,6 +52,7 @@ mod slack;
 mod square;
 mod standard_webhooks;
 mod stripe;
+mod tailscale;
 mod tally;
 mod twilio;
 mod twitch;
@@ -451,6 +452,17 @@ pub enum Provider {
     /// primitive over the `crc_token` but is a response the caller computes
     /// (out of scope: this crate verifies inbound deliveries only).
     X,
+    /// Tailscale webhook events (`Tailscale-Webhook-Signature`, HMAC-SHA256
+    /// over `t.body`, hex, `t=,v1=` list; rotation-safe on multiple `v1=`).
+    ///
+    /// Covers the HTTPS POSTs Tailscale sends to a configured webhook endpoint
+    /// (network events like `nodeCreated`, `policyUpdate`, `userRoleUpdated`,
+    /// and the `test` probe). The header is a comma-separated `key=value` list
+    /// carrying the event's unix-seconds epoch instant as `t` and the
+    /// HMAC-SHA256 over `{t}.{raw_body}` as `v1` (hex, the only defined
+    /// scheme). The docs recommend treating any event older than five minutes
+    /// as a replay attack, so the shared `max_age` window applies.
+    Tailscale,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
@@ -522,6 +534,7 @@ impl fmt::Display for Provider {
             Provider::Calendly => f.write_str("Calendly"),
             Provider::Vercel => f.write_str("Vercel"),
             Provider::X => f.write_str("X"),
+            Provider::Tailscale => f.write_str("Tailscale"),
             Provider::StandardWebhooks => f.write_str("Standard Webhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
@@ -659,6 +672,7 @@ impl core::str::FromStr for Provider {
             {
                 Ok(Provider::X)
             }
+            n if n.eq_ignore_ascii_case("tailscale") => Ok(Provider::Tailscale),
             n if n.eq_ignore_ascii_case("standardwebhooks")
                 || n.eq_ignore_ascii_case("standard webhooks")
                 || n.eq_ignore_ascii_case("standard-webhooks")
@@ -683,7 +697,7 @@ impl fmt::Display for ProviderParseError {
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `contentful`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `tally`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `nylas`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `x` (or `twitter`), \
+             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `tailscale`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
@@ -771,6 +785,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Calendly => vec![calendly::SIGNATURE_HEADER],
         Provider::Vercel => vec![vercel::SIGNATURE_HEADER],
         Provider::X => vec![x_twitter::SIGNATURE_HEADER],
+        Provider::Tailscale => vec![tailscale::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
         Provider::StandardWebhooks => vec![
             standard_webhooks::ID_HEADER,
@@ -914,6 +929,7 @@ pub(crate) fn verify_ref(
         Provider::Calendly => calendly::verify(headers, raw_body, secret, options),
         Provider::Vercel => vercel::verify(headers, raw_body, secret, options),
         Provider::X => x_twitter::verify(headers, raw_body, secret, options),
+        Provider::Tailscale => tailscale::verify(headers, raw_body, secret, options),
         #[cfg(feature = "paypal")]
         Provider::PayPal => paypal::verify(headers, raw_body, secret, options),
         #[cfg(not(feature = "paypal"))]
@@ -1524,6 +1540,7 @@ mod tests {
         assert_eq!(Provider::Calendly.to_string(), "Calendly");
         assert_eq!(Provider::Vercel.to_string(), "Vercel");
         assert_eq!(Provider::X.to_string(), "X");
+        assert_eq!(Provider::Tailscale.to_string(), "Tailscale");
         assert_eq!(Provider::StandardWebhooks.to_string(), "Standard Webhooks");
 
         let custom = Provider::Custom(CustomScheme {
@@ -1609,6 +1626,7 @@ mod tests {
             ("calendly", Provider::Calendly),
             ("vercel", Provider::Vercel),
             ("x", Provider::X),
+            ("tailscale", Provider::Tailscale),
             ("standardwebhooks", Provider::StandardWebhooks),
             ("standard webhooks", Provider::StandardWebhooks),
         ];
@@ -1822,6 +1840,7 @@ mod tests {
             (Provider::Calendly, &[calendly::SIGNATURE_HEADER]),
             (Provider::Vercel, &[vercel::SIGNATURE_HEADER]),
             (Provider::X, &[x_twitter::SIGNATURE_HEADER]),
+            (Provider::Tailscale, &[tailscale::SIGNATURE_HEADER]),
             (
                 Provider::Zoom,
                 &[zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
@@ -1935,7 +1954,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 51] {
+    fn provider_list() -> [Provider; 52] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1987,6 +2006,7 @@ mod tests {
             Provider::Calendly,
             Provider::Vercel,
             Provider::X,
+            Provider::Tailscale,
             Provider::StandardWebhooks,
         ]
     }

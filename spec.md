@@ -2045,6 +2045,68 @@ Challenge-Response Check and sample event payloads).
   case-insensitive), analogous to Mailchimp Transactional's `"mailchimp"`
   alias — X's own docs still use the pre-rebrand header name.
 
+### Tailscale
+
+Source: <https://tailscale.com/docs/features/webhooks> ("Verifying an event
+signature" — the header reference, the signed-string recipe, the 5-minute
+replay recommendation, and the events payload) and Tailscale's official
+example verifier
+(<https://github.com/tailscale/tailscale/blob/main/docs/webhooks/example.go>).
+This entry covers the HTTPS POSTs Tailscale sends to a configured webhook
+endpoint (`nodeCreated`, `policyUpdate`, `userRoleUpdated`, the `test` probe,
+etc.), which all share the `Tailscale-Webhook-Signature` scheme.
+
+- Header: `Tailscale-Webhook-Signature: t=<unix_ts>,v1=<hex_hmac>[,v1=<hex_hmac>...]`
+  — a comma-separated `key=value` list. `t` is "the epoch time in seconds when
+  the event occurred"; `v1` is HMAC-SHA256 over `{t}.{raw_body}` and is "the
+  only supported scheme for the signature". Unknown fields and non-`v1`
+  schemes are discarded for forward compatibility.
+- Multiple `v1=` values are accepted during webhook-secret rotation (a match
+  on *any* `v1` element is accepted), matching the official Go verifier, which
+  accumulates every `v1` and compares against each in constant time.
+- Duplicate `t` fields are rejected as ambiguous — never first-wins,
+  following the crate-wide rule that malformed/ambiguous signing material
+  fails closed rather than defaulting to valid (the Go verifier's parser takes
+  the last occurrence; this crate does not).
+- Keys are compared after trimming surrounding whitespace, so the comma-space
+  spelling `t=..., v1=...` (produced by proxy header-folding and hand-pasted
+  values) parses like the canonical `t=...,v1=...`. Values are never trimmed —
+  the timestamp rides verbatim into the signed string.
+- Signed string: `"{t}.{raw_body}"` — the `t` value exactly as it appears in
+  the header, a literal dot, then the raw request body bytes. The docs'
+  phrasing ("you need to decode the request body for signing purposes") refers
+  to the events payload being JSON-encoded on the wire, **not** to a transform
+  of the signed bytes: the official Go verifier reads `io.ReadAll(req.Body)`
+  verbatim into the HMAC and `json.Unmarshal`s the body only *after* the
+  signature check. Re-serializing or re-encoding the JSON before signing is
+  therefore incorrect and breaks verification.
+- Algorithm: HMAC-SHA256 over the signed string, hex-encoded (lowercase, bare
+  — no prefix).
+- Key: the per-endpoint webhook secret shared between Tailscale and the
+  endpoint creator, as a plain UTF-8 string (case-sensitive, not decoded),
+  matching the docs and the Go verifier's `[]byte(secret)`.
+- Timestamp validation routes through the shared pure-ASCII-digit parser:
+  sign-prefixed (`t=+1663781880`), whitespace-padded, empty, or overflowing
+  values fail closed as `MalformedHeader`. The Go verifier uses
+  `strconv.ParseInt`; the strict shared parser is intentionally stricter and
+  cannot reject a legitimate delivery.
+- Replay protection: the docs advise treating an event whose timestamp is
+  more than five minutes old as a replay attack (the Go verifier hard-codes
+  `time.Now().Add(-time.Minute * 5)`), so the shared symmetric
+  `|now - t| > max_age` (default 300s) semantics apply, as with Mux, Slack,
+  Zoom, Cloudflare, and Coinbase. The future-dated half of the symmetry is
+  stricter than the Go verifier enforces but cannot reject legitimate
+  deliveries.
+- Test-vector provenance: Tailscale's docs describe the scheme and link the
+  official Go verifier, but publish no byte-exact example signature (the
+  docs' header example carries a placeholder `v1=0123456789abcdef...`), so the
+  implementation is validated against locally constructed, deterministic
+  vectors over exactly the documented construction (cross-checked with
+  Python's `hmac` module against the Go verifier's
+  `HMAC-SHA256(secret, "{t}." + body)` recipe). The docs' placeholder example
+  header is replayed as a well-formed-but-mismatching input. Replace the local
+  vectors if Tailscale ever publishes fixed ones.
+
 ### Ripple
 
 Source: <https://docs.ripple.com/products/collections/guides/verifying-webhooks>
