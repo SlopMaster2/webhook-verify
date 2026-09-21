@@ -158,6 +158,10 @@
 //! - `gocardless-hex-signature` — GoCardless's `Webhook-Signature` bare hex
 //!   HMAC-SHA256 signature over the raw body (no prefix, no timestamp),
 //!   reaching hex decode, the 32-byte gate, and HMAC comparison.
+//! - `mollie-sha256-prefix-signature` — Mollie's `X-Mollie-Signature` shape
+//!   (`sha256=` prefixed hex HMAC-SHA256 over the raw body, no timestamp),
+//!   reaching the prefix, hex decode, 32-byte gate, and constant-time HMAC
+//!   comparison.
 //! - `calendly-t-v1-signature` — Calendly's combined `t=...,v1=...`
 //!   `Calendly-Webhook-Signature` header, reaching the comma-split, timestamp
 //!   parse, hex decode, 32-byte gate, and HMAC comparison over `{t}.{body}`.
@@ -400,6 +404,12 @@ const IMPLEMENTED: &[Provider] = &[
     // hex-decode and 32-byte gate, and a well-formed-shaped attempt below
     // reaches HMAC comparison over the `Webhook-Signature` header.
     Provider::GoCardless,
+    // Mollie is a single-header raw-body HMAC (`sha256=` prefixed hex, 32-byte
+    // digest, no timestamp, verbatim string key); arbitrary header bytes
+    // exercise its prefix-strip and hex-decode paths, and a
+    // well-formed-shaped attempt below reaches its 32-byte gate and HMAC
+    // comparison.
+    Provider::Mollie,
     Provider::StandardWebhooks,
     // Discord's secret is a hex public key; the arbitrary-secret loop below
     // exercises its InvalidSecret decoding paths, and a dedicated valid-key
@@ -1304,6 +1314,20 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "Webhook-Signature".to_string(),
             "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Mollie: a well-formed-shaped `X-Mollie-Signature` (`sha256=` prefixed
+    // valid hex 32-byte sig, no timestamp) lets arbitrary body bytes reach the
+    // 32-byte length gate and HMAC comparison.
+    attempt(
+        Provider::Mollie,
+        &[(
+            "X-Mollie-Signature".to_string(),
+            "sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,
