@@ -193,6 +193,15 @@
 //!   `x-twitter-webhooks-signature` shape (`sha256=` prefixed base64
 //!   HMAC-SHA256 over the raw body, no timestamp), reaching the prefix match,
 //!   base64 decode, the 32-byte gate, and HMAC comparison.
+//! - `custom-slack-like-delivery` — the Slack-shaped `CustomScheme` target
+//!   configuration (`X-Slack-Signature` with a `v0=` hex HMAC over
+//!   `v0:{ts}:{body}` plus the `X-Slack-Request-Timestamp` header), reaching
+//!   the user-supplied signed string, prefix-strip, hex decode, the 32-byte
+//!   gate, and timestamp-parse paths of `Provider::Custom` (`spec.md` §2.2).
+//! - `custom-raw-base64-signature` — the raw-body/base64 `CustomScheme`
+//!   target configuration (`X-Raw-Sig`, no prefix, no timestamp, three hash
+//!   algorithms), reaching base64 decode, the digest-length gate, and the
+//!   constant-time comparison for `Provider::Custom`.
 //! - `header-garbage-without-body-separator` — an adversarial malformed input
 //!   with no `\n\n` separator, anchoring the parser's fail-closed paths.
 
