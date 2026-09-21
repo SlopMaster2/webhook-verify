@@ -87,6 +87,7 @@ pub enum Provider {
     Calendly,
     Vercel,
     X,
+    Tailscale,
     StandardWebhooks,
     Custom(CustomScheme),
 }
