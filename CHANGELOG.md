@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: `Mollie`** (next-gen webhooks; `Provider::Mollie`). Verifies
+  the hex HMAC-SHA256 over the raw body in the `X-Mollie-Signature` header
+  behind a literal `sha256=` prefix (matched case-sensitively, exactly like
+  GitHub), keyed by the signing secret configured at webhook setup used
+  verbatim as its UTF-8 bytes (never decoded). Mollie's docs instruct
+  verifying against "the unaltered POST body", matching the crate's
+  `raw_body` contract. No timestamp is signed, so `max_age` has no effect.
+  During the documented 24-hour rotation window Mollie attaches **two**
+  `X-Mollie-Signature` headers per event; this crate reads the first, so
+  rotating callers keep the previous secret until the window closes and
+  verify against each. Only next-gen signed webhooks are covered — classic
+  `webhookUrl` deliveries POST a bare `id=<resource_id>` form field and are
+  unsigned. Scheme and test-vector provenance linked to
+  <https://docs.mollie.com/reference/webhooks-new> and Mollie's official SDKs
+  in `spec.md` §3. `Provider::from_str` accepts `"mollie"`.
 - **New provider: `FastSpring`** (`Provider::FastSpring`). Verifies the bare
   base64 HMAC-SHA256 over the raw body in the `X-FS-Signature` header, keyed
   by the per-webhook "HMAC SHA256 Secret" — the same shape as Tally, Shopify,
