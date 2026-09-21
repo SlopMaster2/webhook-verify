@@ -511,7 +511,7 @@ impl fmt::Display for Provider {
             Provider::Fintoc => f.write_str("Fintoc"),
             Provider::Razorpay => f.write_str("Razorpay"),
             Provider::Ripple => f.write_str("Ripple"),
-            Provider::LemonSqueezy => f.write_str("LemonSqueezy"),
+            Provider::LemonSqueezy => f.write_str("Lemon Squeezy"),
             Provider::Xero => f.write_str("Xero"),
             Provider::Sentry => f.write_str("Sentry"),
             Provider::Adyen => f.write_str("Adyen"),
@@ -1509,7 +1509,7 @@ mod tests {
         assert_eq!(Provider::Fintoc.to_string(), "Fintoc");
         assert_eq!(Provider::Razorpay.to_string(), "Razorpay");
         assert_eq!(Provider::Ripple.to_string(), "Ripple");
-        assert_eq!(Provider::LemonSqueezy.to_string(), "LemonSqueezy");
+        assert_eq!(Provider::LemonSqueezy.to_string(), "Lemon Squeezy");
         assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::Sentry.to_string(), "Sentry");
         assert_eq!(Provider::Adyen.to_string(), "Adyen");
