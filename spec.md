@@ -53,6 +53,7 @@ pub enum Provider {
     Slack,
     Square,
     Tally,
+    FastSpring,
     Twilio,
     Twitch,
     Typeform,
@@ -2202,6 +2203,41 @@ HMAC-SHA256 construction, and includes the published example webhook event).
   documented construction using a body mirroring the published example event,
   cross-checked with Python's `hashlib`/`hmac` and `openssl`. Replace them if
   Tally ever publishes fixed vectors.
+
+### FastSpring (commerce webhooks)
+
+Source: <https://developer.fastspring.com/reference/message-security> (the
+official "Message Security" page describing the `X-FS-Signature` header and
+the base64 HMAC-SHA256 construction, with working Java/Node/PHP samples).
+
+- Header: `X-FS-Signature: <base64_hmac>` — a bare base64 digest (standard
+  alphabet with padding) of the SHA256 HMAC over the payload, no `sha256=`
+  prefix and no timestamp; same shape as Tally, Shopify, Xero, and WooCommerce.
+  The docs warn the header "is not case-sensitive and might be sent with
+  varying case (all lowercase, or mixed case)" — header lookup is
+  case-insensitive, covering that
+- Signed string: the raw request body bytes, unmodified. FastSpring's own Node
+  sample hashes the raw body before any JSON parser runs (the Express example
+  is explicit: "you must valid before the json parser"); this crate hashes
+  `raw_body` verbatim (`spec.md` §4), which matches the signer's actual wire
+  bytes and avoids the re-encoding failure class; callers must pass the
+  untouched request body
+- Algorithm: HMAC-SHA256, base64-encoded. Key: the webhook's "HMAC SHA256
+  Secret" field (optional — when left blank, FastSpring sends unsigned
+  requests) as its UTF-8 bytes, matching the docs' reference construction
+  (`createHmac('sha256', secret).update(body).digest().toString('base64')`)
+- No timestamp in the signature scheme (`max_age` has no effect); FastSpring
+  does not publish a signed timestamp, so callers dedupe from the payload's own
+  `id` field, which is outside this crate's scope (payload parsing is a
+  non-goal, §1)
+- Test-vector provenance: FastSpring's docs describe the construction and
+  publish working sample code but no byte-exact example signature (the secret
+  is endpoint-specific, set once per webhook in the FastSpring App and never
+  shown again), so the implementation is validated against locally constructed,
+  deterministic vectors over the documented recipe using a body mirroring the
+  shape of an `order.completed` event, cross-checked with Python's
+  `hashlib`/`hmac` and `openssl`. Replace them if FastSpring ever publishes
+  fixed vectors.
 
 ### Standard Webhooks spec
 

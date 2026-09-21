@@ -99,6 +99,7 @@ hand-copied signing-string logic to get wrong.
 | Slack | HMAC-SHA256 `v0=` scheme, `X-Slack-Signature` + timestamp + replay window | ✅ |
 | Square | HMAC-SHA256 over notification URL + body, base64, `x-square-hmacsha256-signature` (needs `VerifyOptions::request_url`) | ✅ |
 | Tally (form webhooks) | HMAC-SHA256 over raw body, base64, `Tally-Signature` (per-webhook signing secret, no prefix, no timestamp) | ✅ |
+| FastSpring (commerce webhooks) | HMAC-SHA256 over raw body, base64, `X-FS-Signature` (per-webhook HMAC secret, no prefix, no timestamp; header may arrive with varying case) | ✅ |
 | Twilio | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Twilio-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
 | Mailchimp Transactional (Mandrill) | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Mandrill-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
 | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) | ✅ |

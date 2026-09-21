@@ -18,6 +18,7 @@ mod discord;
 mod docusign;
 mod dropbox;
 mod expo;
+mod fastspring;
 mod fintoc;
 mod github;
 mod hubspot;
@@ -203,7 +204,19 @@ pub enum Provider {
     /// signing secret is optional: when none is set, Tally sends unsigned
     /// requests (`spec.md` §3). Tally signs no timestamp, so `max_age` has no
     /// effect for this provider.
-    Tally,
+Tally,
+    /// FastSpring (`X-FS-Signature`, base64-encoded HMAC-SHA256 over the raw
+    /// body).
+    ///
+    /// FastSpring (commerce subscription/webhook platform) signs the request
+    /// body with the per-webhook "HMAC SHA256 Secret" — used verbatim as its
+    /// UTF-8 bytes — behind a bare base64 digest, the same shape as Tally,
+    /// Shopify, Xero, and WooCommerce. The signing secret is optional: when
+    /// none is set, FastSpring sends unsigned requests (`spec.md` §3).
+    /// FastSpring's docs note the header may arrive with varying case;
+    /// lookup is case-insensitive. FastSpring signs no timestamp, so `max_age`
+    /// has no effect for this provider.
+    FastSpring,
     /// Twilio (HMAC-SHA1 over full URL + sorted form params; needs
     /// `VerifyOptions::request_url` and `VerifyOptions::form_params`).
     Twilio,
@@ -500,6 +513,7 @@ impl fmt::Display for Provider {
             Provider::Slack => f.write_str("Slack"),
             Provider::Square => f.write_str("Square"),
             Provider::Tally => f.write_str("Tally"),
+            Provider::FastSpring => f.write_str("FastSpring"),
             Provider::Twilio => f.write_str("Twilio"),
             Provider::Twitch => f.write_str("Twitch"),
             Provider::Typeform => f.write_str("Typeform"),
@@ -607,6 +621,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("slack") => Ok(Provider::Slack),
             n if n.eq_ignore_ascii_case("square") => Ok(Provider::Square),
             n if n.eq_ignore_ascii_case("tally") => Ok(Provider::Tally),
+            n if n.eq_ignore_ascii_case("fastspring") => Ok(Provider::FastSpring),
             n if n.eq_ignore_ascii_case("twilio") => Ok(Provider::Twilio),
             n if n.eq_ignore_ascii_case("twitch") => Ok(Provider::Twitch),
             n if n.eq_ignore_ascii_case("typeform") => Ok(Provider::Typeform),
@@ -695,7 +710,7 @@ impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `contentful`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
-             `slack`, `square`, `tally`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
+             `slack`, `square`, `tally`, `fastspring`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `nylas`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `tailscale`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
@@ -751,6 +766,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Slack => vec![slack::SIGNATURE_HEADER, slack::TIMESTAMP_HEADER],
         Provider::Square => vec![square::SIGNATURE_HEADER],
         Provider::Tally => vec![tally::SIGNATURE_HEADER],
+        Provider::FastSpring => vec![fastspring::SIGNATURE_HEADER],
         Provider::Twilio => vec![twilio::SIGNATURE_HEADER],
         Provider::Twitch => vec![
             twitch::MESSAGE_ID_HEADER,
@@ -905,6 +921,7 @@ pub(crate) fn verify_ref(
         Provider::Slack => slack::verify(headers, raw_body, secret, options),
         Provider::Square => square::verify(headers, raw_body, secret, options),
         Provider::Tally => tally::verify(headers, raw_body, secret, options),
+        Provider::FastSpring => fastspring::verify(headers, raw_body, secret, options),
         Provider::Stripe => stripe::verify(headers, raw_body, secret, options),
         Provider::StandardWebhooks => standard_webhooks::verify(headers, raw_body, secret, options),
         Provider::Twilio => twilio::verify(headers, raw_body, secret, options),
@@ -1793,6 +1810,7 @@ mod tests {
             ),
             (Provider::Square, &[square::SIGNATURE_HEADER]),
             (Provider::Tally, &[tally::SIGNATURE_HEADER]),
+            (Provider::FastSpring, &[fastspring::SIGNATURE_HEADER]),
             (Provider::Twilio, &[twilio::SIGNATURE_HEADER]),
             (
                 Provider::Twitch,
@@ -1954,7 +1972,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 52] {
+    fn provider_list() -> [Provider; 53] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1972,6 +1990,7 @@ mod tests {
             Provider::Slack,
             Provider::Square,
             Provider::Tally,
+            Provider::FastSpring,
             Provider::Twilio,
             Provider::Twitch,
             Provider::Typeform,
