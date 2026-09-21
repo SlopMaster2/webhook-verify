@@ -41,10 +41,12 @@ pub enum VerifyError {
     /// close the provided signature was to the expected one.
     SignatureMismatch,
     /// The signed timestamp is further from "now" than
-    /// [`crate::VerifyOptions::max_age`] allows; skew is how far outside the
-    /// window it fell.
+    /// [`crate::VerifyOptions::max_age`] allows; skew is the timestamp's
+    /// total distance from "now" (`|now - timestamp|`), not the excess beyond
+    /// the window boundary.
     TimestampOutOfTolerance {
-        /// How far outside the tolerance window the timestamp was.
+        /// The timestamp's distance from "now" (`|now - timestamp|`); how far
+        /// the timestamp fell outside the allowed window.
         skew: Duration,
         /// The configured maximum age.
         max_age: Duration,

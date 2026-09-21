@@ -55,19 +55,19 @@
 //! | Stripe | HMAC-SHA256 over `timestamp.body`, tolerance window |
 //! | GitHub | HMAC-SHA256, `X-Hub-Signature-256` |
 //! | Bitbucket | HMAC-SHA256, `sha256=` prefix, `X-Hub-Signature` |
-//! | Contentful | hex HMAC-SHA256 of `[method, path, signedHeaders, body].join('\n')`, `x-contentful-signature` (headers and order self-described by `x-contentful-signed-headers`) + `x-contentful-timestamp` (epoch ms) replay window |
+//! | Contentful | hex HMAC-SHA256 of `[method, path, signedHeaders, body].join('\n')`, `x-contentful-signature` (headers and order self-described by `x-contentful-signed-headers`) + `x-contentful-timestamp` (epoch ms) replay window (needs `VerifyOptions::request_method` + `request_url`) |
 //! | Box | HMAC-SHA256 over `{raw_body}{delivery_timestamp}`, base64, `BOX-SIGNATURE-PRIMARY`/`BOX-SIGNATURE-SECONDARY` (rotation-safe) + RFC 3339 timestamp tolerance window |
 //! | Intercom | HMAC-SHA1, `sha1=` prefix, `X-Hub-Signature` |
 //! | Expo (EAS) | HMAC-SHA1, `sha1=` prefix, `expo-signature` |
 //! | Meta (Graph API, Messenger, Instagram, WhatsApp Cloud API) | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Hub-Signature-256` (App Secret key, no timestamp) |
-//! | HubSpot | HMAC-SHA256 over `{method}{uri}{body}{timestamp}` (epoch ms), base64, `X-HubSpot-Signature-V3` + tolerance window |
+//! | HubSpot | HMAC-SHA256 over `{method}{uri}{body}{timestamp}` (epoch ms), base64, `X-HubSpot-Signature-V3` + tolerance window (needs `VerifyOptions::request_method` + `request_url`) |
 //! | Klaviyo | HMAC-SHA256 over `{raw_body}{timestamp}`, hex, `Klaviyo-Signature` + `Klaviyo-Timestamp` (IMF-fixdate) replay window |
 //! | Shopify | HMAC-SHA256, base64, `X-Shopify-Hmac-Sha256` |
 //! | Slack | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Square | HMAC-SHA256 over notification URL + body, base64, `x-square-hmacsha256-signature` (needs `VerifyOptions::request_url`) |
 //! | Tally | HMAC-SHA256 over raw body, base64, `Tally-Signature` (no timestamp) |
-//! | Twilio | HMAC-SHA1 (base64) over URL + sorted form params, `X-Twilio-Signature` |
-//! | Mandrill (Mailchimp Transactional) | HMAC-SHA1 (base64) over URL + sorted form params, `X-Mandrill-Signature` |
+//! | Twilio | HMAC-SHA1 (base64) over URL + sorted form params, `X-Twilio-Signature` (needs `VerifyOptions::request_url` + `form_params`) |
+//! | Mandrill (Mailchimp Transactional) | HMAC-SHA1 (base64) over URL + sorted form params, `X-Mandrill-Signature` (needs `VerifyOptions::request_url` + `form_params`) |
 //! | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) |
 //! | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp tolerance window |
 //! | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` |

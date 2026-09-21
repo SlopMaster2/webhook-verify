@@ -82,9 +82,11 @@ for CI to catch you — apply them while writing the diff:
    official server-side SDK's source, if docs are thin) and their
    published example/test payload if one exists. Link it in your PR
    description and in a code comment above the test vector.
-2. Add a row to the table in `spec.md` §3 describing: header name(s),
-   signed-string construction, hash algorithm, encoding, and whether replay
-   protection applies.
+2. Add an entry to the provider sections in `spec.md` §3 describing: header
+   name(s), signed-string construction, hash algorithm, encoding, and whether
+   replay protection applies. (The `spec.md` §3 entry is prose per provider,
+   not a table; the two provider **tables** — `README.md` and the `lib.rs`
+   crate docs — are updated separately as part of the same PR.)
 3. Implement `src/providers/<name>.rs`:
    - A private function building the exact signed-string/bytes per the
      spec entry.
@@ -158,9 +160,11 @@ shouldn't verify does" report as security-relevant until proven otherwise:
   `spec.md` §2.1).
 - Do not implement PayPal/SendGrid-style certificate-based verification by
   reaching for a synchronous network call inside `verify()` — this
-  contradicts the "no network calls" goal. See the open question in
-  `spec.md` §7 and raise the design question instead of picking a default
-  unilaterally.
+  contradicts the "no network calls" goal. The §7 design question is
+  **resolved: caller-supplied key material only** (sendgrid and paypal ship
+  as feature-gated providers using `VerifyOptions::verifying_material`) — do
+  not regress it into an in-crate fetcher; raise any new fetch-related design
+  question instead of picking a default unilaterally.
 
 ## 8. When you're unsure
 
