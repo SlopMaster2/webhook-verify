@@ -857,13 +857,13 @@ repeating the signing guidance and the "Sample payload").
 ### LINE
 
 Source: <https://developers.line.biz/en/docs/messaging-api/verify-webhook-signature/>
-("Verify webhook signature": the required `X-Line-Signature` header, the
+("Verify webhook signature": the required `x-line-signature` header, the
 `openssl` verification command below, and the byte-exact example) and
 <https://developers.line.biz/en/docs/messaging-api/receiving-messages/>
 (the messaging-receipt overview, which spells the header lowercase and
 documents the verification middleware contract).
 
-- Header: `X-Line-Signature: <base64_hmac>` — a bare base64 digest, no
+- Header: `x-line-signature: <base64_hmac>` — a bare base64 digest, no
   `sha256=` prefix and no timestamp; standard alphabet with padding, same
   single-header shape as DocuSign and Shopify.
 - Signed string: the exact request body. LINE's docs are explicit that

@@ -709,6 +709,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **LINE: the signature-header constant and spec now spell the header the way
+  LINE's docs do.** LINE's official "Verify webhook signature" docs send the
+  digest in a lowercase `x-line-signature` header, but the crate's
+  `SIGNATURE_HEADER` constant (surfaced in `VerifyError::MissingHeader` /
+  `MalformedHeader` messages and the tower/actix duplicate-scan) used the
+  title-cased `X-Line-Signature`. Following the Square precedent, the constant
+  and the `spec.md` §3 LINE row now match the provider's spelling (lookup is
+  ASCII case-insensitive, so this only changes operator-facing output, not
+  verification behavior).
+- **Crate docs: the Square provider row omitted its header name.** The
+  supported-providers table in `src/lib.rs` and the `Provider::Square` doc
+  comment described the scheme without naming `x-square-hmacsha256-signature`
+  (the README and `spec.md` already named it), so a docs.rs reader had no way
+  to learn the header to extract without cross-referencing. Doc-only change.
 - **Spec: Contentful's self-describing signed-header list is documented as
   outside the adapters' duplicate-ambiguity scan.** The `spec.md` §4.4 rule
   claimed built-in providers' schemes are fully ambiguity-scanned, but
