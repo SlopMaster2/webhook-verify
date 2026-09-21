@@ -713,6 +713,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name but differing in encoding or hash previously logged identically;
   operators can now tell them apart. The `signed_string` closure has no
   reliable textual form and is intentionally not rendered.
+- `VerifyError::TimestampOutOfTolerance` `Display` no longer misdescribes
+  `skew` as the excess *beyond* the `max_age` window. The field is the
+  signed timestamp's total distance from "now" (`|now - timestamp|`,
+  `src/core/replay.rs` `check_replay`), so a 600s distance over a 300s
+  window previously read "600s outside the allowed 300s window" even though
+  the excess is only 300s. The message now reads "600s from now exceeds the
+  allowed 300s window", matching the documented field semantics (the doc
+  fix in PR #138 aligned the field docs; this aligns the operator-facing
+  message). Message-text only — the `skew`/`max_age` values printed, the
+  failure condition, and every other `Display` variant are unchanged.
 
 ### Fixed
 

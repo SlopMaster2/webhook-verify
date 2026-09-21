@@ -83,7 +83,7 @@ impl fmt::Display for VerifyError {
             VerifyError::SignatureMismatch => write!(f, "signature mismatch"),
             VerifyError::TimestampOutOfTolerance { skew, max_age } => write!(
                 f,
-                "timestamp out of tolerance: {skew:?} outside the allowed {max_age:?} window",
+                "timestamp out of tolerance: {skew:?} from now exceeds the allowed {max_age:?} window",
             ),
             VerifyError::UnsupportedProvider => {
                 write!(f, "provider not available (feature disabled)")
@@ -149,7 +149,7 @@ mod tests {
         };
         assert_eq!(
             e.to_string(),
-            "timestamp out of tolerance: 600s outside the allowed 300s window"
+            "timestamp out of tolerance: 600s from now exceeds the allowed 300s window"
         );
     }
 
@@ -163,7 +163,7 @@ mod tests {
         };
         assert_eq!(
             e.to_string(),
-            "timestamp out of tolerance: 1s outside the allowed 500ms window"
+            "timestamp out of tolerance: 1s from now exceeds the allowed 500ms window"
         );
 
         let e = VerifyError::TimestampOutOfTolerance {
@@ -172,7 +172,7 @@ mod tests {
         };
         assert_eq!(
             e.to_string(),
-            "timestamp out of tolerance: 4s outside the allowed 3.5s window"
+            "timestamp out of tolerance: 4s from now exceeds the allowed 3.5s window"
         );
     }
 
@@ -180,16 +180,16 @@ mod tests {
     fn display_timestamp_out_of_tolerance_preserves_sub_second_skew() {
         // A sub-second skew must not be truncated to "0s" in operator-facing
         // logs either (mirroring the max_age fix): a 150ms skew over a 100ms
-        // window previously read "0s outside the allowed 100ms window",
-        // which does not describe the actual skew. Duration's Debug renders
-        // sub-second values faithfully.
+        // window previously read "0s from now exceeds the allowed 100ms
+        // window", which does not describe the actual skew. Duration's Debug
+        // renders sub-second values faithfully.
         let e = VerifyError::TimestampOutOfTolerance {
             skew: Duration::from_millis(150),
             max_age: Duration::from_millis(100),
         };
         assert_eq!(
             e.to_string(),
-            "timestamp out of tolerance: 150ms outside the allowed 100ms window"
+            "timestamp out of tolerance: 150ms from now exceeds the allowed 100ms window"
         );
 
         let e = VerifyError::TimestampOutOfTolerance {
@@ -198,7 +198,7 @@ mod tests {
         };
         assert_eq!(
             e.to_string(),
-            "timestamp out of tolerance: 1.5s outside the allowed 1s window"
+            "timestamp out of tolerance: 1.5s from now exceeds the allowed 1s window"
         );
     }
 
