@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timestamp is signed, so `max_age` has no effect. Scheme and test-vector
   provenance linked to <https://developer.fastspring.com/reference/message-security>
   in `spec.md` §3. `Provider::from_str` accepts `"fastspring"`.
+- **New provider: `GoCardless`** (`Provider::GoCardless`). Verifies the bare
+  lowercase-hex HMAC-SHA256 over the raw body in the `Webhook-Signature`
+  header, keyed by the webhook endpoint secret used verbatim as its UTF-8
+  bytes (never decoded — the secret merely looks base64url-shaped). No
+  timestamp is signed, so `max_age` has no effect; GoCardless's docs mandate
+  hashing the raw request body without re-parsing, matching the crate's
+  `raw_body` contract. Scheme and test-vector provenance linked to
+  <https://docs.gocardless.com/docs/api-reference/webhooks> in `spec.md` §3.
+  `Provider::from_str` accepts `"gocardless"`.
 - **New provider: `Tailscale`**. Verifies the hex HMAC-SHA256 in
   `Tailscale-Webhook-Signature`, a comma-separated `t=<unix_ts>,v1=<hex>`
   list. The signed string is `{t}.{raw_body}` keyed by the per-endpoint

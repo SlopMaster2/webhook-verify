@@ -155,6 +155,9 @@
 //! - `fastspring-base64-signature` — FastSpring's `X-FS-Signature` base64
 //!   HMAC-SHA256 signature over the raw body (no prefix, no timestamp),
 //!   reaching base64 decode, the 32-byte gate, and HMAC comparison.
+//! - `gocardless-hex-signature` — GoCardless's `Webhook-Signature` bare hex
+//!   HMAC-SHA256 signature over the raw body (no prefix, no timestamp),
+//!   reaching hex decode, the 32-byte gate, and HMAC comparison.
 //! - `calendly-t-v1-signature` — Calendly's combined `t=...,v1=...`
 //!   `Calendly-Webhook-Signature` header, reaching the comma-split, timestamp
 //!   parse, hex decode, 32-byte gate, and HMAC comparison over `{t}.{body}`.
@@ -392,6 +395,11 @@ const IMPLEMENTED: &[Provider] = &[
     // exercise its base64-decode and 32-byte gate, and a well-formed-shaped
     // attempt below reaches HMAC comparison.
     Provider::FastSpring,
+    // GoCardless is a single-header raw-body HMAC (bare hex, no prefix, no
+    // timestamp, verbatim string key); arbitrary header bytes exercise its
+    // hex-decode and 32-byte gate, and a well-formed-shaped attempt below
+    // reaches HMAC comparison over the `Webhook-Signature` header.
+    Provider::GoCardless,
     Provider::StandardWebhooks,
     // Discord's secret is a hex public key; the arbitrary-secret loop below
     // exercises its InvalidSecret decoding paths, and a dedicated valid-key
@@ -1282,6 +1290,20 @@ fuzz_target!(|data: &[u8]| {
         &[(
             "X-FS-Signature".to_string(),
             "hnekiT0GuNX9rRmSlg0oxCxyBHwzBcb0J24w8gQbXo0=".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // GoCardless: a well-formed-shaped `Webhook-Signature` (valid hex 32-byte
+    // sig, no prefix, no timestamp) lets arbitrary body bytes reach the
+    // 32-byte length gate and HMAC comparison.
+    attempt(
+        Provider::GoCardless,
+        &[(
+            "Webhook-Signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,
         WELL_FORMED_SECRET,

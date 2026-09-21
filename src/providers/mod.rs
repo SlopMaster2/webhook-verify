@@ -21,6 +21,7 @@ mod expo;
 mod fastspring;
 mod fintoc;
 mod github;
+mod gocardless;
 mod hubspot;
 mod intercom;
 /// Header-name constants re-exported publicly for Klaviyo's caller-side
@@ -217,6 +218,18 @@ pub enum Provider {
     /// lookup is case-insensitive. FastSpring signs no timestamp, so `max_age`
     /// has no effect for this provider.
     FastSpring,
+    /// GoCardless (`Webhook-Signature`, bare lowercase hex HMAC-SHA256 over
+    /// the raw body).
+    ///
+    /// GoCardless (direct debit) signs the raw request body with the webhook
+    /// endpoint's secret — used verbatim as its UTF-8 bytes, never decoded —
+    /// behind a bare lowercase hex digest, the same shape as Razorpay and
+    /// Lemon Squeezy. GoCardless's docs are explicit that the raw, unparsed
+    /// body must be hashed ("do not parse the JSON and re-serialise it, as
+    /// this may change the byte sequence and break the digest"), so the crate
+    /// hashes `raw_body` verbatim. GoCardless signs no timestamp, so `max_age`
+    /// has no effect for this provider.
+    GoCardless,
     /// Twilio (HMAC-SHA1 over full URL + sorted form params; needs
     /// `VerifyOptions::request_url` and `VerifyOptions::form_params`).
     Twilio,
@@ -514,6 +527,7 @@ impl fmt::Display for Provider {
             Provider::Square => f.write_str("Square"),
             Provider::Tally => f.write_str("Tally"),
             Provider::FastSpring => f.write_str("FastSpring"),
+            Provider::GoCardless => f.write_str("GoCardless"),
             Provider::Twilio => f.write_str("Twilio"),
             Provider::Twitch => f.write_str("Twitch"),
             Provider::Typeform => f.write_str("Typeform"),
@@ -622,6 +636,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("square") => Ok(Provider::Square),
             n if n.eq_ignore_ascii_case("tally") => Ok(Provider::Tally),
             n if n.eq_ignore_ascii_case("fastspring") => Ok(Provider::FastSpring),
+            n if n.eq_ignore_ascii_case("gocardless") => Ok(Provider::GoCardless),
             n if n.eq_ignore_ascii_case("twilio") => Ok(Provider::Twilio),
             n if n.eq_ignore_ascii_case("twitch") => Ok(Provider::Twitch),
             n if n.eq_ignore_ascii_case("typeform") => Ok(Provider::Typeform),
@@ -710,7 +725,7 @@ impl fmt::Display for ProviderParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `contentful`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
-             `slack`, `square`, `tally`, `fastspring`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
+             `slack`, `square`, `tally`, `fastspring`, `gocardless`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `nylas`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
              `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `tailscale`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
@@ -767,6 +782,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Square => vec![square::SIGNATURE_HEADER],
         Provider::Tally => vec![tally::SIGNATURE_HEADER],
         Provider::FastSpring => vec![fastspring::SIGNATURE_HEADER],
+        Provider::GoCardless => vec![gocardless::SIGNATURE_HEADER],
         Provider::Twilio => vec![twilio::SIGNATURE_HEADER],
         Provider::Twitch => vec![
             twitch::MESSAGE_ID_HEADER,
@@ -922,6 +938,7 @@ pub(crate) fn verify_ref(
         Provider::Square => square::verify(headers, raw_body, secret, options),
         Provider::Tally => tally::verify(headers, raw_body, secret, options),
         Provider::FastSpring => fastspring::verify(headers, raw_body, secret, options),
+        Provider::GoCardless => gocardless::verify(headers, raw_body, secret, options),
         Provider::Stripe => stripe::verify(headers, raw_body, secret, options),
         Provider::StandardWebhooks => standard_webhooks::verify(headers, raw_body, secret, options),
         Provider::Twilio => twilio::verify(headers, raw_body, secret, options),
@@ -1523,6 +1540,7 @@ mod tests {
         assert_eq!(Provider::Slack.to_string(), "Slack");
         assert_eq!(Provider::Square.to_string(), "Square");
         assert_eq!(Provider::Tally.to_string(), "Tally");
+        assert_eq!(Provider::GoCardless.to_string(), "GoCardless");
         assert_eq!(Provider::Twilio.to_string(), "Twilio");
         assert_eq!(Provider::Twitch.to_string(), "Twitch");
         assert_eq!(Provider::Typeform.to_string(), "Typeform");
@@ -1608,6 +1626,7 @@ mod tests {
             ("slack", Provider::Slack),
             ("square", Provider::Square),
             ("tally", Provider::Tally),
+            ("gocardless", Provider::GoCardless),
             ("twilio", Provider::Twilio),
             ("twitch", Provider::Twitch),
             ("typeform", Provider::Typeform),
@@ -1811,6 +1830,7 @@ mod tests {
             (Provider::Square, &[square::SIGNATURE_HEADER]),
             (Provider::Tally, &[tally::SIGNATURE_HEADER]),
             (Provider::FastSpring, &[fastspring::SIGNATURE_HEADER]),
+            (Provider::GoCardless, &[gocardless::SIGNATURE_HEADER]),
             (Provider::Twilio, &[twilio::SIGNATURE_HEADER]),
             (
                 Provider::Twitch,
@@ -1972,7 +1992,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 53] {
+    fn provider_list() -> [Provider; 54] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -1991,6 +2011,7 @@ mod tests {
             Provider::Square,
             Provider::Tally,
             Provider::FastSpring,
+            Provider::GoCardless,
             Provider::Twilio,
             Provider::Twitch,
             Provider::Typeform,
