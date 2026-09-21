@@ -101,6 +101,7 @@ hand-copied signing-string logic to get wrong.
 | Tally (form webhooks) | HMAC-SHA256 over raw body, base64, `Tally-Signature` (per-webhook signing secret, no prefix, no timestamp) | ✅ |
 | FastSpring (commerce webhooks) | HMAC-SHA256 over raw body, base64, `X-FS-Signature` (per-webhook HMAC secret, no prefix, no timestamp; header may arrive with varying case) | ✅ |
 | GoCardless | HMAC-SHA256 over raw body, hex, `Webhook-Signature` (endpoint secret used verbatim, no prefix, no timestamp) | ✅ |
+| Mollie (next-gen webhooks) | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Mollie-Signature` (per-webhook signing secret, no timestamp) | ✅ |
 | Twilio | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Twilio-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
 | Mailchimp Transactional (Mandrill) | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Mandrill-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
 | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) | ✅ |

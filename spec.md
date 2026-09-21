@@ -55,6 +55,7 @@ pub enum Provider {
     Tally,
     FastSpring,
     GoCardless,
+    Mollie,
     Twilio,
     Twitch,
     Typeform,
@@ -2278,6 +2279,54 @@ against GoCardless's official SDK implementations
   body mirroring the published `mandates.cancelled` example event,
   cross-checked with Python's `hashlib`/`hmac` and `openssl`. Replace them if
   GoCardless ever publishes fixed vectors.
+
+### Mollie
+
+Source: <https://docs.mollie.com/reference/webhooks-new> (the official
+"Next-gen webhooks" documentation: the "Manual signature verification"
+section defines the `X-Mollie-Signature` header, the `sha256=` prefix, and
+the HMAC-SHA256-over-raw-POST-body construction) and
+<https://docs.mollie.com/reference/webhooks-best-practices> (the HMAC
+verification walk-throughs), cross-checked against Mollie's official SDK
+reference implementations
+(<https://github.com/mollie/mollie-api-php/blob/main/src/Webhooks/SignatureValidator.php>
+and the equivalent helpers in the official Python and Go SDKs, all of which
+compute `hash_hmac('sha256', $payload, $secret)` over the raw body, strip the
+lowercase `sha256=` prefix when present, and compare in constant time; the
+best-practices docs publish matching PHP/Python/Node recipes).
+
+- Header: `X-Mollie-Signature: sha256=<hex_hmac>` — HMAC-SHA256 of the webhook
+  request body using the SHA-256 hashing algorithm, keyed by the signing
+  secret configured at webhook setup, hex-encoded behind a `sha256=` prefix.
+- Signed string: the unaltered `POST` body of the webhook request — Mollie's
+  docs instruct integrating applications to verify against "the unaltered POST
+  body", the same raw-body rule the crate applies everywhere (`spec.md` §4).
+- Algorithm: HMAC-SHA256, hex-encoded (lowercase). Key: the signing secret
+  string from the Mollie dashboard/Webhooks API, as its UTF-8 bytes, used
+  verbatim — never base64-decoded.
+- The `sha256=` prefix is matched case-sensitively, exactly like GitHub —
+  Mollie's docs reference the lowercase `sha256=...` form only and the
+  official SDKs' prefix strip checks the exact lowercase spelling. (The
+  SDKs also tolerate a bare hex value; this crate does not — it requires
+  the documented prefix, since the signer always emits it.)
+- No built-in timestamp; the signed data is just the body, so `max_age` has no
+  effect for this provider — document this explicitly (mirroring GitHub).
+- Key rotation: during the documented 24-hour rotation window Mollie attaches
+  **two** `X-Mollie-Signature` headers on each event (one per secret). This
+  crate's single-header model reads the first value, so callers rotating
+  secrets should keep the previous secret until the window closes and verify
+  against each — at least one of those `verify()` calls will pass.
+- Scope carve-out: Mollie's *classic* payment webhooks (the
+  `webhookUrl`-configured deliveries that POST a single `id=<resource_id>`
+  form field) are **unsigned** and deliver no signature header; only
+  next-gen webhooks are signed, and those are what this variant covers.
+- Test-vector provenance: Mollie's docs publish the header *shape*
+  (`sha256=4a4c6f3e...`) but no byte-exact secret/body/signature triple (the
+  signing secret is operator-generated), so the implementation is validated
+  against locally constructed, deterministic vectors over the documented
+  construction using a body mirroring the published `payment-link.paid` event
+  example, cross-checked with `openssl dgst` and Python's `hashlib`/`hmac`.
+  Replace them if Mollie ever publishes fixed vectors.
 
 ### Standard Webhooks spec
 
