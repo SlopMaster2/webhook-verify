@@ -204,7 +204,7 @@ pub enum Provider {
     /// signing secret is optional: when none is set, Tally sends unsigned
     /// requests (`spec.md` §3). Tally signs no timestamp, so `max_age` has no
     /// effect for this provider.
-Tally,
+    Tally,
     /// FastSpring (`X-FS-Signature`, base64-encoded HMAC-SHA256 over the raw
     /// body).
     ///
