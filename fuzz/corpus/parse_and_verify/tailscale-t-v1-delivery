@@ -1,0 +1,3 @@
+Tailscale-Webhook-Signature:t=1720000000,v1=7d66876e2ba2fdc9743974642d91f22adff2b331c5f1a568ac3b2b535699f626
+
+[{"timestamp":"2024-07-03T09:46:40.554Z","version":1,"type":"nodeCreated","tailnet":"example.com","message":"Node alice-workstation1.yak-bebop.ts.net created","data":{"nodeID":"nFJw3SRKTM59","actor":"alice@example.com"}}]

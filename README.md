@@ -135,6 +135,7 @@ hand-copied signing-string logic to get wrong.
 | Calendly | HMAC-SHA256 over `t.body`, hex, `Calendly-Webhook-Signature` (`t=,v1=` list) + replay window | ✅ |
 | Vercel (Webhooks, Log Drains, integration webhooks) | HMAC-SHA1 over raw body, bare hex, `x-vercel-signature` (no prefix, no timestamp) | ✅ |
 | X (formerly Twitter) | HMAC-SHA256 over raw body, base64, `sha256=` prefix, `x-twitter-webhooks-signature` (no timestamp; consumer secret key) | ✅ |
+| Tailscale | HMAC-SHA256 over `t.body`, hex, `Tailscale-Webhook-Signature` (`t=,v1=` list, rotation-safe) + replay window | ✅ |
 | Standard Webhooks spec (Svix, Clerk, Resend, GitLab 19.0+ signing tokens, ...) | HMAC-SHA256, `webhook-signature` (`v1,` base64, rotation list) + replay window | ✅ |
 | Custom | User-supplied HMAC scheme via `Provider::Custom(..)` (SHA-256/SHA-1/SHA-512, hex/base64, optional prefix + timestamp replay window) | ✅ |
 

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: `Tailscale`**. Verifies the hex HMAC-SHA256 in
+  `Tailscale-Webhook-Signature`, a comma-separated `t=<unix_ts>,v1=<hex>`
+  list. The signed string is `{t}.{raw_body}` keyed by the per-endpoint
+  webhook secret; the docs recommend a five-minute replay window, so the
+  shared symmetric `max_age` (default 300s) applies. Multiple `v1=` values
+  are accepted during secret rotation, and unknown fields/schemes are
+  discarded. Scheme and test-vector provenance linked to
+  <https://tailscale.com/docs/features/webhooks> and Tailscale's official
+  example verifier
+  (<https://github.com/tailscale/tailscale/blob/main/docs/webhooks/example.go>)
+  in `spec.md` §3.
 - **`Provider::from_str` now also accepts `"resend"` and `"svix"`** for
   [`Provider::StandardWebhooks`], matching the brand names of two of its
   biggest signers (Resend and Svix both deliver via the Standard Webhooks /

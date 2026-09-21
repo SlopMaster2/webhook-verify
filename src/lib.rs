@@ -102,6 +102,7 @@
 //! | Calendly | HMAC-SHA256 over `t.body`, hex, `Calendly-Webhook-Signature` (`t=,v1=` list) + tolerance window |
 //! | Vercel | HMAC-SHA1 over raw body, hex, `x-vercel-signature` (no timestamp) |
 //! | X (formerly Twitter) | HMAC-SHA256 over raw body, base64, `sha256=` prefix, `x-twitter-webhooks-signature` (no timestamp) |
+//! | Tailscale | HMAC-SHA256 over `t.body`, hex, `Tailscale-Webhook-Signature` (`t=,v1=` list, rotation-safe) + tolerance window |
 //! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, ...) |
 //! | Custom | User-supplied HMAC scheme via [`Provider::Custom`] |
 //!
