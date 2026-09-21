@@ -709,6 +709,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Provider::LemonSqueezy` `Display` now spells the brand the way Lemon
+  Squeezy does.** The enum variant's `Display` impl wrote `"LemonSqueezy"`,
+  the only place in the crate that deviates from the official `Lemon Squeezy`
+  spelling used everywhere else (the enum doc comment, `spec.md` §3, README,
+  `lib.rs`, and the module docs). Following the LINE- and CircleCI-formatting
+  precedents, the `Display` string now matches the brand, so callers doing an
+  exact string compare on `provider.to_string()` (log filtering, config echo,
+  tests) no longer get a false negative against `"Lemon Squeezy"`. `FromStr`
+  already matches case-insensitively and accepts the space-separated form, so
+  round-trips and all existing parse tests are unaffected.
 - **`Provider::Line` `Display` now spells the brand the way LINE does.** The
   enum variant's `Display` impl wrote `"Line"`, the only place in the crate
   that deviates from the official `LINE` capitalization used everywhere else
