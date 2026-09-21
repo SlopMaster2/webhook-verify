@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: `FastSpring`** (`Provider::FastSpring`). Verifies the bare
+  base64 HMAC-SHA256 over the raw body in the `X-FS-Signature` header, keyed
+  by the per-webhook "HMAC SHA256 Secret" — the same shape as Tally, Shopify,
+  Xero, and WooCommerce. The signing secret is optional: when the webhook's
+  secret field is left blank, FastSpring sends unsigned requests. FastSpring's
+  docs warn the header may arrive with varying case (lookup is
+  case-insensitive) and note that payloads must be verified before any JSON
+  parsing (raw-body signing, matching the crate's `raw_body` contract). No
+  timestamp is signed, so `max_age` has no effect. Scheme and test-vector
+  provenance linked to <https://developer.fastspring.com/reference/message-security>
+  in `spec.md` §3. `Provider::from_str` accepts `"fastspring"`.
 - **New provider: `Tailscale`**. Verifies the hex HMAC-SHA256 in
   `Tailscale-Webhook-Signature`, a comma-separated `t=<unix_ts>,v1=<hex>`
   list. The signed string is `{t}.{raw_body}` keyed by the per-endpoint

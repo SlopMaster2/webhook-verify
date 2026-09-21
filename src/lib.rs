@@ -66,6 +66,7 @@
 //! | Slack | HMAC-SHA256 `v0=` scheme + timestamp |
 //! | Square | HMAC-SHA256 over notification URL + body, base64, `x-square-hmacsha256-signature` (needs `VerifyOptions::request_url`) |
 //! | Tally | HMAC-SHA256 over raw body, base64, `Tally-Signature` (no timestamp) |
+//! | FastSpring | HMAC-SHA256 over raw body, base64, `X-FS-Signature` (per-webhook HMAC secret, no timestamp; header may arrive with varying case) |
 //! | Twilio | HMAC-SHA1 (base64) over URL + sorted form params, `X-Twilio-Signature` (needs `VerifyOptions::request_url` + `form_params`) |
 //! | Mandrill (Mailchimp Transactional) | HMAC-SHA1 (base64) over URL + sorted form params, `X-Mandrill-Signature` (needs `VerifyOptions::request_url` + `form_params`) |
 //! | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) |
