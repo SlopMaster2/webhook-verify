@@ -483,7 +483,7 @@ impl fmt::Display for Provider {
             Provider::HubSpot => f.write_str("HubSpot"),
             Provider::Klaviyo => f.write_str("Klaviyo"),
             Provider::Mandrill => f.write_str("Mandrill"),
-            Provider::Line => f.write_str("Line"),
+            Provider::Line => f.write_str("LINE"),
             Provider::Shopify => f.write_str("Shopify"),
             Provider::Slack => f.write_str("Slack"),
             Provider::Square => f.write_str("Square"),
@@ -1482,7 +1482,7 @@ mod tests {
         assert_eq!(Provider::HubSpot.to_string(), "HubSpot");
         assert_eq!(Provider::Klaviyo.to_string(), "Klaviyo");
         assert_eq!(Provider::Mandrill.to_string(), "Mandrill");
-        assert_eq!(Provider::Line.to_string(), "Line");
+        assert_eq!(Provider::Line.to_string(), "LINE");
         assert_eq!(Provider::Shopify.to_string(), "Shopify");
         assert_eq!(Provider::Slack.to_string(), "Slack");
         assert_eq!(Provider::Square.to_string(), "Square");
