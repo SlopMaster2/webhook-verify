@@ -667,6 +667,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: clippy gate documented with `--all-targets`** — `spec.md` §6 and
+  `AGENTS.md` (§4 workflow, §6 PR checklist) now document the clippy run the
+  CI gate actually enforces (`cargo clippy --all-features --all-targets -- -D
+  warnings`, PR #124). The spec previously listed the pre-`--all-targets`
+  command, so a contributor following it locally would lint only lib+bins and
+  let test-only drift through the exact gate that already shipped (#124).
+  Documentation-only change; no verification behavior touched.
 - **Lint: `missing_debug_implementations`** — all public types are now
   required to implement `Debug`, enforced by `#![deny(missing_debug_implementations)]`
   (mirrors the existing `#![deny(missing_docs)]` guard). Every public type
