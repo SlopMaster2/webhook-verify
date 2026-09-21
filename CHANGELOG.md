@@ -737,6 +737,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Fuzz seed-corpus doc comment now enumerates the Tailscale seed.** The
+  `parse_and_verify` target's seed list
+  (`fuzz/fuzz_targets/parse_and_verify.rs`) documented every committed corpus
+  seed, but the `tailscale-t-v1-delivery` seed shipped with the Tailscale
+  provider (#140) was never added to the enumeration — the comment claimed to
+  cover the corpus yet listed 55 of its 56 files. The entry is now documented
+  with the same rationale style as the rest (same drift class as the missing
+  DocuSign/Paystack and LINE seeds fixed in #91/#101 and the Box/Vercel seeds
+  fixed later). Comment-only; no behavior, seed bytes, or crate code affected.
 - **`Provider::StandardWebhooks` `Display` now spells the brand the way the
   spec's own corpus does.** The enum variant's `Display` impl wrote
   `"StandardWebhooks"`, the only place in the crate that deviates from the

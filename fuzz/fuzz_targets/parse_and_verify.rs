@@ -193,6 +193,11 @@
 //!   `x-twitter-webhooks-signature` shape (`sha256=` prefixed base64
 //!   HMAC-SHA256 over the raw body, no timestamp), reaching the prefix match,
 //!   base64 decode, the 32-byte gate, and HMAC comparison.
+//! - `tailscale-t-v1-delivery` — Tailscale's combined
+//!   `Tailscale-Webhook-Signature` header with a `t=...,v1=...` list over a
+//!   `nodeCreated` event body, reaching the comma/key=value splitting,
+//!   timestamp parse, hex decode, 32-byte gate, and HMAC comparison over
+//!   `{t}.{body}`.
 //! - `custom-slack-like-delivery` — the Slack-shaped `CustomScheme` target
 //!   configuration (`X-Slack-Signature` with a `v0=` hex HMAC over
 //!   `v0:{ts}:{body}` plus the `X-Slack-Request-Timestamp` header), reaching
