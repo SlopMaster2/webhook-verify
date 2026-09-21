@@ -522,7 +522,7 @@ impl fmt::Display for Provider {
             Provider::Calendly => f.write_str("Calendly"),
             Provider::Vercel => f.write_str("Vercel"),
             Provider::X => f.write_str("X"),
-            Provider::StandardWebhooks => f.write_str("StandardWebhooks"),
+            Provider::StandardWebhooks => f.write_str("Standard Webhooks"),
             Provider::Custom(scheme) => {
                 write!(f, "Custom({}", scheme.signature_header)?;
                 write!(f, ", {}, {}", scheme.hash, scheme.encoding)?;
@@ -1520,7 +1520,7 @@ mod tests {
         assert_eq!(Provider::Calendly.to_string(), "Calendly");
         assert_eq!(Provider::Vercel.to_string(), "Vercel");
         assert_eq!(Provider::X.to_string(), "X");
-        assert_eq!(Provider::StandardWebhooks.to_string(), "StandardWebhooks");
+        assert_eq!(Provider::StandardWebhooks.to_string(), "Standard Webhooks");
 
         let custom = Provider::Custom(CustomScheme {
             hash: HashAlg::Sha256,
