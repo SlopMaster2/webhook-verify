@@ -19,9 +19,9 @@
 //!   with the channel secret `8c570fa6dd201bb328f1c1eac23a96d8` yields the
 //!   signature `GhRKmvmHys4Pi8DxkF4+EayaH0OqtJtaZxgTD9fMDLs=` (their sample
 //!   `openssl dgst -sha256 -hmac ... | openssl base64` command is reproduced
-//!   in `spec.md` §3). Note the docs spell the header lowercase
-//!   (`x-line-signature`); HTTP headers are case-insensitive and the constant
-//!   here resolves either spelling.
+//!   in `spec.md` §3). The docs spell the header lowercase
+//!   (`x-line-signature`), so the constant here follows that spelling;
+//!   HTTP headers are case-insensitive and lookup resolves either form.
 //!
 //! LINE does not sign a timestamp, so replay protection cannot be provided at
 //! the signature layer — the docs recommend handling replayed deliveries at
@@ -41,7 +41,12 @@ use crate::core::secret::Secret;
 use base64::Engine;
 
 /// The header carrying LINE's signature.
-pub(crate) const SIGNATURE_HEADER: &str = "X-Line-Signature";
+///
+/// LINE's official docs spell this header lowercase
+/// (`x-line-signature`); the `HeaderMap` lookup is ASCII case-insensitive, so
+/// the raw-bytes spelling surfaced in `VerifyError` messages and adapter scans
+/// follows the provider's own spelling (`spec.md` §3, LINE row).
+pub(crate) const SIGNATURE_HEADER: &str = "x-line-signature";
 
 /// HMAC-SHA256 output length in bytes.
 const SIGNATURE_LEN_BYTES: usize = 32;
@@ -70,7 +75,7 @@ pub(crate) fn verify(
     }
 }
 
-/// Parses `X-Line-Signature` into its 32 decoded signature bytes.
+/// Parses `x-line-signature` into its 32 decoded signature bytes.
 ///
 /// LINE sends bare base64 with no prefix. Every failure mode maps to a
 /// distinct error variant so callers can tell malformed-request noise from

@@ -190,7 +190,8 @@ pub enum Provider {
     Shopify,
     /// Slack (`X-Slack-Signature`, `v0=` scheme with timestamp).
     Slack,
-    /// Square (HMAC-SHA256 over notification URL + body, base64).
+    /// Square (`x-square-hmacsha256-signature`, HMAC-SHA256 over notification
+    /// URL + body, base64; needs `VerifyOptions::request_url`).
     Square,
     /// Tally (`Tally-Signature`, base64-encoded HMAC-SHA256 over the raw
     /// body).
