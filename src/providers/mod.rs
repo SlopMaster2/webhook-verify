@@ -1477,8 +1477,11 @@ mod tests {
         assert_eq!(Provider::Stripe.to_string(), "Stripe");
         assert_eq!(Provider::GitHub.to_string(), "GitHub");
         assert_eq!(Provider::Bitbucket.to_string(), "Bitbucket");
+        assert_eq!(Provider::Contentful.to_string(), "Contentful");
+        assert_eq!(Provider::Box.to_string(), "Box");
         assert_eq!(Provider::Intercom.to_string(), "Intercom");
         assert_eq!(Provider::Expo.to_string(), "Expo");
+        assert_eq!(Provider::Meta.to_string(), "Meta");
         assert_eq!(Provider::HubSpot.to_string(), "HubSpot");
         assert_eq!(Provider::Klaviyo.to_string(), "Klaviyo");
         assert_eq!(Provider::Mandrill.to_string(), "Mandrill");
@@ -1486,6 +1489,7 @@ mod tests {
         assert_eq!(Provider::Shopify.to_string(), "Shopify");
         assert_eq!(Provider::Slack.to_string(), "Slack");
         assert_eq!(Provider::Square.to_string(), "Square");
+        assert_eq!(Provider::Tally.to_string(), "Tally");
         assert_eq!(Provider::Twilio.to_string(), "Twilio");
         assert_eq!(Provider::Twitch.to_string(), "Twitch");
         assert_eq!(Provider::Typeform.to_string(), "Typeform");
@@ -1557,6 +1561,8 @@ mod tests {
             ("stripe", Provider::Stripe),
             ("github", Provider::GitHub),
             ("bitbucket", Provider::Bitbucket),
+            ("contentful", Provider::Contentful),
+            ("box", Provider::Box),
             ("intercom", Provider::Intercom),
             ("expo", Provider::Expo),
             ("meta", Provider::Meta),
@@ -1567,6 +1573,7 @@ mod tests {
             ("shopify", Provider::Shopify),
             ("slack", Provider::Slack),
             ("square", Provider::Square),
+            ("tally", Provider::Tally),
             ("twilio", Provider::Twilio),
             ("twitch", Provider::Twitch),
             ("typeform", Provider::Typeform),
