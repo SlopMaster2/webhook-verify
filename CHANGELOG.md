@@ -709,6 +709,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Docs: a broken intra-doc link in the `Provider` `FromStr` parse-notes.**
+  `ProviderParseError`'s implementation notes wrote
+  `` `"lemon squeezy"`/`"lemon-squeezy"` ↔ [`Provider::LemonSqueezy`, `` —
+  an opening `[` with no matching `]` — so docs.rs rendered the literal text
+  `[ Provider::LemonSqueezy ,` instead of a link to the enum variant (the
+  rest of the list, `StandardWebhooks`/`HubSpot`, linked normally). Unbalanced
+  brackets do not trip `RUSTDOCFLAGS="-D warnings"`, so the `doc` CI job
+  could not catch it. Doc-only change; verification behavior is untouched.
 - **LINE: the signature-header constant and spec now spell the header the way
   LINE's docs do.** LINE's official "Verify webhook signature" docs send the
   digest in a lowercase `x-line-signature` header, but the crate's

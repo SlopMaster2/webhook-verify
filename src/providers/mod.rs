@@ -545,7 +545,7 @@ impl fmt::Display for Provider {
 /// [`fmt::Display`] spelling of each provider (e.g. `"github"`, `"GitHub"`,
 /// `"GITHUB"`), plus the space-separated and hyphenated human-readable forms
 /// for the providers whose brand name runs several words together:
-/// `"lemon squeezy"`/`"lemon-squeezy"` ↔ [`Provider::LemonSqueezy`,
+/// `"lemon squeezy"`/`"lemon-squeezy"` ↔ [`Provider::LemonSqueezy`],
 /// `"standard webhooks"`/`"standard-webhooks"` ↔
 /// [`Provider::StandardWebhooks`], `"hub spot"`/`"hub-spot"` ↔
 /// [`Provider::HubSpot`], etc. — the spellings operators actually write in
