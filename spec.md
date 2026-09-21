@@ -54,6 +54,7 @@ pub enum Provider {
     Square,
     Tally,
     FastSpring,
+    GoCardless,
     Twilio,
     Twitch,
     Typeform,
@@ -2238,6 +2239,45 @@ the base64 HMAC-SHA256 construction, with working Java/Node/PHP samples).
   shape of an `order.completed` event, cross-checked with Python's
   `hashlib`/`hmac` and `openssl`. Replace them if FastSpring ever publishes
   fixed vectors.
+
+### GoCardless
+
+Source: <https://docs.gocardless.com/docs/api-reference/webhooks> (the
+official "Webhooks Reference" page: "Signature verification" describes the
+`Webhook-Signature` header and the hex HMAC-SHA256 construction, with a
+working Ruby sample and an explicit raw-body admonition), cross-checked
+against GoCardless's official SDK implementations
+(<https://github.com/gocardless/gocardless-pro-java>,
+<https://github.com/gocardless/gocardless-pro-go>,
+<https://github.com/gocardless/gocardless-nodejs>).
+
+- Header: `Webhook-Signature: <hex_hmac>` — a bare lowercase hex digest of
+  the HMAC-SHA256 over the raw request body, keyed by the webhook endpoint's
+  secret. No `sha256=` prefix and no timestamp; same shape as Razorpay and
+  Lemon Squeezy
+- Signed string: the raw request body bytes, unmodified. GoCardless's docs
+  are explicit: "Use the raw request body — do not parse the JSON and
+  re-serialise it, as this may change the byte sequence and break the
+  digest"; this crate hashes `raw_body` verbatim (`spec.md` §4), matching the
+  signer's actual wire bytes
+- Algorithm: HMAC-SHA256, hex-encoded (lowercase). Key: the webhook endpoint
+  secret from the Dashboard, as its UTF-8 bytes, used verbatim — **never
+  decoded**. The secret looks base64url-shaped, which tempts a base64 decode
+  before HMAC-ing; GoCardless's reference code never decodes it, and decoding
+  produces a non-matching digest, so the crate treats it as an opaque byte
+  string
+- No timestamp in the signature scheme (`max_age` has no effect); GoCardless
+  delivers each event at least once (retrying on non-2xx response), so callers
+  dedupe on the payload's own `event.id` values, which is outside this crate's
+  scope (payload parsing is a non-goal, §1)
+- Test-vector provenance: GoCardless's docs describe the construction and
+  publish an example webhook (event body and signature header) but no
+  byte-exact secret/body/signature triple (the endpoint secret is shown only
+  at endpoint creation), so the implementation is validated against locally
+  constructed, deterministic vectors over the documented construction using a
+  body mirroring the published `mandates.cancelled` example event,
+  cross-checked with Python's `hashlib`/`hmac` and `openssl`. Replace them if
+  GoCardless ever publishes fixed vectors.
 
 ### Standard Webhooks spec
 
