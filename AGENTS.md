@@ -13,7 +13,7 @@ normative contract; this file is the process for meeting it.
 ## 1. What this repo is, in one paragraph
 
 `webhook-verify` is a security-sensitive, dependency-light crate that
-verifies inbound webhook signatures for 52 providers behind one API. The
+verifies inbound webhook signatures for 55 providers behind one API. The
 entire value of this project is **correctness and auditability**. A fast
 but wrong change is worse than no change. When in doubt, prefer the
 smaller, more conservative diff, and surface uncertainty explicitly in your
