@@ -24,7 +24,7 @@
 //! - Algorithm: RSASSA-PKCS1-v1_5 with SHA-256 — PayPal's
 //!   `SHA256withRSA`. The [`PayPal-Auth-Algo`](AUTH_ALGO_HEADER) header must
 //!   carry `SHA256withRSA` (matched case-insensitively); anything else fails
-//!   closed, so a future algorithm change surface as a rejection rather than
+//!   closed, so a future algorithm change surfaces as a rejection rather than
 //!   being silently accepted.
 //! - Signature encoding: base64 (standard alphabet, padded) of the RSA
 //!   signature bytes.

@@ -2311,7 +2311,7 @@ A provider implementation is not mergeable until it has:
      calls", "no required async runtime") and makes the security-critical
      path impure and much harder to audit.
   2. Trusting a cert URL is a deployment-specific decision (PayPal's
-     `Paypal-Cert-Url` must be validated against the caller's own
+     `PayPal-Cert-Url` must be validated against the caller's own
      allowlist before use). Getting it wrong silently weakens verification
      more thoroughly than any crypto bug; the crate should not make that
      choice on callers' behalf.
