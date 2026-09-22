@@ -1215,10 +1215,7 @@ fuzz_target!(|data: &[u8]| {
                 "x-signature".to_string(),
                 "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
             ),
-            (
-                "x-timestamp".to_string(),
-                "1700000000123".to_string(),
-            ),
+            ("x-timestamp".to_string(), "1700000000123".to_string()),
         ],
         body,
         WELL_FORMED_SECRET,
