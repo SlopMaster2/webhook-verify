@@ -1,0 +1,4 @@
+x-signature:59151be7df26a3f68ea91344ca9d4b521b5860f1922b7e4584a0e39a616aab5d
+x-timestamp:1357872222592
+
+{"id":"evt_100_2019102201540902013102020043_8321220011893766","name":"payment_attempt.authorized","account_id":"19621303213","data":{"object":{"payment_intent_id":"pi_09Y0F6n2zzMaxIW7DxAtCEyi","amount":"150.00","currency":"USD","status":"AUTHORISED"}},"created_at":"2019-10-22T01:54:09+0000","version":"2024-02-22"}

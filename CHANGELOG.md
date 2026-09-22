@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: `Airwallex`** (`Provider::Airwallex`). Verifies the hex
+  HMAC-SHA256 in `x-signature`, whose signed string concatenates the
+  `x-timestamp` value (epoch **milliseconds**, as sent) directly with the raw
+  request body — no separators — keyed by the notification URL's secret used
+  verbatim as its UTF-8 bytes (never decoded). The docs warn to verify against
+  the original unmodified body before any JSON parsing, matching the crate's
+  `raw_body` contract. Airwallex leaves the freshness tolerance to the caller,
+  so the shared symmetric `max_age` replay window (default 300s) applies after
+  the millisecond timestamp is floored to whole seconds (as with WorkOS and
+  HubSpot); `x-signature` is only sent on subscriptions configured with a
+  secret. Scheme and test-vector provenance linked to
+  <https://www.airwallex.com/docs/developer-tools/webhooks/listen-for-webhook-events>
+  in `spec.md` §3. `Provider::from_str` accepts `"airwallex"`.
 - **New provider: `Mollie`** (next-gen webhooks; `Provider::Mollie`). Verifies
   the hex HMAC-SHA256 over the raw body in the `X-Mollie-Signature` header
   behind a literal `sha256=` prefix (matched case-sensitively, exactly like

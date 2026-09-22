@@ -6,6 +6,7 @@
 //! [`VerifyError::UnsupportedProvider`].
 
 mod adyen;
+mod airwallex;
 mod bitbucket;
 mod box_webhooks;
 mod calendly;
@@ -420,6 +421,16 @@ pub enum Provider {
     /// rather than the raw body, so they are not covered by this variant —
     /// see the provider module for the exact scheme.
     Adyen,
+    /// Airwallex (`x-signature`, HMAC-SHA256 over `{timestamp}{raw_body}`, hex,
+    /// with `x-timestamp` in epoch milliseconds).
+    ///
+    /// The signed string is the `x-timestamp` value exactly as sent, directly
+    /// concatenated with the raw body (no separators), hex-HMAC-SHA256 keyed by
+    /// the notification URL's secret used verbatim. The timestamp is
+    /// HMAC-covered, so the shared `max_age` replay window applies after the
+    /// millisecond value is floored to whole seconds (as with WorkOS and
+    /// HubSpot).
+    Airwallex,
     /// Mux (`Mux-Signature`, HMAC-SHA256 over `t.body`).
     ///
     /// Covers Mux webhook notifications (video assets, live streams, uploads,
@@ -573,6 +584,7 @@ impl fmt::Display for Provider {
             Provider::Xero => f.write_str("Xero"),
             Provider::Sentry => f.write_str("Sentry"),
             Provider::Adyen => f.write_str("Adyen"),
+            Provider::Airwallex => f.write_str("Airwallex"),
             Provider::Mux => f.write_str("Mux"),
             Provider::Zendesk => f.write_str("Zendesk"),
             Provider::WorkOS => f.write_str("WorkOS"),
@@ -703,6 +715,7 @@ impl core::str::FromStr for Provider {
             n if n.eq_ignore_ascii_case("xero") => Ok(Provider::Xero),
             n if n.eq_ignore_ascii_case("sentry") => Ok(Provider::Sentry),
             n if n.eq_ignore_ascii_case("adyen") => Ok(Provider::Adyen),
+            n if n.eq_ignore_ascii_case("airwallex") => Ok(Provider::Airwallex),
             n if n.eq_ignore_ascii_case("mux") => Ok(Provider::Mux),
             n if n.eq_ignore_ascii_case("zendesk") => Ok(Provider::Zendesk),
             n if n.eq_ignore_ascii_case("workos") => Ok(Provider::WorkOS),
@@ -746,7 +759,7 @@ impl fmt::Display for ProviderParseError {
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `contentful`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `tally`, `fastspring`, `gocardless`, `mollie`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `nylas`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `tailscale`, `x` (or `twitter`), \
+             `xero`, `sentry`, `adyen`, `airwallex`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `tailscale`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
@@ -830,6 +843,7 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::Xero => vec![xero::SIGNATURE_HEADER],
         Provider::Sentry => vec![sentry::SIGNATURE_HEADER],
         Provider::Adyen => vec![adyen::SIGNATURE_HEADER],
+        Provider::Airwallex => vec![airwallex::SIGNATURE_HEADER, airwallex::TIMESTAMP_HEADER],
         Provider::Mux => vec![mux::SIGNATURE_HEADER],
         Provider::Zendesk => vec![zendesk::SIGNATURE_HEADER, zendesk::TIMESTAMP_HEADER],
         Provider::WorkOS => vec![workos::SIGNATURE_HEADER],
@@ -977,6 +991,7 @@ pub(crate) fn verify_ref(
         Provider::Xero => xero::verify(headers, raw_body, secret, options),
         Provider::Sentry => sentry::verify(headers, raw_body, secret, options),
         Provider::Adyen => adyen::verify(headers, raw_body, secret, options),
+        Provider::Airwallex => airwallex::verify(headers, raw_body, secret, options),
         Provider::Mux => mux::verify(headers, raw_body, secret, options),
         Provider::Zendesk => zendesk::verify(headers, raw_body, secret, options),
         Provider::WorkOS => workos::verify(headers, raw_body, secret, options),
@@ -1590,6 +1605,7 @@ mod tests {
         assert_eq!(Provider::Xero.to_string(), "Xero");
         assert_eq!(Provider::Sentry.to_string(), "Sentry");
         assert_eq!(Provider::Adyen.to_string(), "Adyen");
+        assert_eq!(Provider::Airwallex.to_string(), "Airwallex");
         assert_eq!(Provider::Mux.to_string(), "Mux");
         assert_eq!(Provider::Zendesk.to_string(), "Zendesk");
         assert_eq!(Provider::WorkOS.to_string(), "WorkOS");
@@ -1678,6 +1694,7 @@ mod tests {
             ("xero", Provider::Xero),
             ("sentry", Provider::Sentry),
             ("adyen", Provider::Adyen),
+            ("airwallex", Provider::Airwallex),
             ("mux", Provider::Mux),
             ("zendesk", Provider::Zendesk),
             ("workos", Provider::WorkOS),
@@ -1889,6 +1906,10 @@ mod tests {
             (Provider::Xero, &[xero::SIGNATURE_HEADER]),
             (Provider::Sentry, &[sentry::SIGNATURE_HEADER]),
             (Provider::Adyen, &[adyen::SIGNATURE_HEADER]),
+            (
+                Provider::Airwallex,
+                &[airwallex::SIGNATURE_HEADER, airwallex::TIMESTAMP_HEADER],
+            ),
             (Provider::Mux, &[mux::SIGNATURE_HEADER]),
             (Provider::Paddle, &[paddle::SIGNATURE_HEADER]),
             (Provider::PagerDuty, &[pagerduty::SIGNATURE_HEADER]),
@@ -2016,7 +2037,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 55] {
+    fn provider_list() -> [Provider; 56] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -2064,6 +2085,7 @@ mod tests {
             Provider::Xero,
             Provider::Sentry,
             Provider::Adyen,
+            Provider::Airwallex,
             Provider::Mux,
             Provider::Zendesk,
             Provider::WorkOS,

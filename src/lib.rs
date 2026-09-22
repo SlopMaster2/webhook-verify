@@ -98,6 +98,7 @@
 //! | Xero | HMAC-SHA256, base64, `x-xero-signature` |
 //! | Sentry | HMAC-SHA256 over raw body, hex, `Sentry-Hook-Signature` (no timestamp) |
 //! | Adyen | HMAC-SHA256 over raw body, base64, `HmacSignature` (hex key, no timestamp) |
+//! | Airwallex | HMAC-SHA256 over `{timestamp}{raw_body}`, hex, `x-signature` + `x-timestamp` (epoch ms→s replay window) |
 //! | Mux | HMAC-SHA256 over `t.body`, hex, `Mux-Signature` + tolerance window |
 //! | Zendesk | HMAC-SHA256 over `{timestamp}{raw_body}`, base64, `X-Zendesk-Webhook-Signature` + tolerance window |
 //! | WorkOS | HMAC-SHA256 over `t.body`, hex, `WorkOS-Signature` (`t=,v1=` list, millis timestamp floored for the replay window) |
