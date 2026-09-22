@@ -1971,6 +1971,90 @@ mod tests {
         );
     }
 
+    #[test]
+    fn fuzz_implemented_pool_covers_every_nameable_provider() {
+        use std::fs;
+        use std::path::Path;
+
+        // The fuzz target's `IMPLEMENTED` pool (`spec.md` §5.6) is the one
+        // provider listing with no drift guard, and it has drifted twice —
+        // Mollie's corpus seed shipped missing (PR #147) and PayPal shipped
+        // without a row in the pool (PR #161, where the fix was still
+        // manual). The README/crate-doc tables and the §2 enum sketch are
+        // pinned by the guards above; pin the fuzz pool to the same
+        // `provider_list()` source of truth so a provider that ships without
+        // fuzz coverage fails CI instead of shrinking the fuzz surface
+        // silently. `Custom` is deliberately absent: it is not
+        // name-constructible and the target exercises it through dedicated
+        // `attempt()` calls, so the pool must list exactly `provider_list()`.
+        //
+        // `fuzz/` is excluded from the crates.io tarball (Cargo.toml
+        // `exclude`), so in a packaged checkout the file does not exist and
+        // the guard is skipped — it is a repo-internal test, not part of the
+        // shipped crate's contract.
+        let target = {
+            let fuzz_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz");
+            let path = fuzz_dir.join("fuzz_targets/parse_and_verify.rs");
+            match fs::read_to_string(path) {
+                Ok(src) => src,
+                // `fuzz/` not present (e.g. the publish tarball): nothing to
+                // guard against here, and the crate's own tests must not fail
+                // on a file it does not ship.
+                Err(_) => return,
+            }
+        };
+
+        let listed = fuzz_implemented_providers(&target);
+        assert_eq!(
+            listed.len(),
+            provider_list().len(),
+            "fuzz IMPLEMENTED pool must list every name-constructible provider exactly once ({} in `provider_list()`, {listed:?} found)",
+            provider_list().len(),
+        );
+        for provider in provider_list() {
+            let ident = format!("{provider:?}");
+            let hits = listed
+                .iter()
+                .filter(|listed| listed.as_str() == ident)
+                .count();
+            assert_eq!(
+                hits, 1,
+                "fuzz IMPLEMENTED pool must list `{ident}` exactly once (found {hits})"
+            );
+        }
+        assert!(
+            !listed.contains(&"Custom".to_string()),
+            "fuzz IMPLEMENTED pool must not list `Custom` (it is not name-constructible)"
+        );
+    }
+
+    /// The `Provider::<Variant>` identifiers in the fuzz target's
+    /// `const IMPLEMENTED: &[Provider] = &[ ... ];` block, in list order.
+    /// Comments inside the block are skipped because only `Provider::`
+    /// identifiers are collected. Test-only helper over the target's source
+    /// text; the block delimiters are pinned by the assertion messages.
+    fn fuzz_implemented_providers(target: &str) -> Vec<String> {
+        let Some(start) = target.find("const IMPLEMENTED: &[Provider] = &[") else {
+            panic!("fuzz target must declare `const IMPLEMENTED: &[Provider] = &[ ... ];`");
+        };
+        let Some(end) = target[start..].find("];") else {
+            panic!("fuzz target's `const IMPLEMENTED` must close with `];`");
+        };
+        let block = &target[start..start + end];
+        let mut listed: Vec<String> = Vec::new();
+        let mut rest = block;
+        while let Some(at) = rest.find("Provider::") {
+            let after = &rest[at + "Provider::".len()..];
+            let end = after
+                .char_indices()
+                .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '_'))
+                .map_or(after.len(), |(idx, _)| idx);
+            listed.push(after[..end].into());
+            rest = &after[end..];
+        }
+        listed
+    }
+
     /// The first-column brand-name cells of the "Supported providers" table
     /// in `markdown` (the crate-doc tables live in `//!` doc comments), with
     /// the header and separator rows excluded. Test helper over compile-time
