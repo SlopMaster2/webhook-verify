@@ -2517,7 +2517,13 @@ ambiguity).
 A provider implementation is not mergeable until it has:
 
 1. **At least one official test vector**, sourced from the provider's own
-   docs/SDK/test suite, with a comment linking to the source.
+   docs/SDK/test suite, with a comment linking to the source. When the
+   provider publishes no byte-exact secret/body/signature triple (its docs
+   document the signing construction but ship no fixed example values), ship
+   at least one vector built from the documented recipe instead, with a
+   provenance comment marking it as such and linking the construction source.
+   A byte-exact official vector is always preferred when one exists; the
+   recipe-built fallback is conditional on a linkable, official recipe.
 2. **A negative test**: same inputs, one byte flipped in the signature →
    must return `Err(VerifyError::SignatureMismatch)`.
 3. **A tamper test**: valid signature, but `raw_body` modified after
