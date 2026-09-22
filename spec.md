@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2524,8 +2524,13 @@ ambiguity).
   specification"; source: <https://docs.gitlab.com/user/project/integrations/webhooks>),
   and Bird — formerly MessageBird — whose webhook documentation states its
   deliveries "follow the Standard Webhooks specification" (source:
-  <https://docs.bird.com/api/notifications-api/api-reference/webhook-subscriptions/verifying-a-webhook-subscription>),
-  and a growing list of adopters — implementing this once covers all of them.
+  <https://docs.bird.com/api/notifications-api/api-reference/webhook-subscriptions/verifying-a-webhook-subscription>).
+  Clerk's official backend SDK maps the Svix header names (`svix-id`/
+  `svix-timestamp`/`svix-signature`) onto the Standard Webhooks header names
+  and verifies them with the reference Standard Webhooks verifier, keyed by
+  the `whsec_` signing secret from the Clerk Dashboard (source:
+  <https://github.com/clerk/javascript/blob/main/packages/backend/src/webhooks.ts>).
+  This is a growing list of adopters — implementing this once covers all of them.
 
 ---
 
