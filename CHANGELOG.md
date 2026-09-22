@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"gitlab"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of one of the
+  biggest signers of the scheme: GitLab's webhook documentation states its
+  delivery "follows the Standard Webhooks specification" and, when a
+  "signing token" is configured (the recommended authentication mode since
+  GitLab 19.0), signs every request with the same `webhook-id` /
+  `webhook-timestamp` / `webhook-signature` (`v1,<base64>`) construction and
+  `whsec_`-prefixed secret the provider already verifies. Config files that
+  name the provider by the sender's brand — `provider: gitlab` — now parse
+  to [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling; GitLab's legacy plaintext
+  `secret token` (`X-Gitlab-Token`) mode is intentionally *not* covered —
+  it offers no signature to verify.)
 - **New provider: `Webflow`** (`Provider::Webflow`). Verifies the hex
   HMAC-SHA256 in `x-webflow-signature`, whose signed string joins the
   `x-webflow-timestamp` value — Unix epoch **milliseconds**, parsed to an
