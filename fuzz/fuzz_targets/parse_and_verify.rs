@@ -221,6 +221,11 @@
 //!   (bare-hex `x-signature` + epoch-milliseconds `x-timestamp`), reaching the
 //!   ms timestamp parse, hex decode, the 32-byte gate, the `{timestamp}{body}`
 //!   concatenation HMAC comparison, and the ms→s floored replay path.
+//! - `webflow-timestamped-signature-delivery` — Webflow's two-header shape
+//!   (bare-hex `x-webflow-signature` + epoch-milliseconds
+//!   `x-webflow-timestamp`), reaching the ms timestamp parse, hex decode, the
+//!   32-byte gate, the `{timestamp}:{body}` HMAC comparison, and the ms→s
+//!   floored replay path.
 //! - `recharge-sha256-concat-signature` — Recharge's bare-hex
 //!   `X-Recharge-Hmac-Sha256` plain SHA-256 over `{secret}{body}` (no prefix,
 //!   no timestamp), reaching hex decode, the 32-byte gate, the digest-length
@@ -496,6 +501,11 @@ const IMPLEMENTED: &[Provider] = &[
     // base64-decode paths, and a well-formed-shaped attempt below reaches its
     // 32-byte gate and HMAC comparison.
     Provider::X,
+    // Webflow needs two headers (hex `x-webflow-signature` + epoch-milliseconds
+    // `x-webflow-timestamp`) to reach its signature path; a well-formed-shaped
+    // attempt below reaches its ms timestamp parse, hex decode, 32-byte gate,
+    // `{timestamp}:{body}` concatenation HMAC comparison, and ms→s replay path.
+    Provider::Webflow,
     // Tailscale needs a combined `t=...,v1=...` header to reach its signature
     // path; arbitrary bytes exercise the comma/key-value splitting and
     // empty-header rejection, and a well-formed-shaped attempt below reaches
@@ -1532,6 +1542,29 @@ fuzz_target!(|data: &[u8]| {
             "x-twitter-webhooks-signature".to_string(),
             "sha256=wKAeP9GiJsaFuQJdxOljWIpG7W4b0IJshW59aJtfNZ0=".to_string(),
         )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Webflow: a well-formed-shaped two-header delivery (valid-hex 32-byte
+    // `x-webflow-signature` + epoch-milliseconds `x-webflow-timestamp`) lets
+    // arbitrary body bytes reach the ms timestamp parse, the 32-byte length
+    // gate, the `{timestamp}:{body}` concatenation HMAC comparison, and the
+    // ms→s floored replay path; without it the loop above mostly fails
+    // earlier on malformed/missing header fields.
+    attempt(
+        Provider::Webflow,
+        &[
+            (
+                "x-webflow-signature".to_string(),
+                "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            ),
+            (
+                "x-webflow-timestamp".to_string(),
+                "1700000000123".to_string(),
+            ),
+        ],
         body,
         WELL_FORMED_SECRET,
         &url_scoped_options,

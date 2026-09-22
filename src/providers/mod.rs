@@ -63,6 +63,7 @@ mod twilio;
 mod twitch;
 mod typeform;
 mod vercel;
+mod webflow;
 mod woocommerce;
 mod workos;
 mod x_twitter;
@@ -506,6 +507,19 @@ pub enum Provider {
     /// the identity signed-string can reproduce the same bare-hex shape
     /// (`spec.md` §3, §2.2).
     Vercel,
+    /// Webflow site webhooks (`x-webflow-signature`, HMAC-SHA256 over
+    /// `{timestamp}:{raw_body}`, hex, with `x-webflow-timestamp` in epoch
+    /// milliseconds).
+    ///
+    /// The signed string is the timestamp parsed to an integer, canonical
+    /// decimal form (matching the docs' `parseInt`/`int` reference verifiers),
+    /// a literal colon, then the raw body — hex-HMAC-SHA256 keyed by the
+    /// webhook's signing key (a site token secret or the OAuth app's client
+    /// secret) used verbatim. The timestamp is HMAC-covered, so the shared
+    /// `max_age` replay window applies after the millisecond value is floored
+    /// to whole seconds (as with WorkOS and Airwallex). Webflow recommends a
+    /// 5-minute window, matching the crate's default `max_age`.
+    Webflow,
     /// X (formerly Twitter) webhook signatures
     /// (`x-twitter-webhooks-signature`, HMAC-SHA256 over the raw body, base64,
     /// `sha256=` prefix; no timestamp).
@@ -606,6 +620,7 @@ impl fmt::Display for Provider {
             Provider::WooCommerce => f.write_str("WooCommerce"),
             Provider::Calendly => f.write_str("Calendly"),
             Provider::Vercel => f.write_str("Vercel"),
+            Provider::Webflow => f.write_str("Webflow"),
             Provider::X => f.write_str("X"),
             Provider::Tailscale => f.write_str("Tailscale"),
             Provider::StandardWebhooks => f.write_str("Standard Webhooks"),
@@ -743,6 +758,7 @@ impl core::str::FromStr for Provider {
             }
             n if n.eq_ignore_ascii_case("calendly") => Ok(Provider::Calendly),
             n if n.eq_ignore_ascii_case("vercel") => Ok(Provider::Vercel),
+            n if n.eq_ignore_ascii_case("webflow") => Ok(Provider::Webflow),
             n if n.eq_ignore_ascii_case("x")
                 || n.eq_ignore_ascii_case("twitter")
                 || n.eq_ignore_ascii_case("x twitter")
@@ -775,7 +791,7 @@ impl fmt::Display for ProviderParseError {
             "unknown provider name: expected one of `stripe`, `github`, `bitbucket`, `contentful`, `box`, `intercom`, `expo`, `meta`, `hubspot`, `klaviyo`, `mandrill`, `line`, `shopify`, \
              `slack`, `square`, `tally`, `fastspring`, `gocardless`, `mollie`, `twilio`, `twitch`, `typeform`, `discord`, `paypal`, `sendgrid`, `paystack`, `paddle`, `pagerduty`, `pusher`, `linear`, \
              `launchdarkly`, `notion`, `nylas`, `zoom`, `cloudflare`, `circleci`, `coinbase`, `dropbox`, `docusign`, `fintoc`, `razorpay`, `recharge`, `ripple`, `lemonsqueezy` (or `lemon squeezy`), \
-             `xero`, `sentry`, `adyen`, `airwallex`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `tailscale`, `x` (or `twitter`), \
+             `xero`, `sentry`, `adyen`, `airwallex`, `mux`, `zendesk`, `workos`, `woocommerce`, `calendly`, `vercel`, `webflow`, `tailscale`, `x` (or `twitter`), \
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
@@ -867,6 +883,9 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
         Provider::WooCommerce => vec![woocommerce::SIGNATURE_HEADER],
         Provider::Calendly => vec![calendly::SIGNATURE_HEADER],
         Provider::Vercel => vec![vercel::SIGNATURE_HEADER],
+        Provider::Webflow => {
+            vec![webflow::SIGNATURE_HEADER, webflow::TIMESTAMP_HEADER]
+        }
         Provider::X => vec![x_twitter::SIGNATURE_HEADER],
         Provider::Tailscale => vec![tailscale::SIGNATURE_HEADER],
         Provider::Zoom => vec![zoom::SIGNATURE_HEADER, zoom::TIMESTAMP_HEADER],
@@ -1016,6 +1035,7 @@ pub(crate) fn verify_ref(
         Provider::WooCommerce => woocommerce::verify(headers, raw_body, secret, options),
         Provider::Calendly => calendly::verify(headers, raw_body, secret, options),
         Provider::Vercel => vercel::verify(headers, raw_body, secret, options),
+        Provider::Webflow => webflow::verify(headers, raw_body, secret, options),
         Provider::X => x_twitter::verify(headers, raw_body, secret, options),
         Provider::Tailscale => tailscale::verify(headers, raw_body, secret, options),
         #[cfg(feature = "paypal")]
@@ -1632,6 +1652,7 @@ mod tests {
         assert_eq!(Provider::WooCommerce.to_string(), "WooCommerce");
         assert_eq!(Provider::Calendly.to_string(), "Calendly");
         assert_eq!(Provider::Vercel.to_string(), "Vercel");
+        assert_eq!(Provider::Webflow.to_string(), "Webflow");
         assert_eq!(Provider::X.to_string(), "X");
         assert_eq!(Provider::Tailscale.to_string(), "Tailscale");
         assert_eq!(Provider::StandardWebhooks.to_string(), "Standard Webhooks");
@@ -1723,6 +1744,7 @@ mod tests {
             ("woocommerce", Provider::WooCommerce),
             ("calendly", Provider::Calendly),
             ("vercel", Provider::Vercel),
+            ("webflow", Provider::Webflow),
             ("x", Provider::X),
             ("tailscale", Provider::Tailscale),
             ("standardwebhooks", Provider::StandardWebhooks),
@@ -2058,6 +2080,10 @@ mod tests {
             (Provider::WooCommerce, &[woocommerce::SIGNATURE_HEADER]),
             (Provider::Calendly, &[calendly::SIGNATURE_HEADER]),
             (Provider::Vercel, &[vercel::SIGNATURE_HEADER]),
+            (
+                Provider::Webflow,
+                &[webflow::SIGNATURE_HEADER, webflow::TIMESTAMP_HEADER],
+            ),
             (Provider::X, &[x_twitter::SIGNATURE_HEADER]),
             (Provider::Tailscale, &[tailscale::SIGNATURE_HEADER]),
             (
@@ -2173,7 +2199,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 57] {
+    fn provider_list() -> [Provider; 58] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -2229,6 +2255,7 @@ mod tests {
             Provider::WooCommerce,
             Provider::Calendly,
             Provider::Vercel,
+            Provider::Webflow,
             Provider::X,
             Provider::Tailscale,
             Provider::StandardWebhooks,
