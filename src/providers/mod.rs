@@ -545,7 +545,8 @@ pub enum Provider {
     /// scheme). The docs recommend treating any event older than five minutes
     /// as a replay attack, so the shared `max_age` window applies.
     Tailscale,
-    /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend, ...).
+    /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend,
+    /// Bird/MessageBird, GitLab 19.0+ signing tokens, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
     /// providers and internal senders without waiting on a crate release,
@@ -652,10 +653,12 @@ impl fmt::Display for Provider {
 /// [`Provider::HubSpot`], etc. — the spellings operators actually write in
 /// config files.
 /// [`Provider::StandardWebhooks`] additionally accepts the brand names of the
-/// signers that serve it: `"svix"` and `"resend"` both parse to it. (Svix is
-/// the reference implementation whose scheme StandardWebhooks implements;
-/// Resend signs every delivery with the same `svix-signature` construction and
-/// Svix-form secret, per its official docs.)
+/// signers that serve it: `"svix"`, `"resend"`, `"messagebird"`, and `"bird"`
+/// all parse to it. (Svix is the reference implementation whose scheme
+/// StandardWebhooks implements; Resend signs every delivery with the same
+/// `svix-signature` construction and Svix-form secret, per its official docs;
+/// Bird — formerly MessageBird — likewise states its webhook deliveries
+/// follow the Standard Webhooks specification, per its official docs.)
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -771,7 +774,9 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("standard webhooks")
                 || n.eq_ignore_ascii_case("standard-webhooks")
                 || n.eq_ignore_ascii_case("svix")
-                || n.eq_ignore_ascii_case("resend") =>
+                || n.eq_ignore_ascii_case("resend")
+                || n.eq_ignore_ascii_case("messagebird")
+                || n.eq_ignore_ascii_case("bird") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -795,7 +800,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, and `resend` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, and `bird` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1786,6 +1791,10 @@ mod tests {
             ("standard-webhooks", Provider::StandardWebhooks),
             ("svix", Provider::StandardWebhooks),
             ("resend", Provider::StandardWebhooks),
+            ("messagebird", Provider::StandardWebhooks),
+            ("bird", Provider::StandardWebhooks),
+            ("MESSAGEBIRD", Provider::StandardWebhooks),
+            ("Bird", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -1848,10 +1857,10 @@ mod tests {
             );
         }
         // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
-        // ↔ Mandrill; `svix`/`resend` ↔ StandardWebhooks); the message names
-        // them too so an operator who typed a rejected alias sees it echoed
-        // back, instead of only the canonical spellings.
-        for alias in ["mailchimp", "svix", "resend"] {
+        // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird` ↔ StandardWebhooks);
+        // the message names them too so an operator who typed a rejected alias
+        // sees it echoed back, instead of only the canonical spellings.
+        for alias in ["mailchimp", "svix", "resend", "messagebird", "bird"] {
             assert!(
                 message.contains(&format!("`{alias}`")),
                 "error message should list the `{alias}` alias so operators can recover"
