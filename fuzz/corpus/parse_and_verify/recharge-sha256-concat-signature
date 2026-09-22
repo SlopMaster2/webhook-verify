@@ -1,0 +1,2 @@
+X-Recharge-Hmac-Sha256: 9204e51516e4f1b0520b2ecc33556fdb99dfe5e4adf62294152453aa72dd89df
+{"id":734031438,"type":"order/created","shop_id":438291,"order":{"id":123456789,"customer":{"id":8991507},"status":"queued","total_price":"19.99","currency":"USD"}}

@@ -78,6 +78,7 @@ pub enum Provider {
     DocuSign,
     Fintoc,
     Razorpay,
+    Recharge,
     Ripple,
     LemonSqueezy,
     Xero,
@@ -2379,6 +2380,60 @@ best-practices docs publish matching PHP/Python/Node recipes).
   construction using a body mirroring the published `payment-link.paid` event
   example, cross-checked with `openssl dgst` and Python's `hashlib`/`hmac`.
   Replace them if Mollie ever publishes fixed vectors.
+
+### Recharge
+
+Source: <https://docs.getrecharge.com/docs/webhooks-overview> (the official
+"Validating webhooks" documentation: the `X-Recharge-Hmac-Sha256` header, the
+`echo -n '<client secret string><request body string>' | openssl dgst -sha256`
+OpenSSL reference recipe, and the "go to" warning that the client secret
+"needs to be concatenated with request body string and placed before it in
+order for validation to work!"), cross-checked against the other three
+reference recipes in that same page — Python
+(`hashlib.sha256(secret_string + request_body_bytes)`), PHP
+(`hash('sha256', $client_secret.$request_body)`), and Ruby
+(`Digest::SHA256.hexdigest(secret_string + request_body)`). All four agree on
+a **plain SHA-256** digest of the concatenation — Recharge's header name says
+`Hmac` but the scheme is not an HMAC.
+
+- Header: `X-Recharge-Hmac-Sha256: <hex_sha256>` — lowercase bare hex digest,
+  no prefix, no timestamp, no signature-version field.
+- Signed string: the API Client Secret's UTF-8 bytes **concatenated with** the
+  raw request body bytes, secret first, no separator — `sha256(secret || body)`.
+  The signing key is the per-token **API Client Secret** (visible in the API
+  token's Edit page); the docs explicitly warn that the API token itself is
+  not the key. The secret is used verbatim as UTF-8 bytes, never decoded (and
+  never a Webhook URL secret).
+- Algorithm: SHA-256 (plain digest of the concatenation), hex-encoded
+  (lowercase). Because the construction is `sha256(secret || body)` and not
+  HMAC, the crate routes it through the audited shared
+  `verify_sha256_prepended_key` helper (`src/core/crypto.rs`), the only
+  non-HMAC shared-secret scheme in the crate.
+- Raw-body contract: the docs are explicit that the body "must be in JSON
+  string format. Validation will fail even if one space is lost in process of
+  JSON string generating" — the digest is over the exact wire bytes delivered,
+  so `raw_body` is passed through untouched per `spec.md` §4.
+- No built-in timestamp; the signed data is just `secret || body`, so `max_age`
+  and the injected clock have no effect for this provider, and replay
+  protection cannot be provided at the signature layer — document this
+  explicitly (mirroring Razorpay: no-timestamp, no replay protection).
+- Test-vector provenance: Recharge's docs publish the header *shape* and the
+  integration recipes but no byte-exact secret/body/signature triple (the
+  client secret is operator-generated), so the implementation is validated
+  against locally constructed, deterministic vectors over the documented
+  `sha256(secret || body)` construction using a body mirroring the published
+  `order/created` webhook example, cross-checked with `openssl dgst` and
+  Python's `hashlib`. The tests additionally pin the two classic traps:
+  (a) a genuine HMAC-SHA256 over the same key/body is **rejected** (the
+  `Hmac` header name lies), and (b) the reverse-order concatenation
+  `sha256(body || secret)` is **rejected** (secret must be prepended). Replace
+  these if Recharge ever publishes fixed vectors.
+- Scope note: Recharge is migrating to a timestamp-signed delivery format;
+  at the time of writing no official description, header name, or test vector
+  for that scheme is published (only a third-party re-implementation mentions
+  it), so this variant covers the **documented** body-only scheme only. The
+  migration format is outside this crate's current scope; revisit when
+  Recharge documents it.
 
 ### Standard Webhooks spec
 
