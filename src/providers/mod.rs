@@ -1594,6 +1594,7 @@ mod tests {
         assert_eq!(Provider::Slack.to_string(), "Slack");
         assert_eq!(Provider::Square.to_string(), "Square");
         assert_eq!(Provider::Tally.to_string(), "Tally");
+        assert_eq!(Provider::FastSpring.to_string(), "FastSpring");
         assert_eq!(Provider::GoCardless.to_string(), "GoCardless");
         assert_eq!(Provider::Mollie.to_string(), "Mollie");
         assert_eq!(Provider::Twilio.to_string(), "Twilio");
@@ -1618,6 +1619,7 @@ mod tests {
         assert_eq!(Provider::DocuSign.to_string(), "DocuSign");
         assert_eq!(Provider::Fintoc.to_string(), "Fintoc");
         assert_eq!(Provider::Razorpay.to_string(), "Razorpay");
+        assert_eq!(Provider::Recharge.to_string(), "Recharge");
         assert_eq!(Provider::Ripple.to_string(), "Ripple");
         assert_eq!(Provider::LemonSqueezy.to_string(), "Lemon Squeezy");
         assert_eq!(Provider::Xero.to_string(), "Xero");
@@ -1682,6 +1684,7 @@ mod tests {
             ("slack", Provider::Slack),
             ("square", Provider::Square),
             ("tally", Provider::Tally),
+            ("fastspring", Provider::FastSpring),
             ("gocardless", Provider::GoCardless),
             ("mollie", Provider::Mollie),
             ("twilio", Provider::Twilio),
@@ -1917,6 +1920,7 @@ mod tests {
             (Provider::DocuSign, &[docusign::SIGNATURE_HEADER]),
             (Provider::Fintoc, &[fintoc::SIGNATURE_HEADER]),
             (Provider::Razorpay, &[razorpay::SIGNATURE_HEADER]),
+            (Provider::Recharge, &[recharge::SIGNATURE_HEADER]),
             (
                 Provider::Ripple,
                 &[ripple::SIGNATURE_HEADER, ripple::TIMESTAMP_HEADER],
@@ -2056,7 +2060,7 @@ mod tests {
     /// missing from the round-trip list while present here). `Provider::Custom`
     /// is intentionally absent: it needs a `CustomScheme` and cannot be parsed
     /// from a bare name.
-    fn provider_list() -> [Provider; 56] {
+    fn provider_list() -> [Provider; 57] {
         [
             Provider::Stripe,
             Provider::GitHub,
@@ -2099,6 +2103,7 @@ mod tests {
             Provider::DocuSign,
             Provider::Fintoc,
             Provider::Razorpay,
+            Provider::Recharge,
             Provider::Ripple,
             Provider::LemonSqueezy,
             Provider::Xero,
