@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: `Recharge`** (`Provider::Recharge`). Verifies the hex digest
+  in the `X-Recharge-Hmac-Sha256` header, which — despite the header name — is
+  a **plain SHA-256** of the per-token **API Client Secret's** UTF-8 bytes
+  concatenated with the raw request body (secret first, no separator), not an
+  HMAC; the four reference recipes in Recharge's "Validating webhooks" docs
+  (OpenSSL, Python, PHP, Ruby) all agree on the bare-digest construction. The
+  docs warn the body "must be in JSON string format. Validation will fail even
+  if one space is lost" and that the reverse concatenation order "will result
+  in fake false", matching the crate's `raw_body` contract (never re-serialize)
+  and a secret-prepended signed string. It is the crate's only non-HMAC
+  shared-secret scheme and routes through the new audited shared
+  `verify_sha256_prepended_key` helper in `src/core/crypto.rs` (a strictly
+  additive core change: no existing code is touched, only Recharge consumes
+  it). No timestamp is signed, so `max_age` has no effect and replay
+  protection cannot be provided at the signature layer; the docs' newer
+  timestamp-signed format has no official description or vector yet and is
+  explicitly out of scope. Scheme and test-vector provenance linked to
+  <https://docs.getrecharge.com/docs/webhooks-overview> in `spec.md` §3.
+  `Provider::from_str` accepts `"recharge"`.
 - **New provider: `Airwallex`** (`Provider::Airwallex`). Verifies the hex
   HMAC-SHA256 in `x-signature`, whose signed string concatenates the
   `x-timestamp` value (epoch **milliseconds**, as sent) directly with the raw

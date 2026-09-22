@@ -127,6 +127,33 @@ pub(crate) fn sha256_hexdigest(bytes: &[u8]) -> alloc::string::String {
     hex::encode(hasher.finalize())
 }
 
+/// Verifies `provided_signature` against the plain SHA-256 digest of the
+/// concatenation `key || raw_body` — the UTF-8 bytes of a secret key
+/// immediately followed by the raw body, no separator — using a constant-time
+/// comparison.
+///
+/// This is **not** an HMAC. Recharge's scheme (`spec.md` §3) hashes a bare
+/// `client_secret ++ body` concatenation with SHA-256 despite the header being
+/// named `X-Recharge-Hmac-Sha256`; the four reference recipes in Recharge's
+/// own docs (`echo -n secret body | openssl dgst -sha256`, the Python
+/// `hashlib` snippet, the PHP `hash('sha256', secret.body)` snippet, and the
+/// Ruby `Digest::SHA256.hexdigest(secret + body)` snippet) all confirm the
+/// plain construction. Providers must call this helper instead of reaching
+/// for `sha2` directly, keeping the digest construction and the
+/// constant-time comparison in the audited module.
+#[must_use]
+pub(crate) fn verify_sha256_prepended_key(
+    key: &[u8],
+    raw_body: &[u8],
+    provided_signature: &[u8],
+) -> bool {
+    let mut hasher = Sha256::new();
+    hasher.update(key);
+    hasher.update(raw_body);
+    let expected = hasher.finalize();
+    expected.as_slice().ct_eq(provided_signature).into()
+}
+
 /// Verifies an Ed25519 `signature` over `message` against a 32-byte
 /// compressed Edwards public key.
 ///
@@ -539,6 +566,30 @@ mod tests {
             super::sha256_hexdigest(b"abc"),
             super::sha256_hexdigest(b" abc")
         );
+    }
+
+    #[test]
+    fn sha256_prepended_key_matches_independently_computed_vector() {
+        // SHA-256 of the concatenation `key || data` with no separator,
+        // cross-checked with `printf 'keydata' | openssl dgst -sha256` and
+        // Python `hashlib.sha256(b"key" + b"data")` — the plain-digest
+        // construction Recharge's docs mandate despite the `Hmac-Sha256`
+        // header name (`spec.md` §3).
+        let digest = decode("6b450ccb176c1a99a8f7bf460e92e0e4a4432237c2b8c6a277973c6dfd3bdd6c");
+        assert!(super::verify_sha256_prepended_key(b"key", b"data", &digest));
+
+        // Ordering is part of the construction: hashing `data || key` (the
+        // key appended instead of prepended) must not verify.
+        assert!(!super::verify_sha256_prepended_key(
+            b"data", b"key", &digest
+        ));
+
+        // A genuine HMAC of the same key/body produces a different digest —
+        // pinning that this provider's scheme is sha256(secret || body), not
+        // HMAC (Recharge's "gotcha": the header name lies). Value from
+        // `printf 'data' | openssl dgst -sha256 -hmac "key"`.
+        let hmac = decode("5031fe3d989c6d1537a013fa6e739da23463fdaec3b70137d828e36ace221bd0");
+        assert!(!super::verify_sha256_prepended_key(b"key", b"data", &hmac));
     }
 
     #[test]

@@ -221,6 +221,10 @@
 //!   (bare-hex `x-signature` + epoch-milliseconds `x-timestamp`), reaching the
 //!   ms timestamp parse, hex decode, the 32-byte gate, the `{timestamp}{body}`
 //!   concatenation HMAC comparison, and the ms→s floored replay path.
+//! - `recharge-sha256-concat-signature` — Recharge's bare-hex
+//!   `X-Recharge-Hmac-Sha256` plain SHA-256 over `{secret}{body}` (no prefix,
+//!   no timestamp), reaching hex decode, the 32-byte gate, the digest-length
+//!   check, and the crate's only non-HMAC shared-secret comparison.
 //! - `header-garbage-without-body-separator` — an adversarial malformed input
 //!   with no `\n\n` separator, anchoring the parser's fail-closed paths.
 
@@ -332,6 +336,13 @@ const IMPLEMENTED: &[Provider] = &[
     // timestamp); arbitrary header bytes exercise its hex-decode and 32-byte
     // gate, and a well-formed-shaped attempt below reaches HMAC comparison.
     Provider::Razorpay,
+    // Recharge is a single-header bare-hex **plain SHA-256** over
+    // `{secret}{body}` (secret prepended, no prefix, no timestamp) — the
+    // crate's only non-HMAC shared-secret provider; arbitrary header bytes
+    // exercise its hex-decode, 32-byte gate, and digest-length checks, and a
+    // well-formed-shaped attempt below reaches the sha256(secret || body)
+    // constant-time comparison.
+    Provider::Recharge,
     // Paystack is a single-header raw-body HMAC (bare hex, no prefix, no
     // timestamp, but SHA-512 — the only built-in provider with a 64-byte
     // digest); arbitrary header bytes exercise its hex-decode and 64-byte
@@ -1147,6 +1158,20 @@ fuzz_target!(|data: &[u8]| {
         Provider::Sentry,
         &[(
             "Sentry-Hook-Signature".to_string(),
+            "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+        )],
+        body,
+        WELL_FORMED_SECRET,
+        &url_scoped_options,
+    );
+
+    // Recharge: a well-formed-shaped `X-Recharge-Hmac-Sha256` (valid 64-char
+    // hex sig, no prefix, no timestamp) lets arbitrary body bytes reach the
+    // 32-byte length gate and the sha256(secret || body) comparison.
+    attempt(
+        Provider::Recharge,
+        &[(
+            "X-Recharge-Hmac-Sha256".to_string(),
             "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
         )],
         body,

@@ -93,6 +93,7 @@
 //! | DocuSign (Connect) | HMAC-SHA256 over raw body, base64, `X-Docusign-Signature-1` (first configured key, no timestamp) |
 //! | Fintoc | HMAC-SHA256 over `t.body`, hex, `Fintoc-Signature` (`t=,v1=` list) + tolerance window |
 //! | Razorpay | HMAC-SHA256 over raw body, hex, `X-Razorpay-Signature` (no timestamp) |
+//! | Recharge | Plain SHA-256 over `{client_secret}{raw_body}`, hex, `X-Recharge-Hmac-Sha256` (no timestamp, not an HMAC) |
 //! | Ripple (Collections) | HMAC-SHA256 over `{timestamp}.{sha256(body)}`, hex, `X-Webhook-Signature` + `X-Webhook-Timestamp` replay window (base64 key) |
 //! | Lemon Squeezy | HMAC-SHA256, `X-Signature` (bare hex, no timestamp) |
 //! | Xero | HMAC-SHA256, base64, `x-xero-signature` |

@@ -126,6 +126,7 @@ hand-copied signing-string logic to get wrong.
 | DocuSign (Connect webhooks) | HMAC-SHA256 over raw body, base64, `X-Docusign-Signature-1` (first configured key, no timestamp) | ✅ |
 | Fintoc | HMAC-SHA256 over `t.body`, hex, `Fintoc-Signature` (`t=,v1=` list) + replay window | ✅ |
 | Razorpay | HMAC-SHA256 over raw body, hex, `X-Razorpay-Signature` (no timestamp) | ✅ |
+| Recharge | Plain SHA-256 over `{client_secret}{raw_body}` (secret first, no separator — not an HMAC despite the header name), hex, `X-Recharge-Hmac-Sha256` (no timestamp) | ✅ |
 | Ripple (Collections) | HMAC-SHA256 over `{timestamp}.{sha256(body)}`, hex, `X-Webhook-Signature` + `X-Webhook-Timestamp` (base64 key, ms→s replay window) | ✅ |
 | Lemon Squeezy | HMAC-SHA256, `X-Signature` (bare hex, no prefix, no timestamp) | ✅ |
 | Xero | HMAC-SHA256, base64, `x-xero-signature` | ✅ |
