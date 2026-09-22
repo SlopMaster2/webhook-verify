@@ -113,6 +113,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `provider: svix` — now parse instead of erroring. (Alias accepted
   case-insensitively, like every other spelling; the original
   `"standardwebhooks"` / `"standard webhooks"` spellings are unchanged.)
+- **`Provider::from_str` now also accepts `"messagebird"` and `"bird"`** for
+  [`Provider::StandardWebhooks`], matching the brand names of Bird (formerly
+  MessageBird), whose webhook documentation states its deliveries "follow the
+  Standard Webhooks specification" (headers `webhook-id` /
+  `webhook-timestamp` / `webhook-signature` with `v1,<base64>` signatures and
+  a `whsec_`-prefixed signing secret). Config files that name the provider by
+  the sender's brand — `provider: bird` / `provider: messagebird` — now parse
+  to [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling.)
 - **New provider: `Contentful`** (webhooks with a configured signing secret).
   Verifies the hex HMAC-SHA256 in `x-contentful-signature`, reconstructed over
   Contentful's documented canonical string

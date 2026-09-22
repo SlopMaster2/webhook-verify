@@ -173,9 +173,10 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend" (adopters that sign deliveries with the same
-    // scheme), Mandrill takes "mailchimp"/"mailchimp transactional"/
-    // "mailchimp-transactional" (its current brand name), and X takes
+    // takes "svix"/"resend"/"messagebird"/"bird" (adopters that sign
+    // deliveries with the same scheme), Mandrill takes "mailchimp"/
+    // "mailchimp transactional"/"mailchimp-transactional" (its current brand
+    // name), and X takes
     // "twitter"/"x twitter"/"x-twitter" (its pre-rebrand name, per §3).
     // `custom` is rejected: a CustomScheme requires configuration and
     // must be built directly.
@@ -2520,6 +2521,9 @@ ambiguity).
 - Used by Svix, Clerk, Resend, GitLab (webhook "signing token", GitLab 19.0+ —
   GitLab states its webhook delivery "follows the Standard Webhooks
   specification"; source: <https://docs.gitlab.com/user/project/integrations/webhooks>),
+  and Bird — formerly MessageBird — whose webhook documentation states its
+  deliveries "follow the Standard Webhooks specification" (source:
+  <https://docs.bird.com/api/notifications-api/api-reference/webhook-subscriptions/verifying-a-webhook-subscription>),
   and a growing list of adopters — implementing this once covers all of them.
 
 ---
