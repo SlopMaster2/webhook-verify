@@ -22,6 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-insensitively, like every other spelling; GitLab's legacy plaintext
   `secret token` (`X-Gitlab-Token`) mode is intentionally *not* covered —
   it offers no signature to verify.)
+- **`Provider::from_str` now also accepts `"clerk"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of one of the
+  largest signers of the scheme: Clerk's official backend SDK maps the Svix
+  header names (`svix-id`/`svix-timestamp`/`svix-signature`) onto the
+  Standard Webhooks header names and verifies deliveries with the reference
+  Standard Webhooks verifier, keyed by the `whsec_` signing secret from the
+  Clerk Dashboard. Config files that name the provider by the sender's brand —
+  `provider: clerk` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling.
+  Source:
+  <https://github.com/clerk/javascript/blob/main/packages/backend/src/webhooks.ts>.)
 - **New provider: `Webflow`** (`Provider::Webflow`). Verifies the hex
   HMAC-SHA256 in `x-webflow-signature`, whose signed string joins the
   `x-webflow-timestamp` value — Unix epoch **milliseconds**, parsed to an
