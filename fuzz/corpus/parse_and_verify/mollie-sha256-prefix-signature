@@ -1,0 +1,3 @@
+X-Mollie-Signature:sha256=726eb72833c59fe944cf728b37d95e900329c598cd77addfd1afeceb195e6a54
+
+{"resource":"event","id":"event_GvJ8WHrp5isUdRub9CJyH","type":"payment-link.paid","entityId":"pl_qng5gbbv8NAZ5gpM5ZYgx","createdAt":"2024-12-16T15:59:04.0Z","_links":{"self":{"href":"https://api.mollie.com/v2/events/event_GvJ8WHrp5isUdRub9CJyH","type":"application/hal+json"},"documentation":{"href":"https://docs.mollie.com/guides/webhooks","type":"text/html"}}}
