@@ -24,7 +24,8 @@ pub(crate) fn parse_timestamp(header: &'static str, value: &str) -> Result<u64, 
 ///
 /// HubSpot (`X-HubSpot-Request-Timestamp`), Contentful
 /// (`x-contentful-timestamp`), WorkOS (the `t=` element of
-/// `WorkOS-Signature`), and Ripple (`X-Webhook-Timestamp`) deliver their
+/// `WorkOS-Signature`), Ripple (`X-Webhook-Timestamp`), Airwallex
+/// (`x-timestamp`), and Webflow (`x-webflow-timestamp`) deliver their
 /// signing timestamps in milliseconds (`spec.md` §3), unlike every other
 /// timestamped provider's whole-second values. The shape rules are identical
 /// to [`parse_timestamp`] (pure ASCII digits, no sign/whitespace); only the
@@ -45,8 +46,8 @@ pub(crate) fn parse_millis(header: &'static str, value: &str) -> Result<u64, Ver
 /// Rejects leading `+`/`-`, whitespace, and non-numeric text, all of which
 /// would otherwise pass through Rust's `u64::from_str` (e.g. `+1531420618`).
 /// Timestamps are "integer unix seconds" per `spec.md` §3 (or integer
-/// milliseconds for HubSpot, Contentful, WorkOS, and Ripple) — no sign
-/// prefix is valid.
+/// milliseconds for HubSpot, Contentful, WorkOS, Ripple, Airwallex, and
+/// Webflow) — no sign prefix is valid.
 fn parse_unsigned_decimal(
     header: &'static str,
     value: &str,
