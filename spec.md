@@ -91,6 +91,7 @@ pub enum Provider {
     WooCommerce,
     Calendly,
     Vercel,
+    Webflow,
     X,
     Tailscale,
     StandardWebhooks,
