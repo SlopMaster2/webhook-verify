@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
