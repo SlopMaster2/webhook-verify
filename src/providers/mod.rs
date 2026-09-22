@@ -1924,6 +1924,53 @@ mod tests {
         }
     }
 
+    #[test]
+    fn spec_two_provider_enum_sketch_matches_declaration_order() {
+        // The `spec.md` §2 `pub enum Provider { ... }` sketch is a hand-written
+        // mirror of the shipped enum's variant list in declaration order, and
+        // it has drifted twice — Fintoc/Ripple/X shipped without their sketch
+        // lines (CHANGELOG), and Webflow did too (PRs #142/#158, each needing
+        // a follow-up doc PR to catch up). The README/crate-doc guards above
+        // pin the "Supported providers" tables; this guard pins the §2 sketch
+        // itself to `provider_list()`, so a variant added, reordered, or
+        // renamed in the sketch fails CI instead of being chased later.
+        // `Provider`'s `Debug` prints the exact variant identifier (`Line`,
+        // `CircleCi`, `LemonSqueezy`, `X`, `StandardWebhooks` — the spelling
+        // the sketch uses, no Display-name normalization needed).
+        let spec = include_str!("../../spec.md");
+        let lines = spec
+            .lines()
+            .skip_while(|line| !line.contains("pub enum Provider {"));
+        let sketch: Vec<&str> = lines
+            .skip(1)
+            .take_while(|line| line.trim_end() != "}")
+            .map(|line| {
+                let name = line.trim();
+                let end = name.find('(').unwrap_or(name.len());
+                name[..end].trim_end_matches(',')
+            })
+            .collect();
+        assert_eq!(
+            sketch.len(),
+            provider_list().len() + 1,
+            "spec.md §2 `Provider` enum sketch must list every variant plus `Custom`"
+        );
+        for (i, provider) in provider_list().iter().enumerate() {
+            let sketch_ident = sketch.get(i).copied().unwrap_or("");
+            let provider_ident = format!("{provider:?}");
+            assert_eq!(
+                sketch_ident,
+                provider_ident.as_str(),
+                "spec.md §2 sketch entry {i} must be `{provider_ident}` (the enum variant, in declaration order)"
+            );
+        }
+        assert_eq!(
+            sketch.last().copied().unwrap_or(""),
+            "Custom",
+            "spec.md §2 sketch must end with `Custom(CustomScheme)`"
+        );
+    }
+
     /// The first-column brand-name cells of the "Supported providers" table
     /// in `markdown` (the crate-doc tables live in `//!` doc comments), with
     /// the header and separator rows excluded. Test helper over compile-time
