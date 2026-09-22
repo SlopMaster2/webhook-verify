@@ -83,6 +83,7 @@ pub enum Provider {
     Xero,
     Sentry,
     Adyen,
+    Airwallex,
     Mux,
     Zendesk,
     WorkOS,
@@ -1709,6 +1710,57 @@ with [`CustomScheme`] if needed) and is not this provider.
   construction (the vector's `t` and `secret` mirror the docs' own examples;
   the docs' example header shape is replayed as a well-formed-but-mismatching
   input). Replace them if Coinbase ever publishes fixed vectors.
+
+### Airwallex
+
+Source: <https://www.airwallex.com/docs/developer-tools/webhooks/listen-for-webhook-events>
+("Listen for webhook events" — the delivery-headers table and the "Check
+webhook signatures" recipe with its reference Java verifier). Airwallex
+publishes no byte-exact example signature, but the docs fully specify the
+construction and show the exact recipe and reference code.
+
+- Headers: `x-timestamp: <epoch_ms>` (a Unix timestamp in milliseconds, e.g.
+  the docs' own `1357872222592`) and `x-signature: <hex_hmac>` — "The HMAC hex
+  digest of the concatenated timestamp and request body", sent **only if the
+  webhook is configured with a secret**.
+- Signed string: `"{x-timestamp}{raw_body}"` — the `x-timestamp` value exactly
+  as it appears in its header (never re-formatted from the parsed number),
+  immediately followed by the raw request body bytes, unmodified, with **no
+  separators**. The docs build `value_to_digest` by "concatenating the
+  `x-timestamp` (as a string) and the actual JSON payload (the request's body,
+  as a string)" in exactly that order, and their "Check the concatenation
+  order" pitfall confirms the timestamp comes first. Their troubleshooting
+  list also demands the original, unmodified body and verification before any
+  JSON parsing — matching the crate's `raw_body` contract.
+- Algorithm: HMAC-SHA256 over the signed string, **hex**-encoded, keyed by the
+  notification URL's **secret** used verbatim as a plain UTF-8 string (the
+  reference Java verifier keys `HmacUtils(HMAC_SHA_256, secret)` with the
+  retrieved secret directly — never base64/hex-decoded). Each secret is unique
+  to the URL it corresponds to.
+- Timestamp validation routes through the shared pure-ASCII-digit
+  epoch-milliseconds parser (`parse_millis`, the same shape rules HubSpot's
+  and WorkOS's millisecond timestamps use): sign-prefixed, whitespace-padded,
+  empty, or overflowing values fail closed as `MalformedHeader`.
+- Replay protection: the docs instruct callers, after a matching signature, to
+  "compute the difference between the current timestamp and the received
+  timestamp, then decide if the difference is within your tolerance" — the
+  window is left to the verifier — so the shared symmetric `|now - t| >
+  max_age` (default 300s) semantics apply via the injected clock, as with
+  Slack, Zoom, Cloudflare, Coinbase, and HubSpot. Because the header value is
+  epoch milliseconds, the parsed value is floored to whole seconds
+  (`millis / 1000`) before the shared check — identical treatment to HubSpot's
+  `X-HubSpot-Request-Timestamp` and WorkOS's `t=` element; the sub-second
+  truncation error (< 1s) is negligible against any configured window. The
+  future-dated half of the symmetry is stronger than the docs' sample code but
+  cannot reject legitimate deliveries (the timestamp is HMAC-covered, so an
+  attacker cannot freshen it).
+- Test-vector provenance: Airwallex publishes no byte-exact example signature,
+  so vectors are locally constructed over exactly the documented construction
+  (`{x-timestamp}{raw_body}`, HMAC-SHA256 hex against the docs' Java
+  verifier), cross-checked with OpenSSL. The `x-timestamp` value is the docs'
+  own example epoch-milliseconds value with a deliberate non-round sub-second
+  component so the sub-second-truncation boundary is exercised by the primary
+  vector. Replace them if Airwallex ever publishes fixed vectors.
 
 ### Mux
 

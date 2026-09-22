@@ -217,6 +217,10 @@
 //!   target configuration (`X-Raw-Sig`, no prefix, no timestamp, three hash
 //!   algorithms), reaching base64 decode, the digest-length gate, and the
 //!   constant-time comparison for `Provider::Custom`.
+//! - `airwallex-signature-delivery` — Airwallex's two-header shape
+//!   (bare-hex `x-signature` + epoch-milliseconds `x-timestamp`), reaching the
+//!   ms timestamp parse, hex decode, the 32-byte gate, the `{timestamp}{body}`
+//!   concatenation HMAC comparison, and the ms→s floored replay path.
 //! - `header-garbage-without-body-separator` — an adversarial malformed input
 //!   with no `\n\n` separator, anchoring the parser's fail-closed paths.
 
@@ -344,6 +348,12 @@ const IMPLEMENTED: &[Provider] = &[
     // comparison. The fixed base64-shaped secret exercises the InvalidSecret
     // key-decode gate.
     Provider::Adyen,
+    // Airwallex needs two headers (bare-hex signature + epoch-milliseconds
+    // timestamp) and the `{timestamp}{body}` concatenation to reach its
+    // signature path; arbitrary bytes exercise the ms-timestamp parse and
+    // empty-header rejection, and a well-formed-shaped attempt below reaches
+    // its hex decode, 32-byte gate, HMAC comparison, and ms→s replay paths.
+    Provider::Airwallex,
     // LemonSqueezy is a single-header raw-body HMAC (bare hex, no prefix);
     // arbitrary header bytes exercise its hex-decode and 32-byte gate, and
     // a well-formed-shaped attempt below reaches HMAC comparison.
@@ -1189,6 +1199,29 @@ fuzz_target!(|data: &[u8]| {
         )],
         body,
         ADYEN_HEX_SECRET,
+        &url_scoped_options,
+    );
+
+    // Airwallex: a well-formed-shaped two-header delivery (valid-hex 32-byte
+    // `x-signature` + epoch-milliseconds `x-timestamp`) lets arbitrary body
+    // bytes reach the ms timestamp parse, the 32-byte length gate, the
+    // `{timestamp}{body}` concatenation HMAC comparison, and the ms→s floored
+    // replay path; without it the loop above mostly fails earlier on
+    // malformed/missing header fields.
+    attempt(
+        Provider::Airwallex,
+        &[
+            (
+                "x-signature".to_string(),
+                "5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e".to_string(),
+            ),
+            (
+                "x-timestamp".to_string(),
+                "1700000000123".to_string(),
+            ),
+        ],
+        body,
+        WELL_FORMED_SECRET,
         &url_scoped_options,
     );
 
