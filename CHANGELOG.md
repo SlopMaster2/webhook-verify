@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New provider: `Webflow`** (`Provider::Webflow`). Verifies the hex
+  HMAC-SHA256 in `x-webflow-signature`, whose signed string joins the
+  `x-webflow-timestamp` value — Unix epoch **milliseconds**, parsed to an
+  integer and reformatted to its canonical decimal form exactly as Webflow's
+  reference verifiers do (`parseInt(timestamp, 10)` in Node, `int(timestamp)`
+  in Python) — with the raw request body through a literal `:` separator, no
+  other delimiters. The docs warn to verify against "the exact bytes of the
+  request body" before deserializing, matching the crate's `raw_body`
+  contract. Keying is the webhook's signing key used verbatim as its UTF-8
+  bytes (never decoded): a per-webhook site token secret for webhooks created
+  through site settings, or the OAuth application's client secret for OAuth-
+  created webhooks. The docs prescribe a 300000ms (~5 minute) freshness
+  window, so the shared symmetric `max_age` replay window (default 300s)
+  applies after the millisecond value is floored to whole seconds (as with
+  WorkOS, Airwallex, and HubSpot); the timestamp is HMAC-covered, so an
+  attacker cannot freshen it. Scheme and test-vector provenance linked to
+  <https://developers.webflow.com/data/docs/working-with-webhooks> in
+  `spec.md` §3. `Provider::from_str` accepts `"webflow"`.
 - **New provider: `Recharge`** (`Provider::Recharge`). Verifies the hex digest
   in the `X-Recharge-Hmac-Sha256` header, which — despite the header name — is
   a **plain SHA-256** of the per-token **API Client Secret's** UTF-8 bytes

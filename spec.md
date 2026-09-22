@@ -2065,6 +2065,64 @@ an explicit constant-time comparison).
   SHA-256-length reject case pins the 20-byte digest shape). Replace them if
   Vercel ever publishes fixed vectors.
 
+### Webflow
+
+Source: <https://developers.webflow.com/data/docs/working-with-webhooks>
+("Working with webhooks" — the request-headers reference, the "Validating
+request signatures" section's manual recipe, and the Node/Python reference
+verifiers, plus the Create-Webhook response example's `secretKey`). Webflow
+publishes example request headers (including an example signature) but never
+the matching secret, so the vectors are locally constructed over exactly the
+documented construction.
+
+- Headers: `x-webflow-timestamp: <epoch_ms>` (Unix time in milliseconds, e.g.
+  the docs' own `1722370035277`) and `x-webflow-signature: <hex_hmac>`, sent
+  on every webhook delivery. Webhooks created through the dashboard do **not**
+  include these headers (the docs say so explicitly), so verification is only
+  possible for API-created webhooks.
+- Signed string: `"{timestamp}:{raw_body}"` — the `x-webflow-timestamp` value
+  **parsed to an integer and reformatted to its canonical decimal form**
+  (matching both reference verifiers, which convert first: Node's
+  `parseInt(timestamp, 10)` then `` `${requestTimestamp}:${requestBody}` ``,
+  Python's `int(timestamp)` then `f"{timestamp}:{request_body}"`), a literal
+  `:` separator, then the raw request body bytes, unmodified. The docs warn
+  to verify against the original body before JSON parsing; the Python
+  reference reads it raw (`request.get_data(as_text=True)`), matching the
+  crate's `raw_body` contract. For any legitimate delivery (a canonical
+  13-digit millis value with no leading zeros) the parsed-and-reformatted form
+  is byte-identical to the header value verbatim.
+- Algorithm: HMAC-SHA256 over the signed string, **hex**-encoded (the
+  reference code compares a `digest('hex')` output), keyed by the webhook's
+  signing key used verbatim as a plain UTF-8 string (both references key
+  `crypto.createHmac('sha256', clientSecret)` with the secret directly — never
+  base64/hex-decoded). The signing key is a per-webhook **site token secret**
+  for webhooks created through site settings via a site token after
+  April 14, 2025 (each webhook gets its own `secretKey`, e.g. the docs'
+  `2b4acfd1c5518bf03c73a4889d197d77251353857c22694bf150b9e3402ba15f`) or the
+  **OAuth application's client secret** for webhooks created through an OAuth
+  app.
+- Timestamp validation routes through the shared pure-ASCII-digit
+  epoch-milliseconds parser (`parse_millis`, the same shape rules Airwallex's
+  and WorkOS's millisecond timestamps use): sign-prefixed, whitespace-padded,
+  empty, or overflowing values fail closed as `MalformedHeader`.
+- Replay protection: the timestamp is HMAC-covered, so the shared symmetric
+  `|now - t| > max_age` (default 300s) semantics apply via the injected clock,
+  as with Slack, Zoom, Cloudflare, Coinbase, and HubSpot. Because the header
+  value is epoch milliseconds, the parsed value is floored to whole seconds
+  (`millis / 1000`) before the shared check — identical treatment to
+  Airwallex's and WorkOS's millisecond timestamps; the sub-second truncation
+  error (< 1s) is negligible against any configured window. The docs prescribe
+  rejecting a request when `currentTime - requestTimestamp` exceeds
+  `300000` milliseconds, matching the crate's default 300s window exactly.
+- Test-vector provenance: the primary vector uses the docs' own example
+  `x-webflow-timestamp` (`1722370035277`) and example `form_submission` body,
+  keyed by the docs' own example `secretKey`, with the HMAC computed locally
+  over the exact documented construction (`parseInt(timestamp, 10) + ":" +
+  raw_body`) and cross-checked with OpenSSL and Python's `hmac` module. The
+  timestamp carries a deliberate non-round sub-second component so the
+  sub-second-truncation boundary is exercised by the primary vector. Replace
+  them if Webflow ever publishes a byte-exact secret/body/signature triple.
+
 ### X (formerly Twitter)
 
 Source: <https://docs.x.com/x-api/account-activity/guides/account-activity-webhooks>

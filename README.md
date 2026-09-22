@@ -139,6 +139,7 @@ hand-copied signing-string logic to get wrong.
 | WooCommerce | HMAC-SHA256, base64, `X-WC-Webhook-Signature` | ✅ |
 | Calendly | HMAC-SHA256 over `t.body`, hex, `Calendly-Webhook-Signature` (`t=,v1=` list) + replay window | ✅ |
 | Vercel (Webhooks, Log Drains, integration webhooks) | HMAC-SHA1 over raw body, bare hex, `x-vercel-signature` (no prefix, no timestamp) | ✅ |
+| Webflow (Site Webhooks) | HMAC-SHA256 over `{timestamp}:{raw_body}` (colon join, epoch-ms timestamp), hex, `x-webflow-signature` + `x-webflow-timestamp` (site token secret / OAuth client secret key) + replay window | ✅ |
 | X (formerly Twitter) | HMAC-SHA256 over raw body, base64, `sha256=` prefix, `x-twitter-webhooks-signature` (no timestamp; consumer secret key) | ✅ |
 | Tailscale | HMAC-SHA256 over `t.body`, hex, `Tailscale-Webhook-Signature` (`t=,v1=` list, rotation-safe) + replay window | ✅ |
 | Standard Webhooks spec (Svix, Clerk, Resend, GitLab 19.0+ signing tokens, ...) | HMAC-SHA256, `webhook-signature` (`v1,` base64, rotation list) + replay window | ✅ |

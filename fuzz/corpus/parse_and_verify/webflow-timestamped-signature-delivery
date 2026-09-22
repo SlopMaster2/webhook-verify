@@ -1,0 +1,4 @@
+x-webflow-signature:3d2c36d21a1f85c7812f702074afdf7ea44f45f49155d4c0704735d6366295f8
+x-webflow-timestamp:1722370035277
+
+{"triggerType":"form_submission","payload":{"name":"Email Form","siteId":"65427cf400e02b306eaa049c","data":{"Email 2":"hello@gmail.com"},"submittedAt":"2024-07-30T20:07:15.220Z","id":"66a947f35b9d7ba400e22733","formId":"65429eadebe8a9f3a30f62d7"}}
