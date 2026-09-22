@@ -1223,6 +1223,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change; the grep pattern and the jobs it gates are unchanged.
 - `.cargo/audit.toml`: fixed "Revist" → "Revisit" in the `time` advisory's
   re-evaluation-trigger note. Comment-only change.
+- **Fuzz target: PayPal was missing from the `IMPLEMENTED` coverage list.**
+  The PayPal provider ships a dedicated well-formed-shaped `attempt` (with a
+  constant test certificate) but was never added to the `parse_and_verify`
+  target's `IMPLEMENTED` array — the same drift class as Ripple (#112) — so
+  its five required-header lookups, empty-header checks, and fail-closed
+  `MissingContext` paths never received arbitrary fuzz bytes and never ran
+  through the `verify_any` rotation loop. `spec.md` §5.6 requires every
+  provider's parsing path in the shared target; adding `Provider::PayPal` to
+  `IMPLEMENTED` restores both. The target rebuilds and runs clean.
 
 ## [0.1.0] - Unreleased
 
