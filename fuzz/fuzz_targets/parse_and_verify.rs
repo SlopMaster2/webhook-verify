@@ -459,6 +459,11 @@ const IMPLEMENTED: &[Provider] = &[
     // into the ECDSA/SPKI parsing path; it is additionally exercised with a
     // constant valid SPKI below.
     Provider::SendGrid,
+    // PayPal needs `webhook_id` + `verifying_material` (an X.509 certificate,
+    // never fetched by this crate; the caller supplies it) to get past its
+    // context checks and into the RSA/X.509 parsing path; it is additionally
+    // exercised with a constant valid certificate below.
+    Provider::PayPal,
     // Paddle: a `ts=...;h1=...` header that reaches the constant-time
     // comparison is built below; arbitrary bytes still exercise the
     // semicolon/key=value splitting, timestamp parsing, and hex-decode paths.
