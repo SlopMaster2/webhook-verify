@@ -172,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn official_vector_over_docs_example_event() {
+    fn docs_example_event_with_constructed_signature_verifies() {
         assert_eq!(verify_official(PRIMARY_BODY, PRIMARY_SIGNATURE), Ok(()));
     }
 
