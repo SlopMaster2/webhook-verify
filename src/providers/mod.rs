@@ -1837,6 +1837,119 @@ mod tests {
         }
     }
 
+    #[test]
+    fn readme_and_crate_docs_provider_tables_cover_every_provider() {
+        // The README and crate-doc provider tables (spec.md §3's prose rows,
+        // mirrored into `README.md`'s "Supported providers" table and the
+        // `lib.rs` crate docs) are hand-maintained. Nothing re-checked them
+        // against the `Provider` enum, so both a stale row count and a
+        // provider omitted from one table but present in the other shipped
+        // silently. This guard pins each table to `provider_list()`: a
+        // provider counts as listed when its `Display` brand name appears in
+        // that table's first column (optionally with a parenthetical
+        // qualifier or a rebrand spelling — e.g. `Mandrill` inside
+        // `Mailchimp Transactional (Mandrill)`). `Custom` is listed in both
+        // tables but is not in `provider_list()` (it cannot be parsed from a
+        // bare name, matching the `FromStr` docs), so its row is asserted
+        // separately.
+        for (label, markdown) in [
+            ("README.md", include_str!("../../README.md")),
+            ("crate docs", include_str!("../lib.rs")),
+        ] {
+            let cells = provider_table_cells(markdown);
+            assert_eq!(
+                cells.len(),
+                provider_list().len() + 1,
+                "`{label}` provider table must list every provider plus `Custom`"
+            );
+            for provider in provider_list() {
+                let brand = provider.to_string();
+                let hits = cells
+                    .iter()
+                    .filter(|cell| brand_cell_matches(cell, &brand))
+                    .count();
+                assert_eq!(
+                    hits, 1,
+                    "`{label}` table must list `{brand}` exactly once (found {hits})"
+                );
+            }
+            assert!(
+                cells.iter().any(|cell| cell == "Custom"),
+                "`{label}` provider table must include a row for `Custom`"
+            );
+            for cell in &cells {
+                if cell == "Custom" {
+                    continue;
+                }
+                let hits = provider_list()
+                    .iter()
+                    .filter(|provider| brand_cell_matches(cell, &provider.to_string()))
+                    .count();
+                assert!(
+                    hits >= 1,
+                    "`{label}` table row `{cell}` matches no known provider"
+                );
+            }
+        }
+    }
+
+    /// The first-column brand-name cells of the "Supported providers" table
+    /// in `markdown` (the crate-doc tables live in `//!` doc comments), with
+    /// the header and separator rows excluded. Test helper over compile-time
+    /// `include_str!` data, so the `.unwrap_or` fall back is unreachable.
+    fn provider_table_cells(markdown: &str) -> Vec<String> {
+        let mut cells = Vec::new();
+        let mut in_section = false;
+        let mut collecting = false;
+        for line in markdown.lines() {
+            let line = line.strip_prefix("//!").unwrap_or(line).trim();
+            if !in_section {
+                if line.contains("## Supported providers") {
+                    in_section = true;
+                }
+                continue;
+            }
+            if !collecting {
+                if line.starts_with('|') {
+                    collecting = true;
+                } else {
+                    continue;
+                }
+            }
+            if let Some(rest) = line.strip_prefix('|') {
+                let cell = rest.split('|').next().unwrap_or("").trim();
+                if !cell.is_empty() && cell != "Provider" && !cell.starts_with('-') {
+                    cells.push(String::from(cell));
+                }
+            } else {
+                break;
+            }
+        }
+        cells
+    }
+
+    /// Whether a table cell's brand-name entry refers to `brand`. The cell is
+    /// a human-readable name that may carry a parenthetical qualifier
+    /// ("Expo (EAS ...)") or a rebrand spelling ("Mailchimp Transactional
+    /// (Mandrill)"), so the match requires the brand to sit on a word
+    /// boundary rather than be a bare substring — which would otherwise let
+    /// e.g. `X` match `Xero` or `Expo`. Test helper.
+    fn brand_cell_matches(cell: &str, brand: &str) -> bool {
+        let mut search_from = 0;
+        while let Some(hit) = cell[search_from..].find(brand) {
+            let hit = search_from + hit;
+            let before_ok = hit == 0 || matches!(cell.as_bytes()[hit - 1], b' ' | b'(');
+            let after = hit + brand.len();
+            let after_ok =
+                after == cell.len() || matches!(cell.as_bytes()[after], b' ' | b'(' | b')');
+            if before_ok && after_ok {
+                return true;
+            }
+            search_from = hit + brand.len();
+        }
+        false
+    }
+
     #[cfg(any(feature = "tower", feature = "actix"))]
     #[test]
     fn signature_header_names_cover_every_provider_header() {
