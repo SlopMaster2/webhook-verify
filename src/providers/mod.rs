@@ -546,7 +546,7 @@ pub enum Provider {
     /// as a replay attack, so the shared `max_age` window applies.
     Tailscale,
     /// Standard Webhooks spec (`webhook-*` headers; Svix, Clerk, Resend,
-    /// Bird/MessageBird, GitLab 19.0+ signing tokens, Supabase, Etsy, ...).
+    /// Bird/MessageBird, GitLab 19.0+ signing tokens, Supabase, Etsy, Sardine, ...).
     StandardWebhooks,
     /// A caller-configured HMAC scheme (`spec.md` §2.2): covers long-tail
     /// providers and internal senders without waiting on a crate release,
@@ -657,7 +657,7 @@ impl fmt::Display for Provider {
 /// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, `"loops"`, `"anthropic"`,
 /// `"gemini"`, `"brex"`, `"bigcommerce"` (also `"big commerce"`/
 /// `"big-commerce"`), `"lithic"`, `"incident.io"` (also `"incident"`),
-/// `"supabase"`, and `"etsy"` all parse to it.
+/// `"supabase"`, `"etsy"`, and `"sardine"` all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -720,6 +720,13 @@ impl fmt::Display for Provider {
 /// `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
 /// base64-decoded remainder of a `whsec_`-prefixed signing secret, and a
 /// 300-second replay tolerance window; Etsy is also listed as a Standard
+/// Webhooks-compatible sender on the official site.
+/// Sardine's official webhook docs describe the exact same construction — the
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+/// headers, a signed content string of
+/// `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+/// base64-decoded remainder of a `whsec_`-prefixed signing secret, and a
+/// constant-time comparison; Sardine is also listed as a Standard
 /// Webhooks-compatible sender on the official site.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
@@ -854,7 +861,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("incident.io")
                 || n.eq_ignore_ascii_case("incident")
                 || n.eq_ignore_ascii_case("supabase")
-                || n.eq_ignore_ascii_case("etsy") =>
+                || n.eq_ignore_ascii_case("etsy")
+                || n.eq_ignore_ascii_case("sardine") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -878,7 +886,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, and `etsy` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, and `sardine` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1915,6 +1923,9 @@ mod tests {
             ("etsy", Provider::StandardWebhooks),
             ("Etsy", Provider::StandardWebhooks),
             ("ETSY", Provider::StandardWebhooks),
+            ("sardine", Provider::StandardWebhooks),
+            ("Sardine", Provider::StandardWebhooks),
+            ("SARDINE", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -1979,7 +1990,7 @@ mod tests {
         // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
         // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
-        // `lithic`/`incident.io`/`incident`/`supabase`/`etsy` ↔ StandardWebhooks); the
+        // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2002,6 +2013,7 @@ mod tests {
             "incident",
             "supabase",
             "etsy",
+            "sardine",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
