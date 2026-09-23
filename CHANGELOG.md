@@ -1085,6 +1085,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Docs: the built-in SHA-1 scheme enumerations now include Mailchimp
+  Transactional.** Three places undercounted the built-in HMAC-SHA1 providers
+  (the actual set is Vercel, Twilio, Intercom, Expo EAS, and Mailchimp
+  Transactional — the README's provider table correctly lists all five): the
+  `spec.md` §3 Vercel row claimed "Vercel, Twilio, Intercom, and Expo (EAS)
+  are the built-in providers' four HMAC-SHA1 schemes" without Mandrill, the
+  Vercel provider module docs named only Twilio and Intercom, and the
+  `Provider::Vercel` doc comment (`src/providers/mod.rs`) omitted Mandrill.
+  All three now enumerate the full five and keep the true sub-claim that
+  Vercel is the only bare-hex raw-body SHA-1 scheme. Doc-only change;
+  verification behavior is untouched.
 - **Tailscale: non-canonical `t=` timestamps are now rejected.** The signed
   string reuses the raw `t` substring, and Tailscale's official verifier
   (`docs/webhooks/example.go`) signs the parsed integer re-formatted

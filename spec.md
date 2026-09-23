@@ -2044,12 +2044,13 @@ an explicit constant-time comparison).
   prefix and no timestamp; the reference code compares `digest('hex')` output
   directly against the header value. Same shape as Dropbox, Razorpay, and
   Lemon Squeezy, but keyed with **SHA-1** rather than the SHA-256 most
-  providers use. Vercel, Twilio, Intercom, and Expo (EAS) are the built-in
-  providers' four HMAC-SHA1 schemes; Twilio signs a different construction
-  (URL + form params) and both Intercom and Expo deliver their raw-body digest
-  behind a `sha1=` prefix, so Vercel's bare-hex raw-body header is the only one
-  of the four without a prefix. Covers requests from Webhooks, Log Drains, and
-  integration webhooks alike.
+  providers use. Vercel, Twilio, Intercom, Expo (EAS), and Mailchimp
+  Transactional (Mandrill) are the built-in providers' five HMAC-SHA1
+  schemes; Twilio and Mailchimp Transactional sign a different construction
+  (URL + form params, base64) and both Intercom and Expo deliver their
+  raw-body digest behind a `sha1=` prefix, so Vercel's bare-hex raw-body
+  header is the only one of the five without a prefix. Covers requests from
+  Webhooks, Log Drains, and integration webhooks alike.
 - Signed string: raw request body bytes, unmodified — Vercel's docs verify
   the signature *before* `JSON.parse`, and warn that URL-encoded or
   re-encoded bodies break the HMAC.
