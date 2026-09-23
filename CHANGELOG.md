@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"warp"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of a provider whose
+  webhook documentation states it "implements the Standard Webhooks
+  specification": every delivery carries the same `webhook-id` /
+  `webhook-timestamp` / `webhook-signature` (`v1,<base64>`) construction and
+  `whsec_`-prefixed signing secret the provider already verifies, and the docs
+  explicitly recommend verifying with the reference Standard Webhooks
+  libraries. Config files that name the provider by the sender's brand —
+  `provider: warp` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling.
+  Source:
+  <https://docs.warp.co/webhooks>.)
 - **`Provider::from_str` now also accepts `"openai"`** for
   [`Provider::StandardWebhooks`], matching the brand name of one of the
   biggest signers of the scheme: OpenAI's webhook documentation states its
