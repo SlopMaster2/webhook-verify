@@ -1,7 +1,7 @@
 //! Standard Webhooks signature verification (covers Svix, Clerk, Resend,
 //! OpenAI, Warp, Anthropic, GitLab 19.0+ signing tokens, Gemini, Loops, Brex,
 //! BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments,
-//! Zapier, Vanta, SafetyKit, ...).
+//! Zapier, Vanta, SafetyKit, Prescience, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -487,6 +487,80 @@ mod tests {
                 payload,
                 id,
                 &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// Official Prescience webhook test vector, from the Prescience partner
+    /// docs (<https://docs.getprescience.com/guides/webhooks>): a delivery
+    /// example whose docs state that "the signature above is the genuine HMAC
+    /// of this exact example" under the setup secret — a claim this test
+    /// independently re-derives. Prescience signs with the exact Standard
+    /// Webhooks construction this module implements (`{id}.{timestamp}.{raw_body}`,
+    /// HMAC-SHA256 keyed by the base64-decoded remainder of a `whsec_`-prefixed
+    /// secret, `v1,<base64>`), so `prescience` is accepted as a brand alias for
+    /// this provider.
+    #[test]
+    fn official_prescience_vector_verifies() {
+        let payload = br#"{"id":"evt_9b21c7e4f60a","type":"enrollment.created","createdAt":"2026-06-12T09:14:33Z","mode":"test","data":{"enrollmentId":"enr_3f7a92c81b40","groupId":"grp_8c2f41d09a3e","quoteId":"qt_5b9e2c7f10ad","startDate":"2026-09-01","companyDomain":"acme.com","onboardingMode":"hosted"}}"#;
+        let secret = Secret::new(whsec("4f8a1c2b9d3e6f7a8b9c0d1e2f3a4b5c"));
+        let id = "evt_9b21c7e4f60a";
+        let timestamp: u64 = 1_781_255_673;
+        let signature = "v1,HBEvFBV11h9jUBzFayGaYNRxDDEgPNGT2bzaRQdfnwo=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                signature,
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Prescience vector, with one base64 character of the signature
+    /// flipped: officially published inputs + a wrong-but-well-formed
+    /// signature must fail closed (negative §5.2 case).
+    #[test]
+    fn official_prescience_vector_negative_flip_fails() {
+        let payload = br#"{"id":"evt_9b21c7e4f60a","type":"enrollment.created","createdAt":"2026-06-12T09:14:33Z","mode":"test","data":{"enrollmentId":"enr_3f7a92c81b40","groupId":"grp_8c2f41d09a3e","quoteId":"qt_5b9e2c7f10ad","startDate":"2026-09-01","companyDomain":"acme.com","onboardingMode":"hosted"}}"#;
+        let secret = Secret::new(whsec("4f8a1c2b9d3e6f7a8b9c0d1e2f3a4b5c"));
+        let id = "evt_9b21c7e4f60a";
+        let timestamp: u64 = 1_781_255_673;
+        let flipped = "v1,IBEvFBV11h9jUBzFayGaYNRxDDEgPNGT2bzaRQdfnwo=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                flipped,
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Prescience vector with the raw body mutated after signing must
+    /// fail (tamper §5.3 case).
+    #[test]
+    fn official_prescience_vector_tampered_body_fails() {
+        let payload = br#"{"id":"evt_9b21c7e4f60a","type":"enrollment.created","createdAt":"2026-06-12T09:14:33Z","mode":"prod","data":{"enrollmentId":"enr_3f7a92c81b40","groupId":"grp_8c2f41d09a3e","quoteId":"qt_5b9e2c7f10ad","startDate":"2026-09-01","companyDomain":"acme.com","onboardingMode":"hosted"}}"#;
+        let secret = Secret::new(whsec("4f8a1c2b9d3e6f7a8b9c0d1e2f3a4b5c"));
+        let id = "evt_9b21c7e4f60a";
+        let timestamp: u64 = 1_781_255_673;
+        let signature = "v1,HBEvFBV11h9jUBzFayGaYNRxDDEgPNGT2bzaRQdfnwo=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                signature,
                 &timestamp.to_string(),
                 &secret,
                 clocked_at(timestamp, Some(Duration::from_secs(300))),

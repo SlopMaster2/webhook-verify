@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"prescience"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Prescience's official webhook docs state that signatures "follow
+  the [standard-webhooks](https://www.standardwebhooks.com) scheme", describe
+  the exact same construction — the canonical
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers,
+  a signed content string of `{webhook-id}.{webhook-timestamp}.{raw_body}`,
+  HMAC-SHA256 keyed by the base64-decoded remainder of a `whsec_`-prefixed
+  signing secret, constant-time comparison, and a ~5-minute replay tolerance
+  window — and publish a byte-exact worked example whose claimed signature is
+  the genuine HMAC of the example (verified, not just asserted). Config files
+  that name the provider by the sender's brand — `provider: prescience` — now
+  parse to [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://docs.getprescience.com/guides/webhooks>.)
 - **`Provider::from_str` now also accepts `"safetykit"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: SafetyKit's official webhook docs describe the exact same
