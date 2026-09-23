@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"supabase"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another major
+  signer of the scheme: Supabase's official auth-hooks docs state that HTTP
+  hooks "follow the Standard Webhooks Specification", attach the same three
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers, generate symmetric `v1,whsec_<base64-secret>` signing secrets,
+  and direct receivers to verify with the reference Standard Webhooks
+  libraries. Supabase is also listed as a Standard Webhooks-compatible
+  sender on the official site. Config files that name the provider by the
+  sender's brand — `provider: supabase` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Sources:
+  <https://supabase.com/docs/guides/auth/auth-hooks> and
+  <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"incident.io"`** (and the short
   `"incident"` spelling) for [`Provider::StandardWebhooks`], matching the
   brand name of another signer of the scheme: incident.io's official
