@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2663,6 +2663,14 @@ ambiguity).
   <https://developer.vanta.com/docs/webhooks>).
   Vanta is also listed as a Standard Webhooks-compatible sender on the official
   site (sources: <https://www.standardwebhooks.com>).
+  SafetyKit's official webhook docs describe the exact same construction — the
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers,
+  a signed content string of `{webhook-id}.{webhook-timestamp}.{raw_body}`,
+  HMAC-SHA256 keyed by the base64-decoded remainder of a `whsec_`-prefixed
+  signing secret, a space-delimited `v1,` signature list, a five-minute replay
+  tolerance window, and a constant-time comparison recommendation — directing
+  receivers to verify with the Svix/Standard Webhooks client libraries
+  (source: <https://docs.safetykit.com/webhooks/verifying-signatures>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
