@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2632,6 +2632,15 @@ ambiguity).
   Standard Webhooks-compatible sender on the official site (sources:
   <https://docs.payments.sardine.ai/integration_guides/nft_checkout/webhooks>
   and <https://www.standardwebhooks.com>).
+  Dodo Payments' official webhook docs state that its deliveries follow the
+  Standard Webhooks specification, attach the same canonical
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (v1,<base64>) headers,
+  sign a message built by concatenating the id, timestamp, and exact raw
+  payload separated by `.` with HMAC-SHA256 keyed by the endpoint's signing
+  secret, and direct receivers to verify with the reference Standard Webhooks
+  libraries — the docs even ship an Express handler that constructs the
+  `standardwebhooks` `Webhook` and calls `verify(payload, headers)` (source:
+  <https://docs.dodopayments.com/developer-resources/webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

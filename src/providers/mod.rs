@@ -657,7 +657,8 @@ impl fmt::Display for Provider {
 /// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, `"loops"`, `"anthropic"`,
 /// `"gemini"`, `"brex"`, `"bigcommerce"` (also `"big commerce"`/
 /// `"big-commerce"`), `"lithic"`, `"incident.io"` (also `"incident"`),
-/// `"supabase"`, `"etsy"`, and `"sardine"` all parse to it.
+/// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, and `"dodopayments"`
+/// all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -728,6 +729,13 @@ impl fmt::Display for Provider {
 /// base64-decoded remainder of a `whsec_`-prefixed signing secret, and a
 /// constant-time comparison; Sardine is also listed as a Standard
 /// Webhooks-compatible sender on the official site.
+/// Dodo Payments' official webhook docs state that its deliveries follow the
+/// Standard Webhooks specification, attaching the same three
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` headers and signing a
+/// message built by concatenating the id, timestamp, and raw payload with `.`
+/// joins using HMAC-SHA256 keyed by the endpoint's signing secret; the docs
+/// verify deliveries with the reference Standard Webhooks libraries and
+/// publish an Express handler that does exactly that.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -862,7 +870,9 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("incident")
                 || n.eq_ignore_ascii_case("supabase")
                 || n.eq_ignore_ascii_case("etsy")
-                || n.eq_ignore_ascii_case("sardine") =>
+                || n.eq_ignore_ascii_case("sardine")
+                || n.eq_ignore_ascii_case("dodo")
+                || n.eq_ignore_ascii_case("dodopayments") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -886,7 +896,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, and `sardine` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1926,6 +1936,12 @@ mod tests {
             ("sardine", Provider::StandardWebhooks),
             ("Sardine", Provider::StandardWebhooks),
             ("SARDINE", Provider::StandardWebhooks),
+            ("dodo", Provider::StandardWebhooks),
+            ("Dodo", Provider::StandardWebhooks),
+            ("DODO", Provider::StandardWebhooks),
+            ("dodopayments", Provider::StandardWebhooks),
+            ("DodoPayments", Provider::StandardWebhooks),
+            ("DODOPAYMENTS", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -1990,7 +2006,8 @@ mod tests {
         // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
         // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
-        // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine` ↔ StandardWebhooks); the
+        // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
+        // `dodo`/`dodopayments` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2014,6 +2031,8 @@ mod tests {
             "supabase",
             "etsy",
             "sardine",
+            "dodo",
+            "dodopayments",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
