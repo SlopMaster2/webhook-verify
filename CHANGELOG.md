@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"vanta"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another major
+  signer of the scheme: Vanta's official webhook docs state that its event
+  deliveries are "powered by Svix", carry the `svix-id`/`svix-timestamp`/
+  `svix-signature` headers (the Svix-branded aliases of the spec's
+  `webhook-*` names), and verify with a `{svix-id}.{svix-timestamp}.
+  {raw_body}` signed content, HMAC-SHA256 keyed by the base64-decoded
+  remainder of a `whsec_`-prefixed signing secret, a space-delimited `v1,`
+  signature list, and a five-minute replay tolerance window. Config files
+  that name the provider by the sender's brand — `provider: vanta` — now
+  parse to [`Provider::StandardWebhooks`] instead of erroring. (Alias
+  accepted case-insensitively, like every other spelling. Sources:
+  <https://developer.vanta.com/docs/webhooks> and
+  <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"zapier"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another major
   signer of the scheme: Zapier's official webhook docs state that its
