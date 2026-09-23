@@ -656,7 +656,8 @@ impl fmt::Display for Provider {
 /// signers that serve it: `"svix"`, `"resend"`, `"messagebird"`, `"bird"`,
 /// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, `"loops"`, `"anthropic"`,
 /// `"gemini"`, `"brex"`, `"bigcommerce"` (also `"big commerce"`/
-/// `"big-commerce"`), and `"lithic"` all parse to it.
+/// `"big-commerce"`), `"lithic"`, and `"incident.io"` (also `"incident"`)
+/// all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -698,7 +699,14 @@ impl fmt::Display for Provider {
 /// over `{webhook-id}.{webhook-timestamp}.{raw_body}` keyed by the base64 part
 /// of a `whsec_`-prefixed signing secret, a space-delimited versioned
 /// signature list, and a five-minute replay tolerance window — and publish a
-/// byte-exact worked example.
+/// byte-exact worked example. incident.io's official webhook docs state that
+/// its deliveries are "powered by Svix", carry the same three
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+/// headers, describe the signature as an HMAC of
+/// `$WEBHOOK_ID.$WEBHOOK_TIMESTAMP.$REQUEST_BODY` keyed by the endpoint's
+/// signing secret, and direct receivers to verify with the Svix/Standard
+/// Webhooks client libraries; incident.io is also listed as a Standard
+/// Webhooks-compatible sender on the official site.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -828,7 +836,9 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("bigcommerce")
                 || n.eq_ignore_ascii_case("big commerce")
                 || n.eq_ignore_ascii_case("big-commerce")
-                || n.eq_ignore_ascii_case("lithic") =>
+                || n.eq_ignore_ascii_case("lithic")
+                || n.eq_ignore_ascii_case("incident.io")
+                || n.eq_ignore_ascii_case("incident") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -852,7 +862,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, and `lithic` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1877,6 +1887,12 @@ mod tests {
             ("lithic", Provider::StandardWebhooks),
             ("Lithic", Provider::StandardWebhooks),
             ("LITHIC", Provider::StandardWebhooks),
+            ("incident.io", Provider::StandardWebhooks),
+            ("Incident.io", Provider::StandardWebhooks),
+            ("INCIDENT.IO", Provider::StandardWebhooks),
+            ("incident", Provider::StandardWebhooks),
+            ("Incident", Provider::StandardWebhooks),
+            ("INCIDENT", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -1940,7 +1956,8 @@ mod tests {
         }
         // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
         // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
-        // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/`lithic` ↔ StandardWebhooks); the message
+        // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
+        // `lithic`/`incident.io`/`incident` ↔ StandardWebhooks); the message
         // names them too so an operator who typed a rejected alias sees it
         // echoed back, instead of only the canonical spellings.
         for alias in [
@@ -1959,6 +1976,8 @@ mod tests {
             "brex",
             "bigcommerce",
             "lithic",
+            "incident.io",
+            "incident",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),

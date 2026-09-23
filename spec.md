@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2596,6 +2596,15 @@ ambiguity).
   byte-exact worked example: the docs' "expected signature" `OGBiqPtc/...` for
   a given id/timestamp/secret/body triple, now a test vector for this provider
   (source: <https://docs.lithic.com/docs/events-api>).
+  incident.io's official webhook docs state that its deliveries are
+  "powered by Svix" and carry the same three `webhook-id`/
+  `webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers, describe
+  the signature as an HMAC of `$WEBHOOK_ID.$WEBHOOK_TIMESTAMP.$REQUEST_BODY`
+  keyed by the endpoint's signing secret, and direct receivers to verify
+  with the Svix/Standard Webhooks client libraries; incident.io is also
+  listed as a Standard Webhooks-compatible sender on the official site
+  (sources: <https://docs.incident.io/integrations/webhooks> and
+  <https://www.standardwebhooks.com>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
