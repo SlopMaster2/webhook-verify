@@ -654,16 +654,19 @@ impl fmt::Display for Provider {
 /// config files.
 /// [`Provider::StandardWebhooks`] additionally accepts the brand names of the
 /// signers that serve it: `"svix"`, `"resend"`, `"messagebird"`, `"bird"`,
-/// `"gitlab"`, and `"clerk"` all parse to it. (Svix is the reference
-/// implementation whose scheme StandardWebhooks implements; Resend signs every
-/// delivery with the same `svix-signature` construction and Svix-form secret,
-/// per its official docs; Bird — formerly MessageBird — likewise states its
-/// webhook deliveries follow the Standard Webhooks specification, per its
-/// official docs; GitLab's webhook delivery follows the Standard Webhooks
-/// specification when a "signing token" is configured, per its official docs;
-/// Clerk's official backend SDK maps Svix headers onto the Standard Webhooks
-/// header names and verifies them with the reference Standard Webhooks
-/// verifier, per its official source.)
+/// `"gitlab"`, `"clerk"`, and `"openai"` all parse to it. (Svix is the
+/// reference implementation whose scheme StandardWebhooks implements; Resend
+/// signs every delivery with the same `svix-signature` construction and
+/// Svix-form secret, per its official docs; Bird — formerly MessageBird —
+/// likewise states its webhook deliveries follow the Standard Webhooks
+/// specification, per its official docs; GitLab's webhook delivery follows the
+/// Standard Webhooks specification when a "signing token" is configured, per
+/// its official docs; Clerk's official backend SDK maps Svix headers onto the
+/// Standard Webhooks header names and verifies them with the reference
+/// Standard Webhooks verifier, per its official source; OpenAI delivers
+/// webhooks using the same `webhook-id`/`webhook-timestamp`/`webhook-signature`
+/// (`v1,<base64>`) construction and `whsec_`-prefixed secret, and its official
+/// docs verify them with the reference Standard Webhooks libraries.)
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -783,7 +786,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("messagebird")
                 || n.eq_ignore_ascii_case("bird")
                 || n.eq_ignore_ascii_case("gitlab")
-                || n.eq_ignore_ascii_case("clerk") =>
+                || n.eq_ignore_ascii_case("clerk")
+                || n.eq_ignore_ascii_case("openai") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -807,7 +811,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, and `clerk` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, and `openai` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1806,6 +1810,9 @@ mod tests {
             ("GitLab", Provider::StandardWebhooks),
             ("clerk", Provider::StandardWebhooks),
             ("CLERK", Provider::StandardWebhooks),
+            ("openai", Provider::StandardWebhooks),
+            ("OpenAI", Provider::StandardWebhooks),
+            ("OPENAI", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -1868,10 +1875,10 @@ mod tests {
             );
         }
         // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
-        // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk` ↔
-        // StandardWebhooks); the message names them too so an operator who typed
-        // a rejected alias sees it echoed back, instead of only the canonical
-        // spellings.
+        // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
+        // `openai` ↔ StandardWebhooks); the message names them too so an operator
+        // who typed a rejected alias sees it echoed back, instead of only the
+        // canonical spellings.
         for alias in [
             "mailchimp",
             "svix",
@@ -1880,6 +1887,7 @@ mod tests {
             "bird",
             "gitlab",
             "clerk",
+            "openai",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
