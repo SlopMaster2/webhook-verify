@@ -658,7 +658,7 @@ impl fmt::Display for Provider {
 /// `"gemini"`, `"brex"`, `"bigcommerce"` (also `"big commerce"`/
 /// `"big-commerce"`), `"lithic"`, `"incident.io"` (also `"incident"`),
 /// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
-/// `"zapier"`, `"vanta"`, and `"safetykit"` all parse to it.
+/// `"zapier"`, `"vanta"`, `"safetykit"`, and `"prescience"` all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -760,6 +760,11 @@ impl fmt::Display for Provider {
 /// space-delimited `v1,` signature list, a five-minute replay tolerance
 /// window, and a constant-time comparison recommendation — and direct
 /// receivers to verify with the Svix/Standard Webhooks client libraries.
+/// Prescience's official webhook docs state that signatures "follow the
+/// standard-webhooks scheme", describe the same `{webhook-id}.{webhook-
+/// timestamp}.{raw_body}` HMAC-SHA256 construction keyed by the base64-decoded
+/// remainder of a `whsec_`-prefixed signing secret, and publish a byte-exact
+/// worked example whose claimed signature verifies.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -899,7 +904,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("dodopayments")
                 || n.eq_ignore_ascii_case("zapier")
                 || n.eq_ignore_ascii_case("vanta")
-                || n.eq_ignore_ascii_case("safetykit") =>
+                || n.eq_ignore_ascii_case("safetykit")
+                || n.eq_ignore_ascii_case("prescience") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -923,7 +929,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1978,6 +1984,9 @@ mod tests {
             ("safetykit", Provider::StandardWebhooks),
             ("SafetyKit", Provider::StandardWebhooks),
             ("SAFETYKIT", Provider::StandardWebhooks),
+            ("prescience", Provider::StandardWebhooks),
+            ("Prescience", Provider::StandardWebhooks),
+            ("PRESCIENCE", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
