@@ -2048,6 +2048,75 @@ mod tests {
         );
     }
 
+    #[test]
+    fn fuzz_seed_bullets_and_corpus_agree() {
+        use std::fs;
+        use std::path::Path;
+
+        // The fuzz target's module-doc seed-corpus section (`spec.md` §5.6)
+        // opens with one `//! - `name`` bullet per committed seed in
+        // `fuzz/corpus/parse_and_verify/`. The IMPLEMENTED pool guard above
+        // pins that section's *provider* list, but nothing pinned the *seeds*
+        // themselves: a doc bullet naming a file that is never committed, or
+        // a committed seed file with no doc bullet, ships silently and shrinks
+        // the nightly fuzz surface or rots the seed docs without CI noticing —
+        // the same class of miss as Mollie's corpus seed shipping absent
+        // (PR #147, which the pool guard was written for but which this seam
+        // never protected). This guard pins the two inventories to each other:
+        // the sorted doc-bullet names must equal the sorted committed file
+        // names exactly, so adding, renaming, or dropping either side fails CI
+        // instead of drifting. `Custom`-shaped seeds are covered too — they
+        // are explicit target configurations, not name-constructible providers,
+        // but their seeds are documented the same way.
+        //
+        // Like the pool guard above, `fuzz/` is excluded from the crates.io
+        // tarball (Cargo.toml `exclude`), so in a packaged checkout the
+        // directory does not exist and the guard is skipped — it is a
+        // repo-internal test, not part of the shipped crate's contract.
+        let target = {
+            let path =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/fuzz_targets/parse_and_verify.rs");
+            match fs::read_to_string(path) {
+                Ok(src) => src,
+                // `fuzz/` not present (e.g. the publish tarball): nothing to
+                // guard against here, and the crate's own tests must not fail
+                // on files it does not ship.
+                Err(_) => return,
+            }
+        };
+        let seed_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/corpus/parse_and_verify");
+
+        let mut bullets: Vec<String> = target
+            .lines()
+            .filter_map(|line| {
+                let rest = line.trim_start().strip_prefix("//! - `")?;
+                let name = rest.split('`').next()?;
+                Some(name.to_string())
+            })
+            .collect();
+        bullets.sort();
+        bullets.dedup();
+
+        let mut files: Vec<String> = match fs::read_dir(&seed_dir) {
+            Ok(entries) => entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect(),
+            // `fuzz/corpus/parse_and_verify/` not present (e.g. the publish
+            // tarball): same skip as above.
+            Err(_) => return,
+        };
+        files.sort();
+
+        assert_eq!(
+            bullets,
+            files,
+            "fuzz seed doc bullets ({} in `fuzz_targets/parse_and_verify.rs`) must mirror the committed `fuzz/corpus/parse_and_verify/` files ({} found) exactly — a bullet for a never-committed seed or a committed seed with no doc bullet both fail here",
+            bullets.len(),
+            files.len(),
+        );
+    }
+
     /// The `Provider::<Variant>` identifiers in the fuzz target's
     /// `const IMPLEMENTED: &[Provider] = &[ ... ];` block, in list order.
     /// Comments inside the block are skipped because only `Provider::`
