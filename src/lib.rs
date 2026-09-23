@@ -109,7 +109,7 @@
 //! | Webflow | HMAC-SHA256 over `{timestamp}:{raw_body}` (epoch ms), hex, `x-webflow-signature` + `x-webflow-timestamp` replay window |
 //! | X (formerly Twitter) | HMAC-SHA256 over raw body, base64, `sha256=` prefix, `x-twitter-webhooks-signature` (no timestamp) |
 //! | Tailscale | HMAC-SHA256 over `t.body`, hex, `Tailscale-Webhook-Signature` (`t=,v1=` list, rotation-safe) + tolerance window |
-//! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, Bird/MessageBird, GitLab 19.0+ signing tokens, OpenAI, Warp, Loops, Anthropic, Gemini, Brex, BigCommerce, Lithic, incident.io, Supabase, ...) |
+//! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists (Svix, Clerk, Resend, Bird/MessageBird, GitLab 19.0+ signing tokens, OpenAI, Warp, Loops, Anthropic, Gemini, Brex, BigCommerce, Lithic, incident.io, Supabase, Etsy, ...) |
 //! | Custom | User-supplied HMAC scheme via [`Provider::Custom`] |
 //!
 //! PayPal and SendGrid ship behind crate features; calling [`verify()`] with

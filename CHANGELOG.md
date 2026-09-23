@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"etsy"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another major
+  signer of the scheme: Etsy's official webhook docs describe the exact same
+  construction — the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`) headers, a signed content string of
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret, and a
+  300-second replay tolerance window. Etsy is also listed as a Standard
+  Webhooks-compatible sender on the official site. Config files that name
+  the provider by the sender's brand — `provider: etsy` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Sources:
+  <https://developers.etsy.com/documentation/essentials/webhooks> and
+  <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"supabase"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another major
   signer of the scheme: Supabase's official auth-hooks docs state that HTTP
