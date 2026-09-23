@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2604,6 +2604,15 @@ ambiguity).
   with the Svix/Standard Webhooks client libraries; incident.io is also
   listed as a Standard Webhooks-compatible sender on the official site
   (sources: <https://docs.incident.io/integrations/webhooks> and
+  <https://www.standardwebhooks.com>).
+  Supabase's official auth-hooks docs state that HTTP hooks "follow the
+  Standard Webhooks Specification", attach the same canonical
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers, generate symmetric `v1,whsec_<base64-secret>` signing secrets,
+  and direct receivers to verify with the reference Standard Webhooks
+  libraries; Supabase is also listed as a Standard Webhooks-compatible
+  sender on the official site (sources:
+  <https://supabase.com/docs/guides/auth/auth-hooks> and
   <https://www.standardwebhooks.com>).
   This is a growing list of adopters — implementing this once covers all of them.
 
