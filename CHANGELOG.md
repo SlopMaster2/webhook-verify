@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"anthropic"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of one of the
+  biggest signers of the scheme: Anthropic's webhook documentation states that
+  every delivery carries the Standard Webhooks `webhook-id` /
+  `webhook-timestamp` / `webhook-signature` (`v1,<base64>`) construction and a
+  32-byte `whsec_`-prefixed signing secret, and its SDK verifies deliveries
+  with the reference Standard Webhooks verifier. Config files that name the
+  provider by the sender's brand — `provider: anthropic` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://platform.claude.com/docs/en/managed-agents/webhooks>.)
 - **`Provider::from_str` now also accepts `"loops"`** for
   [`Provider::StandardWebhooks`], matching the brand name of a provider whose
   official webhook documentation ships a verification snippet using the exact
