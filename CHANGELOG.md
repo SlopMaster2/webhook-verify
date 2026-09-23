@@ -879,6 +879,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Tailscale: non-canonical `t=` timestamps are now rejected.** The signed
+  string reuses the raw `t` substring, and Tailscale's official verifier
+  (`docs/webhooks/example.go`) signs the parsed integer re-formatted
+  canonically (`fmt.Append(nil, timestamp.Unix())`). The shared timestamp
+  parser accepts any pure-digit spelling, so a leading-zero value
+  (`t=01663781880`) previously verified against a signed string the reference
+  verifier can never produce — a silent divergence from the cited source.
+  `t` values that are not in canonical decimal form (leading zeros, including
+  `t=00`; a lone `t=0` remains valid) now fail closed as `MalformedHeader`,
+  making the crate's signed string byte-identical to the official verifier
+  for every accepted delivery. Tailscale only emits canonical values, so no
+  legitimate delivery is affected. (`spec.md` §3 Tailscale row updated and the
+  module-doc byte-identical claim is now actually true; same class as the
+  Ripple verbatim-agreement gate.)
+
 - **Fuzz seed-corpus doc comment now enumerates the Tailscale seed.** The
   `parse_and_verify` target's seed list
   (`fuzz/fuzz_targets/parse_and_verify.rs`) documented every committed corpus
