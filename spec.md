@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2651,6 +2651,18 @@ ambiguity).
   with the reference Standard Webhooks libraries and publish a manual
   constant-time `verify()` that mirrors them (source:
   <https://docs.zapier.com/white-label/connection-webhooks/verify-signatures>).
+  Vanta's official webhook docs state that its event deliveries are "powered by
+  Svix", carrying the `svix-id`/`svix-timestamp`/`svix-signature` headers (the
+  Svix-branded aliases of the spec's `webhook-*` names), and describe the exact
+  same construction — a signed content string of
+  `{svix-id}.{svix-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret, a
+  space-delimited `v1,` signature list, and a five-minute replay tolerance
+  window — directing receivers to verify with the Svix/Standard Webhooks
+  client libraries (source:
+  <https://developer.vanta.com/docs/webhooks>).
+  Vanta is also listed as a Standard Webhooks-compatible sender on the official
+  site (sources: <https://www.standardwebhooks.com>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

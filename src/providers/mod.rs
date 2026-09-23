@@ -657,8 +657,8 @@ impl fmt::Display for Provider {
 /// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, `"loops"`, `"anthropic"`,
 /// `"gemini"`, `"brex"`, `"bigcommerce"` (also `"big commerce"`/
 /// `"big-commerce"`), `"lithic"`, `"incident.io"` (also `"incident"`),
-/// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`, and
-/// `"zapier"` all parse to it.
+/// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
+/// `"zapier"`, and `"vanta"` all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -743,6 +743,15 @@ impl fmt::Display for Provider {
 /// joins using HMAC-SHA256 keyed by the endpoint's `whsec_`-prefixed signing
 /// secret, and recommending the spec's five-minute tolerance window and the
 /// reference Standard Webhooks libraries.
+/// Vanta's official webhook docs state that its event deliveries are "powered
+/// by Svix", attaching the same signed content — the `svix-id`/`svix-timestamp`/
+/// `svix-signature` (Svix-branded aliases of the spec's `webhook-*` names)
+/// headers, a message built by concatenating id, timestamp, and raw body with
+/// `.` joins, HMAC-SHA256 keyed by the base64-decoded remainder of a
+/// `whsec_`-prefixed signing secret, a space-delimited `v1,` list, and a
+/// five-minute replay window — and direct receivers to verify with the
+/// Svix/Standard Webhooks client libraries; Vanta is also listed as a Standard
+/// Webhooks-compatible sender on the official site.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -880,7 +889,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("sardine")
                 || n.eq_ignore_ascii_case("dodo")
                 || n.eq_ignore_ascii_case("dodopayments")
-                || n.eq_ignore_ascii_case("zapier") =>
+                || n.eq_ignore_ascii_case("zapier")
+                || n.eq_ignore_ascii_case("vanta") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -904,7 +914,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1953,6 +1963,9 @@ mod tests {
             ("zapier", Provider::StandardWebhooks),
             ("Zapier", Provider::StandardWebhooks),
             ("ZAPIER", Provider::StandardWebhooks),
+            ("vanta", Provider::StandardWebhooks),
+            ("Vanta", Provider::StandardWebhooks),
+            ("VANTA", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2018,7 +2031,7 @@ mod tests {
         // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
-        // `dodo`/`dodopayments`/`zapier` ↔ StandardWebhooks); the
+        // `dodo`/`dodopayments`/`zapier`/`vanta` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2045,6 +2058,7 @@ mod tests {
             "dodo",
             "dodopayments",
             "zapier",
+            "vanta",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
