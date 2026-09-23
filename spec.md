@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2554,6 +2554,13 @@ ambiguity).
   `whsec_`-prefixed endpoint signing secrets, and recommends verifying with a
   standard verification library (source:
   <https://docs.warp.co/webhooks>).
+  Loops' official webhook documentation provides a reference verification
+  snippet that uses the exact Standard Webhooks construction — canonical
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers,
+  a `whsec_`-prefixed base64 signing secret, HMAC-SHA256 over
+  `"{id}.{timestamp}.{raw_body}"`, a 300-second tolerance window, and a
+  space-delimited signature list for rotation (source:
+  <https://loops.so/docs/webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

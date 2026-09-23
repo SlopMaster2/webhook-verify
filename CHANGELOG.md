@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"loops"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of a provider whose
+  official webhook documentation ships a verification snippet using the exact
+  Standard Webhooks construction the provider already verifies: canonical
+  `webhook-id` / `webhook-timestamp` / `webhook-signature` (`v1,<base64>`)
+  headers, a `whsec_`-prefixed base64 signing secret, HMAC-SHA256 over
+  `"{id}.{timestamp}.{raw_body}"`, a 300-second tolerance window, and a
+  space-delimited signature list for zero-downtime secret rotation. Config
+  files that name the provider by the sender's brand — `provider: loops` —
+  now parse to [`Provider::StandardWebhooks`] instead of erroring. (Alias
+  accepted case-insensitively, like every other spelling. Source:
+  <https://loops.so/docs/webhooks>.)
 - **`Provider::from_str` now also accepts `"warp"`** for
   [`Provider::StandardWebhooks`], matching the brand name of a provider whose
   webhook documentation states it "implements the Standard Webhooks
