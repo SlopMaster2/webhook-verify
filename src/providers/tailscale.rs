@@ -17,7 +17,11 @@
 //!   transform of the signed bytes: the official Go verifier reads
 //!   `io.ReadAll(req.Body)` verbatim into the HMAC and decodes the JSON only
 //!   *after* the signature check, so the exact bytes received are the exact
-//!   bytes signed.
+//!   bytes signed. `t` must be in canonical decimal form (no leading zeros):
+//!   the Go verifier signs the parsed integer re-formatted canonically
+//!   (`fmt.Append(nil, timestamp.Unix())`), so a non-canonical `t` would sign
+//!   a string the reference verifier can never produce; Tailscale emits only
+//!   canonical values, so the gate cannot reject a legitimate delivery.
 //! - Algorithm: HMAC-SHA256 keyed by the per-endpoint webhook secret (a
 //!   case-sensitive signing secret shared between Tailscale and the endpoint
 //!   creator) as a plain UTF-8 string, hex-encoded (lowercase, no prefix).
@@ -77,9 +81,10 @@ pub(crate) fn verify(
     let parsed = parse_header(value)?;
 
     // Signed string is `{t}.{raw_body}`; the raw timestamp substring is reused
-    // verbatim so whatever was actually signed is what gets verified (the
-    // official Go verifier re-formats the parsed integer, which is byte-identical
-    // for every value `parse_timestamp` accepts).
+    // verbatim so whatever was actually signed is what gets verified. `parse_header`
+    // has already gated `t` to its canonical decimal form, so the verbatim bytes
+    // are byte-identical to what the official Go verifier signs (it re-formats
+    // the parsed integer with `fmt.Append(nil, timestamp.Unix())`).
     let mut signed_string = Vec::with_capacity(parsed.timestamp_raw.len() + 1 + raw_body.len());
     signed_string.extend_from_slice(parsed.timestamp_raw.as_bytes());
     signed_string.push(b'.');
@@ -192,6 +197,22 @@ fn parse_header(value: &str) -> Result<ParsedHeader<'_>, VerifyError> {
     // intentionally stricter and cannot reject a legitimate delivery.
     let timestamp = parse_timestamp(SIGNATURE_HEADER, timestamp_raw)?;
 
+    // The signed string reuses the raw `t` substring, and the official Go
+    // verifier signs the parsed integer re-formatted *canonically* (`mac.Write(
+    // fmt.Append(nil, timestamp.Unix()))`). `parse_timestamp` accepts any
+    // pure-digit string, including non-canonical spellings such as leading
+    // zeros (`t=01663781880`) — reusing those verbatim would sign a string the
+    // reference verifier can never produce, so they are rejected to keep this
+    // crate's signed string byte-identical to it for every accepted value.
+    // Tailscale emits only canonical values, so this cannot reject a
+    // legitimate delivery.
+    if timestamp_raw.len() > 1 && timestamp_raw.as_bytes()[0] == b'0' {
+        return Err(VerifyError::MalformedHeader {
+            header: SIGNATURE_HEADER,
+            reason: "timestamp is not in canonical decimal form",
+        });
+    }
+
     if signatures.is_empty() {
         return Err(VerifyError::MalformedHeader {
             header: SIGNATURE_HEADER,
@@ -245,6 +266,13 @@ mod tests {
     /// Locally constructed over an empty body (boundary case).
     const EMPTY_BODY_SIGNATURE: &str =
         "8535970d7094154352c09b6117fa588a9a9f5bc18045de5e5871104df2048dd9";
+
+    /// Locally constructed over `t=0` (the canonical boundary of the decimal
+    /// spellings the gate accepts — a single `0`, no leading zeros):
+    /// `HMAC-SHA256("tskey-webhook-xxxxx", "0." + BODY)`, cross-checked with
+    /// Python's `hmac` module.
+    const EPOCH_TIMESTAMP_SIGNATURE: &str =
+        "f35b9749f96bf79188206f1523fabde25c54ae287c98a1ddb5cca6bdf6ce9b99";
 
     /// Locally constructed over `"héllo, 🦀 world!"` (unicode boundary case).
     const UNICODE_BODY_SIGNATURE: &str =
@@ -329,6 +357,37 @@ mod tests {
         assert_eq!(
             verify_fresh("héllo, 🦀 world!".as_bytes(), UNICODE_BODY_SIGNATURE),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn canonical_zero_timestamp_still_verifies() {
+        // The canonical gate rejects *leading zeros*, not the value zero: `t=0`
+        // is the canonical decimal of epoch time and must still verify (with a
+        // clock pinned to it), while `t=00` fails closed like any other
+        // non-canonical spelling.
+        let header = format!("{TIME_FIELD}=0,{SCHEME}={EPOCH_TIMESTAMP_SIGNATURE}");
+        assert_eq!(
+            verify_with(
+                BODY,
+                &header,
+                &Secret::new(SECRET),
+                clocked_at(0, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+        let non_canonical = format!("{TIME_FIELD}=00,{SCHEME}={EPOCH_TIMESTAMP_SIGNATURE}");
+        assert_eq!(
+            verify_with(
+                BODY,
+                &non_canonical,
+                &Secret::new(SECRET),
+                clocked_at(0, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::MalformedHeader {
+                header: SIGNATURE_HEADER,
+                reason: "timestamp is not in canonical decimal form",
+            })
         );
     }
 
@@ -567,6 +626,16 @@ mod tests {
                 VerifyError::MalformedHeader {
                     header: SIGNATURE_HEADER,
                     reason: "timestamp is not a valid unix timestamp",
+                },
+            ),
+            // Leading-zero time parses as digits but is not canonical decimal
+            // form; the Go verifier would sign the canonical re-format, so the
+            // raw spelling must fail closed.
+            (
+                format!("{TIME_FIELD}=0{TIME},{SCHEME}={SIGNATURE}"),
+                VerifyError::MalformedHeader {
+                    header: SIGNATURE_HEADER,
+                    reason: "timestamp is not in canonical decimal form",
                 },
             ),
             // All digits, but past u64 range.

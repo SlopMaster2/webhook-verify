@@ -2197,6 +2197,19 @@ etc.), which all share the `Tailscale-Webhook-Signature` scheme.
   verbatim into the HMAC and `json.Unmarshal`s the body only *after* the
   signature check. Re-serializing or re-encoding the JSON before signing is
   therefore incorrect and breaks verification.
+- **Canonical `t` gate.** The Go verifier signs the parsed integer
+  re-formatted canonically (`timestamp.Unix()` through `fmt.Append`, i.e.
+  `%d`), while this crate reuses the raw `t` substring verbatim. Both agree
+  byte-for-byte on canonical spellings — the only kind an accepted delivery
+  can carry — but `parse_timestamp` also accepts non-canonical pure-digit
+  spellings (leading zeros, e.g. `t=01663781880`), for which a verbatim reuse
+  would sign a string the reference verifier can never produce. Those are
+  therefore rejected outright as `MalformedHeader` ("timestamp is not in
+  canonical decimal form"), so the signed string is byte-identical to the
+  official verifier for every accepted `t` (this also covers `t=00`; a lone
+  `t=0`, the canonical spelling of epoch time, remains valid). Tailscale
+  emits only canonical values, so the gate cannot reject a legitimate
+  delivery.
 - Algorithm: HMAC-SHA256 over the signed string, hex-encoded (lowercase, bare
   — no prefix).
 - Key: the per-endpoint webhook secret shared between Tailscale and the
