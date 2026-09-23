@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"openai"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of one of the
+  biggest signers of the scheme: OpenAI's webhook documentation states its
+  deliveries "follow the Standard Webhooks specification", and shows every
+  delivery signed with the same `webhook-id` / `webhook-timestamp` /
+  `webhook-signature` (`v1,<base64>`) construction and `whsec_`-prefixed
+  signing secret the provider already verifies, explicitly recommending the
+  reference Standard Webhooks libraries for verification. Config files that
+  name the provider by the sender's brand — `provider: openai` — now parse
+  to [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://developers.openai.com/api/docs/guides/webhooks>.)
 - **`Provider::from_str` now also accepts `"gitlab"`** for
   [`Provider::StandardWebhooks`], matching the brand name of one of the
   biggest signers of the scheme: GitLab's webhook documentation states its

@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2530,6 +2530,11 @@ ambiguity).
   and verifies them with the reference Standard Webhooks verifier, keyed by
   the `whsec_` signing secret from the Clerk Dashboard (source:
   <https://github.com/clerk/javascript/blob/main/packages/backend/src/webhooks.ts>).
+  OpenAI delivers webhooks that "follow the Standard Webhooks specification",
+  signing with the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`) construction keyed by the endpoint's `whsec_` signing secret
+  and verifying with the reference Standard Webhooks libraries (source:
+  <https://developers.openai.com/api/docs/guides/webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
