@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2573,6 +2573,14 @@ ambiguity).
   `whsec_`-prefixed signing secret returned by the WebhookService API, and
   recommend verifying with the reference Standard Webhooks libraries (source:
   <https://ai.google.dev/gemini-api/docs/webhooks>).
+  Brex's official webhook docs describe the same construction — the
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` headers, an HMAC-SHA256
+  over `{webhook-id}.{webhook-timestamp}.{raw_body}` keyed by a base64-decoded
+  (in real deliveries `whsec_`-prefixed) signing secret, and a space-delimited
+  versioned signature list — and publish a byte-exact test vector. Brex is also
+  listed as a Standard Webhooks-compatible sender on the official site
+  (sources: <https://developer.brex.com/guides/webhooks> and
+  <https://www.standardwebhooks.com>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

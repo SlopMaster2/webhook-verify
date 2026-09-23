@@ -654,8 +654,8 @@ impl fmt::Display for Provider {
 /// config files.
 /// [`Provider::StandardWebhooks`] additionally accepts the brand names of the
 /// signers that serve it: `"svix"`, `"resend"`, `"messagebird"`, `"bird"`,
-/// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, `"loops"`, `"anthropic"`, and
-/// `"gemini"` all parse to it.
+/// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, `"loops"`, `"anthropic"`,
+/// `"gemini"`, and `"brex"` all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -682,7 +682,13 @@ impl fmt::Display for Provider {
 /// that static webhook deliveries strictly follow the Standard Webhooks
 /// specification, signing every delivery with the same
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` construction keyed by
-/// a `whsec_`-prefixed signing secret returned by the WebhookService API.)
+/// a `whsec_`-prefixed signing secret returned by the WebhookService API;
+/// Brex's official webhook docs describe the exact same construction —
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` headers, an
+/// HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw_body}` keyed by a
+/// base64-decoded signing secret and a space-delimited versioned signature
+/// list — and Brex is listed as a Standard Webhooks-compatible sender on the
+/// official site.)
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -807,7 +813,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("warp")
                 || n.eq_ignore_ascii_case("loops")
                 || n.eq_ignore_ascii_case("anthropic")
-                || n.eq_ignore_ascii_case("gemini") =>
+                || n.eq_ignore_ascii_case("gemini")
+                || n.eq_ignore_ascii_case("brex") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -831,7 +838,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, and `gemini` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, and `brex` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1845,6 +1852,9 @@ mod tests {
             ("gemini", Provider::StandardWebhooks),
             ("Gemini", Provider::StandardWebhooks),
             ("GEMINI", Provider::StandardWebhooks),
+            ("brex", Provider::StandardWebhooks),
+            ("Brex", Provider::StandardWebhooks),
+            ("BREX", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -1908,7 +1918,7 @@ mod tests {
         }
         // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
         // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
-        // `openai`/`warp`/`loops`/`anthropic`/`gemini` ↔ StandardWebhooks); the message
+        // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex` ↔ StandardWebhooks); the message
         // names them too so an operator who typed a rejected alias sees it
         // echoed back, instead of only the canonical spellings.
         for alias in [
@@ -1924,6 +1934,7 @@ mod tests {
             "loops",
             "anthropic",
             "gemini",
+            "brex",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
