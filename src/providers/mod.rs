@@ -500,9 +500,10 @@ pub enum Provider {
     /// Integration Secret (integration webhooks), both used verbatim as UTF-8
     /// bytes. Vercel signs no timestamp, so `max_age` has no effect. This is
     /// the built-in providers' only bare-hex raw-body SHA-1 scheme — the
-    /// crate's other built-in SHA-1 schemes are Twilio (URL + form params),
-    /// Intercom (raw body behind a `sha1=` prefix), and Expo EAS (raw body
-    /// behind a `sha1=` prefix). A `CustomScheme`
+    /// crate's other built-in SHA-1 schemes are Twilio and Mailchimp
+    /// Transactional (URL + form params, base64), Intercom (raw body behind
+    /// a `sha1=` prefix), and Expo EAS (raw body behind a `sha1=` prefix). A
+    /// `CustomScheme`
     /// configured with [`HashAlg::Sha1`], [`Encoding::Hex`], no prefix, and
     /// the identity signed-string can reproduce the same bare-hex shape
     /// (`spec.md` §3, §2.2).
