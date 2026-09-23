@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"dodo"` (and `"dodopayments"`)** for
+  [`Provider::StandardWebhooks`], matching the brand name of another major
+  signer of the scheme: Dodo Payments' official webhook docs state that its
+  deliveries follow the Standard Webhooks specification, attach the same
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers,
+  sign a message built by concatenating the id, timestamp, and exact raw
+  payload with `.` joins using HMAC-SHA256 keyed by the endpoint's signing
+  secret, and direct receivers to verify with the reference Standard Webhooks
+  libraries. Config files that name the provider by the sender's brand —
+  `provider: dodo` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling.
+  Source: <https://docs.dodopayments.com/developer-resources/webhooks>.)
 - **`Provider::from_str` now also accepts `"sardine"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another major
   signer of the scheme: Sardine's official webhook docs describe the exact
