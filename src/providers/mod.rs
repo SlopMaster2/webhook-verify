@@ -655,8 +655,8 @@ impl fmt::Display for Provider {
 /// [`Provider::StandardWebhooks`] additionally accepts the brand names of the
 /// signers that serve it: `"svix"`, `"resend"`, `"messagebird"`, `"bird"`,
 /// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, `"loops"`, `"anthropic"`,
-/// `"gemini"`, `"brex"`, and `"bigcommerce"` (also `"big commerce"`/
-/// `"big-commerce"`) all parse to it.
+/// `"gemini"`, `"brex"`, `"bigcommerce"` (also `"big commerce"`/
+/// `"big-commerce"`), and `"lithic"` all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -692,7 +692,13 @@ impl fmt::Display for Provider {
 /// official site; BigCommerce's official webhook docs tell merchants to
 /// verify callbacks with the official Standard Webhooks libraries and show
 /// `wh.verify(payload, headers)` against the same three `webhook-*` headers,
-/// behind a signature plus a replay-protected timestamp.
+/// behind a signature plus a replay-protected timestamp; Lithic's official
+/// events API docs describe the exact same construction — the
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` headers, an HMAC-SHA256
+/// over `{webhook-id}.{webhook-timestamp}.{raw_body}` keyed by the base64 part
+/// of a `whsec_`-prefixed signing secret, a space-delimited versioned
+/// signature list, and a five-minute replay tolerance window — and publish a
+/// byte-exact worked example.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -821,7 +827,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("brex")
                 || n.eq_ignore_ascii_case("bigcommerce")
                 || n.eq_ignore_ascii_case("big commerce")
-                || n.eq_ignore_ascii_case("big-commerce") =>
+                || n.eq_ignore_ascii_case("big-commerce")
+                || n.eq_ignore_ascii_case("lithic") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -845,7 +852,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, and `bigcommerce` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, and `lithic` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1867,6 +1874,9 @@ mod tests {
             ("BIGCOMMERCE", Provider::StandardWebhooks),
             ("big commerce", Provider::StandardWebhooks),
             ("big-commerce", Provider::StandardWebhooks),
+            ("lithic", Provider::StandardWebhooks),
+            ("Lithic", Provider::StandardWebhooks),
+            ("LITHIC", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -1930,7 +1940,7 @@ mod tests {
         }
         // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
         // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
-        // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce` ↔ StandardWebhooks); the message
+        // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/`lithic` ↔ StandardWebhooks); the message
         // names them too so an operator who typed a rejected alias sees it
         // echoed back, instead of only the canonical spellings.
         for alias in [
@@ -1948,6 +1958,7 @@ mod tests {
             "gemini",
             "brex",
             "bigcommerce",
+            "lithic",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),

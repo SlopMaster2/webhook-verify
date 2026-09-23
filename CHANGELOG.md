@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"lithic"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another major
+  signer of the scheme: Lithic's official events API docs describe the exact
+  Standard Webhooks construction this crate verifies — the
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers, HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw_body}`
+  keyed by the base64 part of a `whsec_`-prefixed signing secret, a
+  space-delimited versioned signature list, and a five-minute replay
+  tolerance window. Lithic's published byte-exact worked example is now a
+  test vector for this provider. Config files that name the provider by the
+  sender's brand — `provider: lithic` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://docs.lithic.com/docs/events-api>.)
 - **`Provider::from_str` now also accepts `"bigcommerce"`** (and the
   human-readable `"big commerce"`/`"big-commerce"` spellings, like the other
   multi-word aliases) for [`Provider::StandardWebhooks`], matching the brand
