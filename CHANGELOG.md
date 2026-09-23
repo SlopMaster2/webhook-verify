@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"bigcommerce"`** (and the
+  human-readable `"big commerce"`/`"big-commerce"` spellings, like the other
+  multi-word aliases) for [`Provider::StandardWebhooks`], matching the brand
+  name of a major signer of the scheme: BigCommerce's official webhook docs
+  direct merchants to verify callback events with the official Standard
+  Webhooks libraries — "We advise merchants to use libraries provided by
+  Standard Webhook to verify the legitimacy of the events" — and show
+  `wh.verify(webhook_payload, webhook_headers)` over the exact
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  construction this crate verifies, keyed by the base64-encoded client
+  secret, with a signature plus a "timestamp used to protect against replay
+  attacks". Config files that name the provider by the sender's brand —
+  `provider: bigcommerce` — now parse to [`Provider::StandardWebhooks`]
+  instead of erroring. (Alias accepted case-insensitively, like every other
+  spelling. Source:
+  <https://docs.bigcommerce.com/developer/docs/integrations/webhooks/https>.)
 - **`Provider::from_str` now also accepts `"brex"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another major
   signer of the scheme: Brex's official webhook docs describe the exact

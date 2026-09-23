@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2581,6 +2581,13 @@ ambiguity).
   listed as a Standard Webhooks-compatible sender on the official site
   (sources: <https://developer.brex.com/guides/webhooks> and
   <https://www.standardwebhooks.com>).
+  BigCommerce's official webhook docs likewise direct merchants to verify
+  callbacks with the Standard Webhooks libraries' `verify(payload, headers)`
+  against the same `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  construction, noting that a "timestamp is used to protect against replay
+  attacks" and advising to "validate the signature and timestamp before
+  processing any webhook event" (source:
+  <https://docs.bigcommerce.com/developer/docs/integrations/webhooks/https>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
