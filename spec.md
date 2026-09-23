@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2561,6 +2561,11 @@ ambiguity).
   `"{id}.{timestamp}.{raw_body}"`, a 300-second tolerance window, and a
   space-delimited signature list for rotation (source:
   <https://loops.so/docs/webhooks>).
+  Anthropic's official webhook docs state that every delivery carries the
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` headers and a 32-byte
+  `whsec_`-prefixed signing secret, and verify deliveries with the SDK's
+  reference Standard Webhooks verifier (source:
+  <https://platform.claude.com/docs/en/managed-agents/webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
