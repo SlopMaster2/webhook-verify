@@ -654,8 +654,8 @@ impl fmt::Display for Provider {
 /// config files.
 /// [`Provider::StandardWebhooks`] additionally accepts the brand names of the
 /// signers that serve it: `"svix"`, `"resend"`, `"messagebird"`, `"bird"`,
-/// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, `"loops"`, and `"anthropic"`
-/// all parse to it.
+/// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, `"loops"`, `"anthropic"`, and
+/// `"gemini"` all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -678,7 +678,11 @@ impl fmt::Display for Provider {
 /// webhook docs state that every delivery carries the same
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` construction keyed by
 /// a `whsec_`-prefixed signing secret and verify with their SDK's reference
-/// Standard Webhooks verifier.)
+/// Standard Webhooks verifier; Google Gemini's official webhook docs state
+/// that static webhook deliveries strictly follow the Standard Webhooks
+/// specification, signing every delivery with the same
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` construction keyed by
+/// a `whsec_`-prefixed signing secret returned by the WebhookService API.)
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -802,7 +806,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("openai")
                 || n.eq_ignore_ascii_case("warp")
                 || n.eq_ignore_ascii_case("loops")
-                || n.eq_ignore_ascii_case("anthropic") =>
+                || n.eq_ignore_ascii_case("anthropic")
+                || n.eq_ignore_ascii_case("gemini") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -826,7 +831,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, and `anthropic` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, and `gemini` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1837,6 +1842,9 @@ mod tests {
             ("anthropic", Provider::StandardWebhooks),
             ("Anthropic", Provider::StandardWebhooks),
             ("ANTHROPIC", Provider::StandardWebhooks),
+            ("gemini", Provider::StandardWebhooks),
+            ("Gemini", Provider::StandardWebhooks),
+            ("GEMINI", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -1900,7 +1908,7 @@ mod tests {
         }
         // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
         // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
-        // `openai`/`warp`/`loops`/`anthropic` ↔ StandardWebhooks); the message
+        // `openai`/`warp`/`loops`/`anthropic`/`gemini` ↔ StandardWebhooks); the message
         // names them too so an operator who typed a rejected alias sees it
         // echoed back, instead of only the canonical spellings.
         for alias in [
@@ -1915,6 +1923,7 @@ mod tests {
             "warp",
             "loops",
             "anthropic",
+            "gemini",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),

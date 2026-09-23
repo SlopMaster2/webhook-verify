@@ -1,5 +1,5 @@
 //! Standard Webhooks signature verification (covers Svix, Clerk, Resend,
-//! OpenAI, Warp, Anthropic, GitLab 19.0+ signing tokens, Loops, ...).
+//! OpenAI, Warp, Anthropic, GitLab 19.0+ signing tokens, Gemini, Loops, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)

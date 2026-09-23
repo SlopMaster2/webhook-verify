@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2566,6 +2566,13 @@ ambiguity).
   `whsec_`-prefixed signing secret, and verify deliveries with the SDK's
   reference Standard Webhooks verifier (source:
   <https://platform.claude.com/docs/en/managed-agents/webhooks>).
+  Google Gemini's official webhook docs state that static webhook deliveries
+  "strictly follow the Standard Webhooks specification for security headers",
+  signing every delivery with the same `webhook-id`/`webhook-timestamp`/
+  `webhook-signature` (`v1,<base64>`) construction keyed by a
+  `whsec_`-prefixed signing secret returned by the WebhookService API, and
+  recommend verifying with the reference Standard Webhooks libraries (source:
+  <https://ai.google.dev/gemini-api/docs/webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

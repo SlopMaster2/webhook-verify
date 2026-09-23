@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"gemini"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of one of the
+  biggest signers of the scheme: Google Gemini's official webhook docs state
+  that static webhook deliveries "strictly follow the Standard Webhooks
+  specification for security headers", signing every delivery with the
+  Standard Webhooks `webhook-id` / `webhook-timestamp` / `webhook-signature`
+  (`v1,<base64>`) construction keyed by a `whsec_`-prefixed signing secret
+  returned by the WebhookService API, and recommend verifying with the
+  reference Standard Webhooks libraries. Config files that name the provider
+  by the sender's brand — `provider: gemini` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://ai.google.dev/gemini-api/docs/webhooks>.)
 - **`Provider::from_str` now also accepts `"anthropic"`** for
   [`Provider::StandardWebhooks`], matching the brand name of one of the
   biggest signers of the scheme: Anthropic's webhook documentation states that
