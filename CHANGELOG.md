@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"incident.io"`** (and the short
+  `"incident"` spelling) for [`Provider::StandardWebhooks`], matching the
+  brand name of another signer of the scheme: incident.io's official
+  webhook docs state that its deliveries are "powered by Svix", carry the
+  three Standard Webhooks headers (`webhook-id`/`webhook-timestamp`/
+  `webhook-signature` with a `v1,<base64>` signature), describe the
+  signature as an HMAC of `$WEBHOOK_ID.$WEBHOOK_TIMESTAMP.$REQUEST_BODY`
+  keyed by the endpoint's signing secret, and direct receivers to verify
+  with the Svix/Standard Webhooks client libraries. incident.io is also
+  listed as a Standard Webhooks-compatible sender on the official site.
+  Config files that name the provider by the sender's brand —
+  `provider: incident.io` — now parse to [`Provider::StandardWebhooks`]
+  instead of erroring. (Alias accepted case-insensitively, like every other
+  spelling. Sources: <https://docs.incident.io/integrations/webhooks> and
+  <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"lithic"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another major
   signer of the scheme: Lithic's official events API docs describe the exact
