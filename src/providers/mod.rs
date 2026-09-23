@@ -654,7 +654,8 @@ impl fmt::Display for Provider {
 /// config files.
 /// [`Provider::StandardWebhooks`] additionally accepts the brand names of the
 /// signers that serve it: `"svix"`, `"resend"`, `"messagebird"`, `"bird"`,
-/// `"gitlab"`, `"clerk"`, `"openai"`, and `"warp"` all parse to it. (Svix is
+/// `"gitlab"`, `"clerk"`, `"openai"`, `"warp"`, and `"loops"` all parse to it.
+/// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
 /// Svix-form secret, per its official docs; Bird — formerly MessageBird —
@@ -669,7 +670,10 @@ impl fmt::Display for Provider {
 /// docs verify them with the reference Standard Webhooks libraries; Warp's
 /// webhook documentation states its deliveries implement the Standard Webhooks
 /// specification, signing with the same construction and `whsec_`-prefixed
-/// secrets, and recommends verifying with a standard verification library.)
+/// secrets, and recommends verifying with a standard verification library;
+/// Loops signs every delivery with the same `webhook-id`/`webhook-timestamp`/
+/// `webhook-signature` (`v1,<base64>`) construction and `whsec_`-prefixed
+/// secret, per its official docs' verification snippet.)
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -791,7 +795,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("gitlab")
                 || n.eq_ignore_ascii_case("clerk")
                 || n.eq_ignore_ascii_case("openai")
-                || n.eq_ignore_ascii_case("warp") =>
+                || n.eq_ignore_ascii_case("warp")
+                || n.eq_ignore_ascii_case("loops") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -815,7 +820,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, and `warp` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, and `loops` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1820,6 +1825,9 @@ mod tests {
             ("warp", Provider::StandardWebhooks),
             ("Warp", Provider::StandardWebhooks),
             ("WARP", Provider::StandardWebhooks),
+            ("loops", Provider::StandardWebhooks),
+            ("Loops", Provider::StandardWebhooks),
+            ("LOOPS", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -1883,9 +1891,9 @@ mod tests {
         }
         // The `FromStr` impl also accepts rebrand/signer aliases (`mailchimp`
         // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
-        // `openai`/`warp` ↔ StandardWebhooks); the message names them too so an
-        // operator who typed a rejected alias sees it echoed back, instead of only
-        // the canonical spellings.
+        // `openai`/`warp`/`loops` ↔ StandardWebhooks); the message names them
+        // too so an operator who typed a rejected alias sees it echoed back,
+        // instead of only the canonical spellings.
         for alias in [
             "mailchimp",
             "svix",
@@ -1896,6 +1904,7 @@ mod tests {
             "clerk",
             "openai",
             "warp",
+            "loops",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
