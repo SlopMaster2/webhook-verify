@@ -1,5 +1,6 @@
 //! Standard Webhooks signature verification (covers Svix, Clerk, Resend,
-//! OpenAI, Warp, Anthropic, GitLab 19.0+ signing tokens, Gemini, Loops, ...).
+//! OpenAI, Warp, Anthropic, GitLab 19.0+ signing tokens, Gemini, Loops, Brex,
+//! ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -325,6 +326,97 @@ mod tests {
             // "now" == the signed timestamp: always within tolerance.
             clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
         )
+    }
+
+    /// Official Brex webhook test vector, from the Brex developer guide
+    /// (<https://developer.brex.com/guides/webhooks>): a payload, unprefixed
+    /// base64 signing secret, id, timestamp, and a space-delimited `v1,` list
+    /// of two signatures that Brex publishes saying it "is verified" apart
+    /// from timestamp checking. Brex signs with the exact Standard Webhooks
+    /// construction this module implements (`{id}.{timestamp}.{raw_body}`,
+    /// HMAC-SHA256 keyed by the base64-decoded secret, `whsec_`-prefixed in
+    /// real deliveries), so `brex` is accepted as a brand alias for this
+    /// provider.
+    #[test]
+    fn official_brex_vector_verifies() {
+        let payload = br#"{"event_type": "TRANSFER_PROCESSED", "transfer_id": "dptx_ckyypz30n000101kgzgnrtqlf", "company_id": "cuacc_ckqckhadg000601r95ox48c2s"}"#;
+        let secret = Secret::new("4j7OxQ4wlv1GmkZ9qLjoFjEFXjpzvHkr");
+        let id = "msg_24Ky2257Hzd0tgc5bWs8TwK9Kod";
+        let timestamp: u64 = 1_643_393_361;
+        let rotation_list = "v1,6mFFi/Bg0gw1Yz2KJwZSVq6Bh+XzllS7JVltAlZ8yCU= v1,9dEEi/Bg0gw1Yz2KJwZSVq6Bh+XzllS7JVltAlZ8yDY=";
+        let single = "v1,6mFFi/Bg0gw1Yz2KJwZSVq6Bh+XzllS7JVltAlZ8yCU=";
+
+        // The published two-signature rotation list verifies in full.
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                rotation_list,
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+
+        // A single-signature list (most deliveries) also verifies.
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                single,
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Brex vector, with one base64 character of the signature
+    /// flipped: officially published inputs + a wrong-but-well-formed
+    /// signature must fail closed (negative §5.2 case).
+    #[test]
+    fn official_brex_vector_negative_flip_fails() {
+        let payload = br#"{"event_type": "TRANSFER_PROCESSED", "transfer_id": "dptx_ckyypz30n000101kgzgnrtqlf", "company_id": "cuacc_ckqckhadg000601r95ox48c2s"}"#;
+        let secret = Secret::new("4j7OxQ4wlv1GmkZ9qLjoFjEFXjpzvHkr");
+        let id = "msg_24Ky2257Hzd0tgc5bWs8TwK9Kod";
+        let timestamp: u64 = 1_643_393_361;
+        let flipped = "v1,6mFFi/Bg0gw1Yz2KJwZSVq6Bh+XzllS7JVltAlZ8yDU=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                flipped,
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Brex vector with the raw body mutated after signing must fail
+    /// (tamper §5.3 case).
+    #[test]
+    fn official_brex_vector_tampered_body_fails() {
+        let payload =
+            br#"{"event_type": "TRANSFER_PROCESSED", "transfer_id": "dptx_ckyypz30n000101kgzgnrtqlf", "company_id": "cuacc_ckqckhadg000601r95ox48c2S"}"#;
+        let secret = Secret::new("4j7OxQ4wlv1GmkZ9qLjoFjEFXjpzvHkr");
+        let id = "msg_24Ky2257Hzd0tgc5bWs8TwK9Kod";
+        let timestamp: u64 = 1_643_393_361;
+        let single = "v1,6mFFi/Bg0gw1Yz2KJwZSVq6Bh+XzllS7JVltAlZ8yCU=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                single,
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
     }
 
     #[test]

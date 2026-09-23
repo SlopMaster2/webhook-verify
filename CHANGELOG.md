@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"brex"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another major
+  signer of the scheme: Brex's official webhook docs describe the exact
+  Standard Webhooks construction this crate verifies — `webhook-id` /
+  `webhook-timestamp` / `webhook-signature` (`v1,<base64>`) headers,
+  HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw_body}` keyed by a
+  base64-decoded signing secret, and a space-delimited versioned signature
+  list — and list Brex as a Standard Webhooks-compatible sender on the
+  official site. Brex's published byte-exact test vector is now a test vector
+  for this provider. Config files that name the provider by the sender's brand
+  — `provider: brex` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling.
+  Sources: <https://developer.brex.com/guides/webhooks> and
+  <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"gemini"`** for
   [`Provider::StandardWebhooks`], matching the brand name of one of the
   biggest signers of the scheme: Google Gemini's official webhook docs state
