@@ -1,6 +1,6 @@
 //! Standard Webhooks signature verification (covers Svix, Clerk, Resend,
 //! OpenAI, Warp, Anthropic, GitLab 19.0+ signing tokens, Gemini, Loops, Brex,
-//! BigCommerce, ...).
+//! BigCommerce, Lithic, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -411,6 +411,81 @@ mod tests {
                 payload,
                 id,
                 single,
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// Official Lithic webhook test vector, from the Lithic events API docs
+    /// (<https://docs.lithic.com/docs/events-api>): a payload, unprefixed
+    /// base64 signing secret, id, timestamp, and the published "expected
+    /// signature" that Lithic says "will be computed as" over the raw body
+    /// using "the Base64 part of your signing secret". Lithic signs with the
+    /// exact Standard Webhooks construction this module implements
+    /// (`{id}.{timestamp}.{raw_body}`, HMAC-SHA256 keyed by the base64-decoded
+    /// secret, `whsec_`-prefixed in real deliveries), so `lithic` is accepted
+    /// as a brand alias for this provider.
+    #[test]
+    fn official_lithic_vector_verifies() {
+        let payload = br#"{"acquirer_fee":0,"amount":2000,"authorization_amount":2000}"#;
+        let secret = Secret::new("aDeFC3Zn55XB3PDD2zF0JP9cyrDHdV/18VOmkTcuyto=");
+        let id = "65a9dad4-1b60-4686-83fd-65b25078a4b4";
+        let timestamp: u64 = 1_698_031_907;
+        let signature = "OGBiqPtc/O2sWacUsuS4pvTdfFBv6dqxYX/4UFzrbGk=";
+
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Lithic vector, with one base64 character of the signature
+    /// flipped: officially published inputs + a wrong-but-well-formed
+    /// signature must fail closed (negative §5.2 case).
+    #[test]
+    fn official_lithic_vector_negative_flip_fails() {
+        let payload = br#"{"acquirer_fee":0,"amount":2000,"authorization_amount":2000}"#;
+        let secret = Secret::new("aDeFC3Zn55XB3PDD2zF0JP9cyrDHdV/18VOmkTcuyto=");
+        let id = "65a9dad4-1b60-4686-83fd-65b25078a4b4";
+        let timestamp: u64 = 1_698_031_907;
+        let flipped = "OHBiqPtc/O2sWacUsuS4pvTdfFBv6dqxYX/4UFzrbGk=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Lithic vector with the raw body mutated after signing must
+    /// fail (tamper §5.3 case).
+    #[test]
+    fn official_lithic_vector_tampered_body_fails() {
+        let payload = br#"{"acquirer_fee":0,"amount":2000,"authorization_amount":20001}"#;
+        let secret = Secret::new("aDeFC3Zn55XB3PDD2zF0JP9cyrDHdV/18VOmkTcuyto=");
+        let id = "65a9dad4-1b60-4686-83fd-65b25078a4b4";
+        let timestamp: u64 = 1_698_031_907;
+        let signature = "OGBiqPtc/O2sWacUsuS4pvTdfFBv6dqxYX/4UFzrbGk=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
                 &timestamp.to_string(),
                 &secret,
                 clocked_at(timestamp, Some(Duration::from_secs(300))),
