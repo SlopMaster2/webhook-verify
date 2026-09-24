@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"render"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Render's official webhook docs state that "Render's webhook
+  implementation follows the specification defined by the Standard Webhooks
+  project", attaching the same `webhook-id`/`webhook-timestamp`/
+  `webhook-signature` (`v1,<base64>`) headers, an HMAC-SHA256 signature over
+  `{webhook-id}.{webhook-timestamp}.{body}` keyed by the endpoint's signing
+  secret, and a five-minute replay tolerance window, and direct receivers to
+  verify with the Standard Webhooks client libraries — the exact construction
+  this provider implements — and Render is listed as a Standard
+  Webhooks-compatible sender on the official site. Config files that name the
+  provider by the sender's brand — `provider: render` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Sources:
+  <https://render.com/docs/webhooks> and <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"nash"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Nash's official webhook docs state "We use a service called Svix
