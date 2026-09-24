@@ -660,7 +660,7 @@ impl fmt::Display for Provider {
 /// `"big-commerce"`), `"lithic"`, `"incident.io"` (also `"incident"`),
 /// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
 /// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
-/// `"liveblocks"`, `"flip"`, and `"replicate"` all parse to it.
+/// `"liveblocks"`, `"flip"`, `"replicate"`, and `"inai"` all parse to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -801,6 +801,14 @@ impl fmt::Display for Provider {
 /// base64-decoded remainder of a `whsec_`-prefixed signing secret, a
 /// space-delimited versioned signature list, a timestamp tolerance window for
 /// replay protection, and a constant-time comparison recommendation.
+/// inai's official webhook docs describe the exact same construction — the
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature`
+/// (`v1,<base64>`) headers, a signed content string of
+/// `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+/// base64-decoded remainder of a `whsec_`-prefixed signing secret, a
+/// space-delimited versioned signature list, and a ±300-second replay
+/// tolerance window — and publish a byte-exact worked example that verifies
+/// against this implementation.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -945,7 +953,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("taskrabbit")
                 || n.eq_ignore_ascii_case("liveblocks")
                 || n.eq_ignore_ascii_case("flip")
-                || n.eq_ignore_ascii_case("replicate") =>
+                || n.eq_ignore_ascii_case("replicate")
+                || n.eq_ignore_ascii_case("inai") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -969,7 +978,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2042,6 +2051,9 @@ mod tests {
             ("replicate", Provider::StandardWebhooks),
             ("Replicate", Provider::StandardWebhooks),
             ("REPLICATE", Provider::StandardWebhooks),
+            ("inai", Provider::StandardWebhooks),
+            ("Inai", Provider::StandardWebhooks),
+            ("INAI", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2108,7 +2120,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2142,6 +2154,7 @@ mod tests {
             "liveblocks",
             "flip",
             "replicate",
+            "inai",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),

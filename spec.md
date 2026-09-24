@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2718,6 +2718,15 @@ ambiguity).
   signing secret, a space-delimited versioned signature list, a timestamp
   tolerance window for replay protection, and a constant-time comparison
   recommendation (source: <https://replicate.com/docs/topics/webhooks/verify-webhook>).
+  inai's official webhook docs describe the exact same construction — the
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers,
+  a signed content string of `{webhook-id}.{webhook-timestamp}.{raw_body}`,
+  HMAC-SHA256 keyed by the base64-decoded remainder of a `whsec_`-prefixed
+  signing secret, a space-delimited versioned signature list (`v1,` entries
+  verified, other versions like `v2,` ignored), and a ±300-second replay
+  tolerance window — and publish a byte-exact worked example that verifies
+  against this implementation (source:
+  <https://docs.inai.io/docs/verifying-your-webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

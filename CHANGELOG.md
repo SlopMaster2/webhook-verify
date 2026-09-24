@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"inai"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: inai's official webhook docs describe the exact same
+  construction — the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`) headers, a signed content string of
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret, a
+  space-delimited versioned signature list, and a ±300-second replay
+  tolerance window — and publish a byte-exact worked example that verifies
+  against this implementation. Config files that name the provider by the
+  sender's brand — `provider: inai` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://docs.inai.io/docs/verifying-your-webhooks>.)
 - **`Provider::StandardWebhooks` now verifies deliveries that carry the
   Svix-branded header names `svix-id`/`svix-timestamp`/`svix-signature`** in
   addition to the canonical `webhook-id`/`webhook-timestamp`/
