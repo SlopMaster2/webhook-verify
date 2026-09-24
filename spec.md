@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2755,6 +2755,20 @@ ambiguity).
   with the Standard Webhooks client libraries; Render is also listed as a
   Standard Webhooks-compatible sender on the official site (sources:
   <https://render.com/docs/webhooks> and <https://www.standardwebhooks.com>).
+  Yoco's official webhook docs direct receivers to verify deliveries with the
+  open-source Standard Webhooks libraries and describe the exact same
+  construction this provider implements — the `webhook-id`/`webhook-timestamp`/
+  `webhook-signature` (`v1,<base64>`) headers, a signed-content string of
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret, a
+  space-delimited versioned signature list compared in constant time, and a
+  replay-protection check on the `webhook-timestamp` window (the docs
+  recommend up to three minutes) — and note that "when Yoco retries delivery, a
+  new timestamp and signature are generated for each attempt"; Yoco is also
+  listed as a Standard Webhooks-compatible sender on the official site
+  (sources: <https://developer.yoco.com/docs/api/webhooks/verifying-events>,
+  <https://yoco.docs.buildwithfern.com/docs/api/webhooks/handling-events>, and
+  <https://www.standardwebhooks.com>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
