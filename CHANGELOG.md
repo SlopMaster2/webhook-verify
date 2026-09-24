@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"replicate"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Replicate's official webhook docs describe the exact same
+  construction — the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`) headers, a signed content string of
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret, a
+  space-delimited versioned signature list, a timestamp tolerance window for
+  replay protection, and a constant-time comparison recommendation. Config files
+  that name the provider by the sender's brand — `provider: replicate` — now
+  parse to [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://replicate.com/docs/topics/webhooks/verify-webhook>.)
 - **`Provider::from_str` now also accepts `"flip"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Flip Energy's official webhook docs state that its deliveries
