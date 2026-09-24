@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"nash"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Nash's official webhook docs state "We use a service called Svix
+  to send webhooks" and direct receivers to verify with the Svix libraries or
+  manually against the `svix-id`/`svix-timestamp`/`svix-signature` headers and
+  the endpoint signing secret (Settings > Webhook Management > Signing Secret)
+  — the exact Svix-served Standard Webhooks construction this provider
+  implements — and Nash is listed as a Standard Webhooks-compatible sender on
+  the official site. Config files that name the provider by the sender's brand —
+  `provider: nash` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling.
+  Sources:
+  <https://docs.usenash.com/reference/webhooks>
+  and <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"drata"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Drata's official workflow docs state that its outbound webhook
