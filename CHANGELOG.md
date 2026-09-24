@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"helcim"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Helcim's official connected-account webhooks docs
+  (<https://devdocs.helcim.com/docs/connected-account-webhooks>) state that
+  deliverables carry the `webhook-signature`/`webhook-timestamp`/`webhook-id`
+  (`v1,<base64>`) headers, that the verification payload is
+  `{webhook_id}.{webhook_timestamp}.{request_body}` signed with HMAC-SHA256
+  keyed by the base64-decoded "Verifier Token" provided during onboarding, and
+  that the `v1,` prefix is stripped only "if manually verifying and not using
+  the SVIX library" — the exact Standard Webhooks construction this provider
+  implements. Config files that name the provider by the sender's brand —
+  `provider: helcim` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling. No
+  official byte-exact vector exists — Helcim's docs example signs with a
+  `CHANGE_ME` placeholder token — so the test vector is recipe-built per
+  `spec.md` §5.1 from their documented construction and cross-checked in two
+  independent HMAC implementations. Source:
+  <https://devdocs.helcim.com/docs/connected-account-webhooks>.)
 - **`Provider::from_str` now also accepts `"polar"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Polar's official webhook docs state that "Our webhook
