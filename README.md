@@ -142,7 +142,7 @@ hand-copied signing-string logic to get wrong.
 | Webflow (Site Webhooks) | HMAC-SHA256 over `{timestamp}:{raw_body}` (colon join, epoch-ms timestamp), hex, `x-webflow-signature` + `x-webflow-timestamp` (site token secret / OAuth client secret key) + replay window | ✅ |
 | X (formerly Twitter) | HMAC-SHA256 over raw body, base64, `sha256=` prefix, `x-twitter-webhooks-signature` (no timestamp; consumer secret key) | ✅ |
 | Tailscale | HMAC-SHA256 over `t.body`, hex, `Tailscale-Webhook-Signature` (`t=,v1=` list, rotation-safe) + replay window | ✅ |
-| Standard Webhooks spec (Svix, Clerk, Resend, Bird/MessageBird, GitLab 19.0+ signing tokens, OpenAI, Warp, Loops, Anthropic, Gemini, Brex, BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments, Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip, Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, ...) | HMAC-SHA256, `webhook-signature` or Svix-branded `svix-signature` (`v1,` base64, rotation list) + replay window | ✅ |
+| Standard Webhooks spec (Svix, Clerk, Resend, Bird/MessageBird, GitLab 19.0+ signing tokens, OpenAI, Warp, Loops, Anthropic, Gemini, Brex, BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments, Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip, Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona, ...) | HMAC-SHA256, `webhook-signature` or Svix-branded `svix-signature` (`v1,` base64, rotation list) + replay window | ✅ |
 | Custom | User-supplied HMAC scheme via `Provider::Custom(..)` (SHA-256/SHA-1/SHA-512, hex/base64, optional prefix + timestamp replay window) | ✅ |
 
 Some providers ship behind crate features: calling `verify()` on `PayPal`
