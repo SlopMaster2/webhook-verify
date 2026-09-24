@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"yoco"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Yoco's official webhook docs direct receivers to verify every
+  delivery (its "only way to confirm an event originated from Yoco") with the
+  open-source Standard Webhooks libraries and describe the exact same
+  construction this provider implements — the `webhook-id`/`webhook-timestamp`/
+  `webhook-signature` (`v1,<base64>`) headers, a signed-content string of
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret, a
+  space-delimited versioned signature list, and a replay-protection timestamp
+  window — and Yoco is listed as a Standard Webhooks-compatible sender on the
+  official site. Config files that name the provider by the sender's brand —
+  `provider: yoco` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling.
+  Sources: <https://developer.yoco.com/docs/api/webhooks/verifying-events>,
+  <https://yoco.docs.buildwithfern.com/docs/api/webhooks/handling-events>, and
+  <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"render"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Render's official webhook docs state that "Render's webhook
