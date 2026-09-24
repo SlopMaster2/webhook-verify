@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"natural"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Natural's official webhook integration guide
+  (<https://docs.natural.co/guides/webhooks-integration>) states that "Natural
+  signs every delivery with the Standard Webhooks spec", attaching the same
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers and a signed content of `{webhook-id}.{webhook-timestamp}.{body}`
+  keyed by the base64-decoded remainder of the `whsec_`-prefixed signing
+  secret, with a space-delimited versioned signature list for secret rotation —
+  the exact Standard Webhooks construction this provider implements. Config
+  files that name the provider by the sender's brand — `provider: natural` —
+  now parse to [`Provider::StandardWebhooks`] instead of erroring. (Alias
+  accepted case-insensitively, like every other spelling. Natural publishes no
+  byte-exact worked example, so the test vector is recipe-built per `spec.md`
+  §5.1 from their documented construction and cross-checked in two independent
+  HMAC implementations. Source: <https://docs.natural.co/guides/webhooks-integration>.)
+- **`Provider::from_str` now also accepts `"origami"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Origami's official webhook docs
+  (<https://docs.origami.chat/webhooks/signatures>) describe the signature as
+  an "HMAC-SHA256 over the literal string
+  `{webhook-id}.{webhook-timestamp}.{raw-body}` using your `whsec_…` secret as
+  the HMAC key", with the prefix stripped and the remainder base64-decoded
+  exactly per the canonical Standard Webhooks spec, a space-delimited `v1,`
+  list for rotation, and a ±300-second replay window — the exact Standard
+  Webhooks construction this provider implements. Config files that name the
+  provider by the sender's brand — `provider: origami` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Origami publishes no
+  byte-exact worked example, so the test vector is recipe-built per `spec.md`
+  §5.1 from their documented construction and cross-checked in two independent
+  HMAC implementations. Source: <https://docs.origami.chat/webhooks/signatures>.)
 - **`Provider::from_str` now also accepts `"celitech"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: CELITECH's official webhook security docs

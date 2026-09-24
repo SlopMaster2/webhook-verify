@@ -662,7 +662,8 @@ impl fmt::Display for Provider {
 /// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
 /// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, `"drata"`, `"nash"`,
 /// `"render"`, `"yoco"`, `"novu"`, `"crossmint"`, `"daytona"`, `"polar"`,
-/// `"helcim"`, `"celitech"`, and `"360learning"` all parse to it.
+/// `"helcim"`, `"celitech"`, `"360learning"`, `"natural"`, and `"origami"`
+/// all parse to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -902,6 +903,21 @@ impl fmt::Display for Provider {
 /// or future should be rejected against replay attacks — so CELITECH is a
 /// Standard Webhooks sender and `celitech` is accepted as a brand alias for
 /// this provider.
+/// Natural's official webhook integration guide states that "Natural signs
+/// every delivery with the Standard Webhooks spec", attaching the same three
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+/// headers, a signed content of `{webhook-id}.{webhook-timestamp}.{body}`,
+/// HMAC-SHA256 keyed by the base64-decoded remainder of a `whsec_`-prefixed
+/// signing secret, and a space-delimited versioned signature list for secret
+/// rotation — so Natural is a Standard Webhooks sender and `natural` is
+/// accepted as a brand alias for this provider.
+/// Origami's official webhook docs describe the signature as an "HMAC-SHA256
+/// over the literal string `{webhook-id}.{webhook-timestamp}.{raw-body}` using
+/// your `whsec_…` secret as the HMAC key", with the prefix stripped and the
+/// remainder base64-decoded exactly per the canonical Standard Webhooks spec,
+/// a space-delimited `v1,` list (two values during a 24-hour secret rotation),
+/// and a ±300-second replay window — so Origami is a Standard Webhooks sender
+/// and `origami` is accepted as a brand alias for this provider.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -1058,7 +1074,9 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("polar")
                 || n.eq_ignore_ascii_case("helcim")
                 || n.eq_ignore_ascii_case("celitech")
-                || n.eq_ignore_ascii_case("360learning") =>
+                || n.eq_ignore_ascii_case("360learning")
+                || n.eq_ignore_ascii_case("natural")
+                || n.eq_ignore_ascii_case("origami") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1082,7 +1100,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning`, `natural`, `origami` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2191,6 +2209,12 @@ mod tests {
             ("360learning", Provider::StandardWebhooks),
             ("360Learning", Provider::StandardWebhooks),
             ("360LEARNING", Provider::StandardWebhooks),
+            ("natural", Provider::StandardWebhooks),
+            ("Natural", Provider::StandardWebhooks),
+            ("NATURAL", Provider::StandardWebhooks),
+            ("origami", Provider::StandardWebhooks),
+            ("Origami", Provider::StandardWebhooks),
+            ("ORIGAMI", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2257,7 +2281,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning`/`natural`/`origami` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2303,6 +2327,8 @@ mod tests {
             "helcim",
             "celitech",
             "360learning",
+            "natural",
+            "origami",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),

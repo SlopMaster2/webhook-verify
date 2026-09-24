@@ -2855,6 +2855,23 @@ ambiguity).
   <https://docs.celitech.com/webhooks/security>); CELITECH publishes no
   byte-verifiable worked example, so the vector suite uses the §5.1
   recipe-built fallback pinned to the construction above.
+  Natural's official webhook integration guide states that "Natural signs every
+  delivery with the Standard Webhooks spec", attaching the same three
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers
+  and a signed content of `{webhook-id}.{webhook-timestamp}.{body}` keyed by the
+  base64-decoded remainder of the `whsec_`-prefixed signing secret, with a
+  space-delimited versioned signature list for secret rotation (source:
+  <https://docs.natural.co/guides/webhooks-integration>); Natural publishes no
+  byte-verifiable worked example, so the vector suite uses the §5.1
+  recipe-built fallback pinned to the construction above.
+  Origami's official webhook docs describe the signature as an "HMAC-SHA256
+  over the literal string `{webhook-id}.{webhook-timestamp}.{raw-body}` using
+  your `whsec_…` secret as the HMAC key", with the prefix stripped and the
+  remainder base64-decoded exactly per the canonical spec, a space-delimited
+  `v1,` list (two values during a 24-hour secret rotation), and a ±300-second
+  replay window (source: <https://docs.origami.chat/webhooks/signatures>);
+  Origami publishes no byte-verifiable worked example, so the vector suite uses
+  the §5.1 recipe-built fallback pinned to the construction above.
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
