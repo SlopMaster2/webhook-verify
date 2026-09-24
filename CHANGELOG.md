@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"crossmint"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Crossmint's official webhook docs state that "Crossmint signs
+  every webhook and its metadata with a unique key for each endpoint", deliver
+  every call with the same `svix-id`/`svix-timestamp`/`svix-signature`
+  (`v1,<base64>`) headers, document signing `{svix-id}.{svix-timestamp}.{body}`
+  (the raw request body) with HMAC-SHA256 keyed by the base64-decoded remainder
+  of a `whsec_`-prefixed signing secret, and direct receivers to verify with
+  the Svix/Standard Webhooks client libraries — the exact construction this
+  provider implements, with the same reference Svix example payload its vector
+  suite pins byte-for-byte. Config files that name the provider by the sender's
+  brand — `provider: crossmint` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://docs.crossmint.com/introduction/platform/webhooks/verify-webhooks>.)
 - **`Provider::from_str` now also accepts `"novu"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Novu's official webhook docs state that "Novu signs webhook

@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco"/"novu" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco"/"novu"/"crossmint" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2782,6 +2782,20 @@ ambiguity).
   are powered by the same Svix-infrastructure construction (sources:
   <https://docs.novu.co/platform/developer/webhooks> and
   <https://docs.novu.co/platform/developer/webhooks/webhooks>).
+  Crossmint's official webhook docs state that "Crossmint signs every webhook
+  and its metadata with a unique key for each endpoint", deliver every call
+  with the same three `svix-id`/`svix-timestamp`/`svix-signature`
+  (`v1,<base64>`) headers, document signing `{svix-id}.{svix-timestamp}.{body}`
+  (the raw request body) with HMAC-SHA256 keyed by the base64-decoded remainder
+  of a `whsec_`-prefixed signing secret (publishing the reference Svix example
+  payload `msg_p5jXN8AQM9LWM0D4loKWxJek` / `1614265330` /
+  `{"test": 2432232314}` /
+  `v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=` as "all sent from the
+  server"), recommend a constant-time comparison and a timestamp-tolerance
+  check, and direct receivers to verify with the Svix/Standard Webhooks client
+  libraries — the exact construction this section implements, and the same
+  worked example the crate's own vector suite pins byte-for-byte (source:
+  <https://docs.crossmint.com/introduction/platform/webhooks/verify-webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
