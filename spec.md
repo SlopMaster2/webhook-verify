@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2693,6 +2693,15 @@ ambiguity).
   directing receivers to the Svix end-to-end tooling and recommending
   verification before processing any payload (source:
   <https://liveblocks.io/docs/platform/webhooks>).
+  Flip Energy's official webhook docs state that their webhook deliveries
+  "follow the Standard Webhooks specification", attach the exact same
+  construction — the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`) headers, a signed content string of
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret — and direct
+  receivers to reject any request whose timestamp is more than five minutes
+  from local time and to compare with a constant-time helper (source:
+  <https://docs.flip.energy/oem/webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
