@@ -669,6 +669,55 @@ mod tests {
     }
 
     #[test]
+    fn svix_header_names_verify_and_conflicting_duplicate_is_rejected() {
+        // Svix-hosted senders deliver under the Svix-branded `svix-*` header
+        // names (Svix's docs state they are aliases of the spec's `webhook-*`
+        // names with identical values). Those names must verify end-to-end
+        // through the layer, and the ambiguity scan must cover them too: with
+        // a duplicate `svix-id` carrying a forged value the request must be
+        // rejected even though the signature below is valid over the *first*
+        // id and the clock is pinned to the vector timestamp.
+        let build = |with_forged_dup: bool| {
+            let mut builder = Request::builder()
+                .header("svix-id", STANDARD_WEBHOOKS_ID)
+                .header("svix-timestamp", STANDARD_WEBHOOKS_TIMESTAMP.to_string())
+                .header(
+                    "svix-signature",
+                    format!("v1,{STANDARD_WEBHOOKS_SIGNATURE}"),
+                );
+            if with_forged_dup {
+                builder = builder.header("svix-id", "msg_forged");
+            }
+            builder
+                .body(TestBody::new(Bytes::from_static(STANDARD_WEBHOOKS_BODY)))
+                .unwrap_or_else(|_| unreachable!("static parts build a valid request"))
+        };
+        let svc = VerifyLayer::with_options(
+            Provider::StandardWebhooks,
+            Secret::new(STANDARD_WEBHOOKS_SECRET),
+            crate::VerifyOptions {
+                clock: Some(Arc::new(FixedClock(epoch(STANDARD_WEBHOOKS_TIMESTAMP)))),
+                ..crate::VerifyOptions::default()
+            },
+        )
+        .layer(EchoLen);
+
+        block_on(async {
+            let response = svc
+                .clone()
+                .oneshot(build(false))
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+            let response = svc
+                .oneshot(build(true))
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        });
+    }
+
+    #[test]
     fn conflicting_third_signature_value_is_rejected() {
         // [valid, valid, forged]: the differing value is not adjacent to the
         // first one. The scan must compare every value against the first, not

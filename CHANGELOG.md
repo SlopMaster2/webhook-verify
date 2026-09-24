@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::StandardWebhooks` now verifies deliveries that carry the
+  Svix-branded header names `svix-id`/`svix-timestamp`/`svix-signature`** in
+  addition to the canonical `webhook-id`/`webhook-timestamp`/
+  `webhook-signature`. Svix-hosted senders — Svix itself, Resend, Vanta,
+  TaskRabbit, incident.io, ... — emit the `svix-*` names by default, and
+  Svix's how-to verification docs state these "are the Svix-branded aliases
+  of the spec's `webhook-*` headers; the values are identical, and the Svix
+  libraries accept either set of names". Previously a genuine Svix delivery
+  carrying the default `svix-*` headers failed with `MissingHeader` even
+  though the provider claims Svix/Resend/Vanta coverage, so those signals are
+  now verified instead of rejected. Both spellings are read
+  case-insensitively; when a delivery carries both, the canonical `webhook-*`
+  spelling wins deterministically and the tower/actix duplicate-header scan
+  (`signature_header_names`) covers both sets. (Source:
+  <https://docs.svix.com/receiving/verifying-payloads/how>.)
 - **`Provider::from_str` now also accepts `"replicate"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Replicate's official webhook docs describe the exact same

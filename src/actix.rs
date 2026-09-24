@@ -637,6 +637,54 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn svix_header_names_verify_and_conflicting_duplicate_is_rejected() {
+        // Svix-hosted senders deliver under the Svix-branded `svix-*` header
+        // names (Svix's docs state they are aliases of the spec's `webhook-*`
+        // names with identical values). Those names must verify end-to-end
+        // through the middleware, and the ambiguity scan must cover them too:
+        // with a duplicate `svix-id` carrying a forged value the request must
+        // be rejected even though the signature below is valid over the
+        // *first* id and the clock is pinned to the vector timestamp.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::with_options(
+                    Provider::StandardWebhooks,
+                    Secret::new(STANDARD_WEBHOOKS_SECRET),
+                    crate::VerifyOptions {
+                        clock: Some(Arc::new(FixedClock(epoch(STANDARD_WEBHOOKS_TIMESTAMP)))),
+                        ..crate::VerifyOptions::default()
+                    },
+                ))
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("svix-id", STANDARD_WEBHOOKS_ID))
+            .insert_header(("svix-timestamp", STANDARD_WEBHOOKS_TIMESTAMP.to_string()))
+            .insert_header((
+                "svix-signature",
+                format!("v1,{STANDARD_WEBHOOKS_SIGNATURE}"),
+            ))
+            .set_payload(Bytes::from_static(STANDARD_WEBHOOKS_BODY))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let req = aw_test::TestRequest::post()
+            .insert_header(("svix-id", STANDARD_WEBHOOKS_ID))
+            .insert_header(("svix-timestamp", STANDARD_WEBHOOKS_TIMESTAMP.to_string()))
+            .insert_header((
+                "svix-signature",
+                format!("v1,{STANDARD_WEBHOOKS_SIGNATURE}"),
+            ))
+            .append_header(("svix-id", "msg_forged"))
+            .set_payload(Bytes::from_static(STANDARD_WEBHOOKS_BODY))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
     async fn conflicting_third_signature_value_is_rejected() {
         // [valid, valid, forged]: the differing value is not adjacent to the
         // first one. The scan must compare every value against the first, not
