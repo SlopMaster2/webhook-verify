@@ -659,7 +659,8 @@ impl fmt::Display for Provider {
 /// `"gemini"`, `"brex"`, `"bigcommerce"` (also `"big commerce"`/
 /// `"big-commerce"`), `"lithic"`, `"incident.io"` (also `"incident"`),
 /// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
-/// `"zapier"`, `"vanta"`, `"safetykit"`, and `"prescience"` all parse to it.
+/// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, and `"taskrabbit"`
+/// all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -766,6 +767,12 @@ impl fmt::Display for Provider {
 /// timestamp}.{raw_body}` HMAC-SHA256 construction keyed by the base64-decoded
 /// remainder of a `whsec_`-prefixed signing secret, and publish a byte-exact
 /// worked example whose claimed signature verifies.
+/// TaskRabbit's official webhook docs state that its deliveries are "delivered
+/// via Svix", that "Svix signs every webhook payload with a secret key unique
+/// to your endpoint", and that receivers "should always verify the signature
+/// before processing the payload" with the Svix verification libraries;
+/// TaskRabbit is also listed as a Standard Webhooks-compatible sender on the
+/// official site.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -906,7 +913,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("zapier")
                 || n.eq_ignore_ascii_case("vanta")
                 || n.eq_ignore_ascii_case("safetykit")
-                || n.eq_ignore_ascii_case("prescience") =>
+                || n.eq_ignore_ascii_case("prescience")
+                || n.eq_ignore_ascii_case("taskrabbit") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -930,7 +938,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -1988,6 +1996,9 @@ mod tests {
             ("prescience", Provider::StandardWebhooks),
             ("Prescience", Provider::StandardWebhooks),
             ("PRESCIENCE", Provider::StandardWebhooks),
+            ("taskrabbit", Provider::StandardWebhooks),
+            ("TaskRabbit", Provider::StandardWebhooks),
+            ("TASKRABBIT", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2053,7 +2064,8 @@ mod tests {
         // ↔ Mandrill; `svix`/`resend`/`messagebird`/`bird`/`gitlab`/`clerk`/
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
-        // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit` ↔ StandardWebhooks); the
+        // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
+        // `taskrabbit` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2082,6 +2094,8 @@ mod tests {
             "zapier",
             "vanta",
             "safetykit",
+            "prescience",
+            "taskrabbit",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
