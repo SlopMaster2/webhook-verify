@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2746,6 +2746,15 @@ ambiguity).
   Standard Webhooks-compatible sender on the official site (sources:
   <https://docs.usenash.com/reference/webhooks> and
   <https://www.standardwebhooks.com>).
+  Render's official webhook docs state that "Render's webhook implementation
+  follows the specification defined by the Standard Webhooks project", attach
+  the same `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`) headers (with an HMAC-SHA256 signature over
+  `{webhook-id}.{webhook-timestamp}.{body}` keyed by the endpoint's signing
+  secret and a five-minute replay tolerance window), and recommend verifying
+  with the Standard Webhooks client libraries; Render is also listed as a
+  Standard Webhooks-compatible sender on the official site (sources:
+  <https://render.com/docs/webhooks> and <https://www.standardwebhooks.com>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
