@@ -3,7 +3,7 @@
 //! BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments,
 //! Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip,
 //! Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona,
-//! Polar, Helcim, ...).
+//! Polar, Helcim, 360Learning, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -664,6 +664,84 @@ mod tests {
         let id = "msg_67sdf768sfjklLHSIyopUsiKFdfsyuP";
         let timestamp: u64 = 1_716_412_291;
         let signature = "hJGvai67b80oDIgyBhrrR0qd3BGmEQf4bOhqODU8WdI=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// 360Learning webhook test vector, recipe-constructed from 360Learning's
+    /// official webhook security docs
+    /// (<https://360learning.readme.io/docs/security-and-signature-verification>):
+    /// they state that webhook payloads are signed with HMAC-SHA256, that
+    /// deliveries are sent by Svix ("We use Svix to deliver webhook events"),
+    /// and that each one carries the `webhook-id`/`webhook-timestamp`/
+    /// `webhook-signature` (`v1,<base64>`, space-delimited during secret
+    /// rotation) headers over a signed content of
+    /// `{webhook-id}.{webhook-timestamp}.{raw_body}` — the exact Standard
+    /// Webhooks construction this module implements. The docs' worked example
+    /// publishes a signature (`v1,U5HnozIIxoqswxyYsplgMpo1w5JaUjaPDlg5dm8n1SE=`)
+    /// but not the signing secret that produced it, so this vector is built per
+    /// §5.1's recipe fallback: id, timestamp, and body are the docs' worked-example
+    /// values, keyed by the reference suite's public test key ([`SECRET`], the
+    /// key the official vectors above pin), and cross-checked in two independent
+    /// HMAC-SHA256 implementations.
+    #[test]
+    fn official_360learning_vector_verifies() {
+        let payload = br#"{"type":"user.created","timestamp":1749816600,"data":{"userId":"684c154ab06eb37545e3cbc0","createdAt":"2025-06-13T12:10:50.568Z","firstName":"Jane","lastName":"Grace","mail":"email@domain.com"}}"#;
+        let id = "msg_35bE2UOtsaBIqUl7VW4mLuR9q2B";
+        let timestamp: u64 = 1_749_816_652;
+        let signature = "PCGZFpfedX9vdBitfWD/cUTDvHLmUj4WOffJpqbh6Ew=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same 360Learning vector, with one base64 character of the
+    /// signature flipped: the documented inputs plus a wrong-but-well-formed
+    /// signature must fail closed (negative §5.2 case).
+    #[test]
+    fn official_360learning_vector_negative_flip_fails() {
+        let payload = br#"{"type":"user.created","timestamp":1749816600,"data":{"userId":"684c154ab06eb37545e3cbc0","createdAt":"2025-06-13T12:10:50.568Z","firstName":"Jane","lastName":"Grace","mail":"email@domain.com"}}"#;
+        let id = "msg_35bE2UOtsaBIqUl7VW4mLuR9q2B";
+        let timestamp: u64 = 1_749_816_652;
+        let flipped = "QCGZFpfedX9vdBitfWD/cUTDvHLmUj4WOffJpqbh6Ew=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same 360Learning vector with the raw body mutated after signing must
+    /// fail (tamper §5.3 case).
+    #[test]
+    fn official_360learning_vector_tampered_body_fails() {
+        let payload = br#"{"type":"user.created","timestamp":1749816600,"data":{"userId":"684c154ab06eb37545e3cbc0","createdAt":"2025-06-13T12:10:50.568Z","firstName":"Jane","lastName":"Grace","mail":"email@domain.comX"}}"#;
+        let id = "msg_35bE2UOtsaBIqUl7VW4mLuR9q2B";
+        let timestamp: u64 = 1_749_816_652;
+        let signature = "PCGZFpfedX9vdBitfWD/cUTDvHLmUj4WOffJpqbh6Ew=";
         assert_eq!(
             verify_with(
                 payload,
