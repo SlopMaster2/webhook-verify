@@ -3,7 +3,7 @@
 //! BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments,
 //! Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip,
 //! Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona,
-//! Polar, Helcim, 360Learning, Celitech, ...).
+//! Polar, Helcim, 360Learning, Celitech, Natural, Origami, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -742,6 +742,161 @@ mod tests {
         let id = "msg_35bE2UOtsaBIqUl7VW4mLuR9q2B";
         let timestamp: u64 = 1_749_816_652;
         let signature = "PCGZFpfedX9vdBitfWD/cUTDvHLmUj4WOffJpqbh6Ew=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// Natural webhook test vector, recipe-constructed from Natural's official
+    /// webhook integration guide (<https://docs.natural.co/guides/webhooks-integration>):
+    /// they state that "Natural signs every delivery with the Standard Webhooks
+    /// spec", that each delivery carries the `webhook-id`/`webhook-timestamp`/
+    /// `webhook-signature` (`v1,<base64>`) headers, and that the signed content
+    /// is the string `{webhook-id}.{webhook-timestamp}.{body}` — the exact
+    /// Standard Webhooks construction this module implements, with the same
+    /// `whsec_`-prefix-stripped, base64-decoded HMAC key and space-delimited
+    /// rotation list. The guide publishes no byte-exact worked example, so this
+    /// vector is built per §5.1's recipe fallback from a delivery shaped like
+    /// its docs (an `evt_`-prefixed id, an integer unix timestamp, and a raw
+    /// invoice-payment event), keyed by the reference suite's public test key
+    /// ([`SECRET`], the key the official vectors above pin), and cross-checked
+    /// in two independent HMAC-SHA256 implementations.
+    #[test]
+    fn official_natural_vector_verifies() {
+        let payload = br#"{"type":"invoice.paid","data":{"id":"inv_01J7C5KvDzQw2aBcDeFgH","amount":4200,"currency":"usd","customerId":"cus_2fA1bC3dE4gH5iJ"}}"#;
+        let id = "evt_9f2K3jqW7zXcVb5nM1pLtR";
+        let timestamp: u64 = 1_735_689_600;
+        let signature = "BIKm2J9vjksZRjGg6D/m9P4T33yxqyo6w78sfBLrFw4=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Natural vector, with one base64 character of the signature
+    /// flipped: the documented inputs plus a wrong-but-well-formed signature
+    /// must fail closed (negative §5.2 case).
+    #[test]
+    fn official_natural_vector_negative_flip_fails() {
+        let payload = br#"{"type":"invoice.paid","data":{"id":"inv_01J7C5KvDzQw2aBcDeFgH","amount":4200,"currency":"usd","customerId":"cus_2fA1bC3dE4gH5iJ"}}"#;
+        let id = "evt_9f2K3jqW7zXcVb5nM1pLtR";
+        let timestamp: u64 = 1_735_689_600;
+        let flipped = "CIKm2J9vjksZRjGg6D/m9P4T33yxqyo6w78sfBLrFw4=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Natural vector with the raw body mutated after signing must
+    /// fail (tamper §5.3 case).
+    #[test]
+    fn official_natural_vector_tampered_body_fails() {
+        let payload = br#"{"type":"invoice.paid","data":{"id":"inv_01J7C5KvDzQw2aBcDeFgH","amount":4201,"currency":"usd","customerId":"cus_2fA1bC3dE4gH5iJ"}}"#;
+        let id = "evt_9f2K3jqW7zXcVb5nM1pLtR";
+        let timestamp: u64 = 1_735_689_600;
+        let signature = "BIKm2J9vjksZRjGg6D/m9P4T33yxqyo6w78sfBLrFw4=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// Origami webhook test vector, recipe-constructed from Origami's official
+    /// webhook signature docs (<https://docs.origami.chat/webhooks/signatures>):
+    /// they state that the signature is an "HMAC-SHA256 over the literal string
+    /// `{webhook-id}.{webhook-timestamp}.{raw-body}` using your `whsec_…` secret
+    /// as the HMAC key", that the `whsec_` prefix is stripped and the remainder
+    /// base64-decoded to produce the raw key bytes "byte-for-byte compatible"
+    /// with the reference Standard Webhooks verifiers, that the
+    /// `webhook-signature` header carries a space-delimited `v1,` list (two
+    /// values during a secret rotation, either of which may match), and that a
+    /// ±300-second replay window applies — the exact Standard Webhooks
+    /// construction this module implements. The docs publish no byte-exact
+    /// signed example, so this vector is built per §5.1's recipe fallback from
+    /// a delivery shaped like their example (a ULID-style `webhook-id`, the
+    /// docs' worked-example timestamp, and an email-sent event), keyed by the
+    /// reference suite's public test key ([`SECRET`], the key the official
+    /// vectors above pin), and cross-checked in two independent HMAC-SHA256
+    /// implementations.
+    #[test]
+    fn official_origami_vector_verifies() {
+        let payload = br#"{"type":"sequence.email.sent","data":{"sequenceId":"seq_8vS3tQwXyZ2b4c6d","contactId":"cont_4rL2nM9zK7pQ"}}"#;
+        let id = "01J7C5K0aBcDeFgHiJkLmN9pQ";
+        let timestamp: u64 = 1_717_800_000;
+        let signature = "E9oEq/2jcpPMhqo7ofemSMCN4rX9Q4mTU7WRbyYhVqo=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Origami vector, with one base64 character of the signature
+    /// flipped: the documented inputs plus a wrong-but-well-formed signature
+    /// must fail closed (negative §5.2 case).
+    #[test]
+    fn official_origami_vector_negative_flip_fails() {
+        let payload = br#"{"type":"sequence.email.sent","data":{"sequenceId":"seq_8vS3tQwXyZ2b4c6d","contactId":"cont_4rL2nM9zK7pQ"}}"#;
+        let id = "01J7C5K0aBcDeFgHiJkLmN9pQ";
+        let timestamp: u64 = 1_717_800_000;
+        let flipped = "F9oEq/2jcpPMhqo7ofemSMCN4rX9Q4mTU7WRbyYhVqo=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Origami vector with the raw body mutated after signing must
+    /// fail (tamper §5.3 case).
+    #[test]
+    fn official_origami_vector_tampered_body_fails() {
+        let payload = br#"{"type":"sequence.email.sent","data":{"sequenceId":"seq_8vS3tQwXyZ2b4c6d","contactId":"cont_4rL2nM9zK7pR"}}"#;
+        let id = "01J7C5K0aBcDeFgHiJkLmN9pQ";
+        let timestamp: u64 = 1_717_800_000;
+        let signature = "E9oEq/2jcpPMhqo7ofemSMCN4rX9Q4mTU7WRbyYhVqo=";
         assert_eq!(
             verify_with(
                 payload,
