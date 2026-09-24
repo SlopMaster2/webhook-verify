@@ -661,7 +661,7 @@ impl fmt::Display for Provider {
 /// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
 /// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
 /// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, `"drata"`, `"nash"`,
-/// `"render"`, and `"yoco"` all parse to it.
+/// `"render"`, `"yoco"`, and `"novu"` all parse to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -835,6 +835,16 @@ impl fmt::Display for Provider {
 /// space-delimited versioned signature list, a constant-time comparison, and a
 /// replay-protection timestamp window; Yoco is also listed as a Standard
 /// Webhooks-compatible sender on the official site.
+/// Novu's official webhook docs state that "Novu signs webhook requests so you
+/// can verify that payloads were sent by Novu", attach the same three
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+/// headers, publish the reference Svix example payload as the shape of a real
+/// delivery, and direct receivers to verify with the Svix/Standard Webhooks
+/// client libraries (whose verification snippet and delivery examples this
+/// provider's [`Provider::StandardWebhooks`] implementation reproduces
+/// byte-for-byte); Novu is an open-source notification platform whose outbound
+/// webhooks are delivered through the same Svix-served construction the
+/// reference implementation ships.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -984,7 +994,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("drata")
                 || n.eq_ignore_ascii_case("nash")
                 || n.eq_ignore_ascii_case("render")
-                || n.eq_ignore_ascii_case("yoco") =>
+                || n.eq_ignore_ascii_case("yoco")
+                || n.eq_ignore_ascii_case("novu") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1008,7 +1019,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2096,6 +2107,9 @@ mod tests {
             ("yoco", Provider::StandardWebhooks),
             ("Yoco", Provider::StandardWebhooks),
             ("YOCO", Provider::StandardWebhooks),
+            ("novu", Provider::StandardWebhooks),
+            ("Novu", Provider::StandardWebhooks),
+            ("NOVU", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2162,7 +2176,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2201,6 +2215,7 @@ mod tests {
             "nash",
             "render",
             "yoco",
+            "novu",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
