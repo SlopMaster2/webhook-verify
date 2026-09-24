@@ -3,7 +3,7 @@
 //! BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments,
 //! Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip,
 //! Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona,
-//! Polar, Helcim, 360Learning, Celitech, Natural, Origami, ...).
+//! Polar, Helcim, 360Learning, Celitech, Natural, Origami, Parallel, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -897,6 +897,85 @@ mod tests {
         let id = "01J7C5K0aBcDeFgHiJkLmN9pQ";
         let timestamp: u64 = 1_717_800_000;
         let signature = "E9oEq/2jcpPMhqo7ofemSMCN4rX9Q4mTU7WRbyYhVqo=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// Parallel webhook test vector, recipe-constructed from Parallel's official
+    /// webhook setup guide
+    /// (<https://docs.parallel.ai/resources/webhook-setup>): it states that its
+    /// webhooks "follow standard webhook conventions", that every delivery
+    /// carries the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+    /// (`v1,<base64>`) headers, and that signing is HMAC-SHA256 over
+    /// `{webhook-id}.{webhook-timestamp}.{payload}` keyed by the base64-decoded
+    /// remainder of a `whsec_`-prefixed secret with space-delimited signatures
+    /// for rotation — the exact Standard Webhooks construction this module
+    /// implements. The guide publishes a worked header example (`webhook-id:
+    /// whevent_abc123def456`, `webhook-timestamp: 1751498975`,
+    /// `webhook-signature: v1,K5oZ...`) but no body or secret, so this vector
+    /// is built per §5.1's recipe fallback from a delivery shaped like the
+    /// guide's own Task API `task_run.status` example payload, keyed by the
+    /// reference suite's public test key ([`SECRET`], the key the official
+    /// vectors above pin), and cross-checked in two independent HMAC-SHA256
+    /// implementations.
+    #[test]
+    fn official_parallel_vector_verifies() {
+        let payload = br#"{"timestamp":"2025-04-23T20:21:48.037943Z","type":"task_run.status","data":{"run_id":"trun_9907962f83aa4d9d98fd7f4bf745d654","status":"completed","is_active":false,"warnings":null,"error":null,"processor":"core","metadata":{"key":"value"},"created_at":"2025-04-23T20:21:48.037943Z","modified_at":"2025-04-23T20:21:48.037943Z"}}"#;
+        let id = "whevent_abc123def456";
+        let timestamp: u64 = 1_751_498_975;
+        let signature = "4DpRzh3WVOeqgGs1T1/BD//0436B0aUN7shOEJ+FzTk=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Parallel vector, with one base64 character of the signature
+    /// flipped: the documented inputs plus a wrong-but-well-formed signature
+    /// must fail closed (negative §5.2 case).
+    #[test]
+    fn official_parallel_vector_negative_flip_fails() {
+        let payload = br#"{"timestamp":"2025-04-23T20:21:48.037943Z","type":"task_run.status","data":{"run_id":"trun_9907962f83aa4d9d98fd7f4bf745d654","status":"completed","is_active":false,"warnings":null,"error":null,"processor":"core","metadata":{"key":"value"},"created_at":"2025-04-23T20:21:48.037943Z","modified_at":"2025-04-23T20:21:48.037943Z"}}"#;
+        let id = "whevent_abc123def456";
+        let timestamp: u64 = 1_751_498_975;
+        let flipped = "5DpRzh3WVOeqgGs1T1/BD//0436B0aUN7shOEJ+FzTk=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Parallel vector with the raw body mutated after signing must
+    /// fail (tamper §5.3 case).
+    #[test]
+    fn official_parallel_vector_tampered_body_fails() {
+        let payload = br#"{"timestamp":"2025-04-23T20:21:48.037943Z","type":"task_run.status","data":{"run_id":"trun_9907962f83aa4d9d98fd7f4bf745d654","status":"failed","is_active":false,"warnings":null,"error":null,"processor":"core","metadata":{"key":"value"},"created_at":"2025-04-23T20:21:48.037943Z","modified_at":"2025-04-23T20:21:48.037943Z"}}"#;
+        let id = "whevent_abc123def456";
+        let timestamp: u64 = 1_751_498_975;
+        let signature = "4DpRzh3WVOeqgGs1T1/BD//0436B0aUN7shOEJ+FzTk=";
         assert_eq!(
             verify_with(
                 payload,

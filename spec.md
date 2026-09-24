@@ -2872,6 +2872,23 @@ ambiguity).
   replay window (source: <https://docs.origami.chat/webhooks/signatures>);
   Origami publishes no byte-verifiable worked example, so the vector suite uses
   the §5.1 recipe-built fallback pinned to the construction above.
+  Parallel's official webhook setup guide states that its webhooks "follow
+  standard webhook conventions", attaching the same three
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers, signing an HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{payload}`
+  keyed by the base64-decoded remainder of the `whsec_`-prefixed signing
+  secret, with a space-delimited versioned signature list for rotation, and a
+  published worked header example (`webhook-id: whevent_abc123def456`,
+  `webhook-timestamp: 1751498975`, `webhook-signature: v1,K5oZ…`). The same
+  guide also documents a *legacy* signing variant — the entire `whsec_…` string
+  used raw as the HMAC key — still supported for earlier integrations; new
+  deliveries follow the Standard Webhooks construction, and this crate
+  verifies those. Parallel publishes no byte-verifiable body/secret pair
+  combining the above headers, so the vector suite uses the §5.1 recipe-built
+  fallback pinned to the construction above with a body shaped like its Task
+  API `task_run.status` example event (source:
+  <https://docs.parallel.ai/resources/webhook-setup>,
+  <https://docs.parallel.ai/task-api/webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

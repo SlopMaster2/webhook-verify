@@ -662,8 +662,8 @@ impl fmt::Display for Provider {
 /// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
 /// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, `"drata"`, `"nash"`,
 /// `"render"`, `"yoco"`, `"novu"`, `"crossmint"`, `"daytona"`, `"polar"`,
-/// `"helcim"`, `"celitech"`, `"360learning"`, `"natural"`, and `"origami"`
-/// all parse to it.
+/// `"helcim"`, `"celitech"`, `"360learning"`, `"natural"`, `"origami"`,
+/// and `"parallel"` all parse to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -918,6 +918,19 @@ impl fmt::Display for Provider {
 /// a space-delimited `v1,` list (two values during a 24-hour secret rotation),
 /// and a ±300-second replay window — so Origami is a Standard Webhooks sender
 /// and `origami` is accepted as a brand alias for this provider.
+/// Parallel's official webhook setup guide states that its webhooks follow the
+/// "standard webhook conventions" — every delivery carries the canonical
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+/// headers, signed over `{webhook-id}.{webhook-timestamp}.{payload}` with
+/// HMAC-SHA256 keyed by the base64-decoded remainder of a `whsec_`-prefixed
+/// signing secret, space-delimited for rotation (source:
+/// <https://docs.parallel.ai/resources/webhook-setup>); the docs also publish
+/// a worked header example. So Parallel is a Standard Webhooks sender and
+/// `parallel` is accepted as a brand alias for this provider. (Note:
+/// Parallel's same guide documents a *legacy* signing variant — the entire
+/// `whsec_…` string used raw as the HMAC key — still supported for earlier
+/// integrations; new deliveries follow the Standard Webhooks construction,
+/// and this provider verifies those.)
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -1076,7 +1089,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("celitech")
                 || n.eq_ignore_ascii_case("360learning")
                 || n.eq_ignore_ascii_case("natural")
-                || n.eq_ignore_ascii_case("origami") =>
+                || n.eq_ignore_ascii_case("origami")
+                || n.eq_ignore_ascii_case("parallel") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1100,7 +1114,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning`, `natural`, `origami` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning`, `natural`, `origami`, `parallel` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2215,6 +2229,9 @@ mod tests {
             ("origami", Provider::StandardWebhooks),
             ("Origami", Provider::StandardWebhooks),
             ("ORIGAMI", Provider::StandardWebhooks),
+            ("parallel", Provider::StandardWebhooks),
+            ("Parallel", Provider::StandardWebhooks),
+            ("PARALLEL", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2281,7 +2298,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning`/`natural`/`origami` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning`/`natural`/`origami`/`parallel` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2329,6 +2346,7 @@ mod tests {
             "360learning",
             "natural",
             "origami",
+            "parallel",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),

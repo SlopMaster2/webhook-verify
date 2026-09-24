@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"parallel"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Parallel's official webhook setup guide
+  (<https://docs.parallel.ai/resources/webhook-setup>) states that its webhooks
+  "follow standard webhook conventions", attaching the same
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers, signing an HMAC-SHA256 over
+  `{webhook-id}.{webhook-timestamp}.{payload}` keyed by the base64-decoded
+  remainder of the `whsec_`-prefixed signing secret, with a space-delimited
+  versioned signature list for rotation — the exact Standard Webhooks
+  construction this provider implements, plus a published worked header
+  example (`webhook-id: whevent_abc123def456`, `webhook-timestamp: 1751498975`,
+  `webhook-signature: v1,K5oZ…`). Config files that name the provider by the
+  sender's brand — `provider: parallel` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Parallel's guide also
+  documents a *legacy* signing variant — the entire `whsec_…` string used raw
+  as the HMAC key — still supported for earlier integrations; new deliveries
+  follow the Standard Webhooks construction, and this provider verifies those.
+  Parallel publishes no byte-exact body/secret pair, so the test vector is
+  recipe-built per `spec.md` §5.1 from their documented construction and a body
+  shaped like their Task API `task_run.status` example event, and cross-checked
+  in two independent HMAC implementations. Source:
+  <https://docs.parallel.ai/resources/webhook-setup>.)
 - **`Provider::from_str` now also accepts `"natural"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Natural's official webhook integration guide
