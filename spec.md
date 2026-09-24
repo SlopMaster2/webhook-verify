@@ -2835,6 +2835,16 @@ ambiguity).
   example signature cannot be re-derived because its example token is the
   `CHANGE_ME` placeholder, so the vector suite uses the §5.1 recipe-built
   fallback pinned to the construction above.
+  360Learning's official webhook security docs state that payloads are signed
+  with HMAC-SHA256, that "we use Svix to deliver webhook events", and that each
+  delivery carries the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`, space-delimited during secret rotation) headers over a signed
+  content of `{webhook-id}.{webhook-timestamp}.{raw_body}` (source:
+  <https://360learning.readme.io/docs/security-and-signature-verification>);
+  360Learning's docs worked example publishes a signature
+  (`v1,U5HnozIIxoqswxyYsplgMpo1w5JaUjaPDlg5dm8n1SE=`) but not the signing secret
+  that produced it, so the vector suite uses the §5.1 recipe-built fallback
+  pinned to the construction above.
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

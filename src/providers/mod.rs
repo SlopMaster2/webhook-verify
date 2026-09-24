@@ -662,7 +662,7 @@ impl fmt::Display for Provider {
 /// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
 /// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, `"drata"`, `"nash"`,
 /// `"render"`, `"yoco"`, `"novu"`, `"crossmint"`, `"daytona"`, `"polar"`,
-/// and `"helcim"` all parse to it.
+/// `"helcim"`, and `"360learning"` all parse to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -884,6 +884,14 @@ impl fmt::Display for Provider {
 /// strip the `v1,` prefix only when not using "the SVIX library" — so Helcim
 /// is a Standard Webhooks sender and `helcim` is accepted as a brand alias for
 /// this provider.
+/// 360Learning's official webhook security docs
+/// (<https://360learning.readme.io/docs/security-and-signature-verification>)
+/// describe the exact same construction — the `webhook-id`/`webhook-timestamp`/
+/// `webhook-signature` (`v1,<base64>`) headers, a signed content of
+/// `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256, and state the
+/// deliveries are sent by Svix ("We use Svix to deliver webhook events") — so
+/// 360Learning is a Standard Webhooks sender and `360learning` is accepted as a
+/// brand alias for this provider.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -1038,7 +1046,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("crossmint")
                 || n.eq_ignore_ascii_case("daytona")
                 || n.eq_ignore_ascii_case("polar")
-                || n.eq_ignore_ascii_case("helcim") =>
+                || n.eq_ignore_ascii_case("helcim")
+                || n.eq_ignore_ascii_case("360learning") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1062,7 +1071,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `360learning` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2165,6 +2174,9 @@ mod tests {
             ("helcim", Provider::StandardWebhooks),
             ("Helcim", Provider::StandardWebhooks),
             ("HELCIM", Provider::StandardWebhooks),
+            ("360learning", Provider::StandardWebhooks),
+            ("360Learning", Provider::StandardWebhooks),
+            ("360LEARNING", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2231,7 +2243,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`360learning` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2275,6 +2287,7 @@ mod tests {
             "daytona",
             "polar",
             "helcim",
+            "360learning",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),

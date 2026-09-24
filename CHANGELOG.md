@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"360learning"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: 360Learning's official webhook security docs
+  (<https://360learning.readme.io/docs/security-and-signature-verification>)
+  state that payloads are signed with HMAC-SHA256, that "we use Svix to deliver
+  webhook events", and that each delivery carries the `webhook-id`/
+  `webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers over a signed
+  content of `{webhook-id}.{webhook-timestamp}.{raw_body}` — the exact Standard
+  Webhooks construction this provider implements. Config files that name the
+  provider by the sender's brand — `provider: 360learning` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. No official byte-exact vector
+  exists — 360Learning's docs worked example publishes a signature but not the
+  signing secret that produced it — so the test vector is recipe-built per
+  `spec.md` §5.1 from their documented construction and cross-checked in two
+  independent HMAC implementations. Source:
+  <https://360learning.readme.io/docs/security-and-signature-verification>.)
 - **`Provider::from_str` now also accepts `"helcim"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Helcim's official connected-account webhooks docs
