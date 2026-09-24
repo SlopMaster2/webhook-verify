@@ -2517,7 +2517,16 @@ Source: <https://www.standardwebhooks.com> and the canonical spec at
 ambiguity).
 
 - Headers: `webhook-id`, `webhook-timestamp` (integer unix seconds),
-  `webhook-signature`
+  `webhook-signature` — Svix-hosted senders (e.g. Vanta and TaskRabbit,
+  below) deliver these under Svix's brand aliases
+  `svix-id`/`svix-timestamp`/`svix-signature`, the same values under
+  different names (Svix's how-to verification docs state the headers "are
+  the Svix-branded aliases of the spec's `webhook-*` headers; the values are
+  identical, and the Svix libraries accept either set of names"; source:
+  <https://docs.svix.com/receiving/verifying-payloads/how>). This provider
+  accepts either spelling — the canonical `webhook-*` name wins when a
+  delivery carries both — so claimed Svix-served senders verify even when
+  they ship the default `svix-*` names
 - Signature header format: space-delimited list of versioned signatures;
   symmetric signatures are `v1,<base64_hmac>` (standard alphabet, padded).
   During zero-downtime secret rotation a match on *any* `v1` element is

@@ -661,6 +661,11 @@ impl fmt::Display for Provider {
 /// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
 /// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
 /// `"liveblocks"`, `"flip"`, and `"replicate"` all parse to it.
+/// Both header spellings are accepted in real deliveries: the canonical
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
+/// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
+/// alias Svix spells out in its verification docs; the canonical name wins
+/// when a delivery carries both).
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -1062,6 +1067,9 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
             standard_webhooks::ID_HEADER,
             standard_webhooks::TIMESTAMP_HEADER,
             standard_webhooks::SIGNATURE_HEADER,
+            standard_webhooks::SVIX_ID_HEADER,
+            standard_webhooks::SVIX_TIMESTAMP_HEADER,
+            standard_webhooks::SVIX_SIGNATURE_HEADER,
         ],
         Provider::Custom(scheme) => {
             // Only the two declared headers are scanned for duplicates.
@@ -2579,6 +2587,9 @@ mod tests {
                     standard_webhooks::ID_HEADER,
                     standard_webhooks::TIMESTAMP_HEADER,
                     standard_webhooks::SIGNATURE_HEADER,
+                    standard_webhooks::SVIX_ID_HEADER,
+                    standard_webhooks::SVIX_TIMESTAMP_HEADER,
+                    standard_webhooks::SVIX_SIGNATURE_HEADER,
                 ],
             ),
             // Custom covers exactly its two declared headers — additional

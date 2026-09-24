@@ -10,7 +10,14 @@
 //! <https://github.com/standard-webhooks/standard-webhooks/blob/main/libraries/python/standardwebhooks/webhooks.py>):
 //!
 //! - Headers: `webhook-id`, `webhook-timestamp` (integer unix seconds), and
-//!   `webhook-signature`
+//!   `webhook-signature`. Svix-hosted senders (Svix, Resend, Vanta, TaskRabbit,
+//!   incident.io, ...) emit these under the Svix-branded aliases `svix-id`/
+//!   `svix-timestamp`/`svix-signature`, which carry identical values — Svix
+//!   states that the two sets are aliases and that "the Svix libraries accept
+//!   either set of names"
+//!   (<https://docs.svix.com/receiving/verifying-payloads/how>). This
+//!   verifier accepts either spelling; the canonical `webhook-*` name wins
+//!   when a delivery carries both.
 //! - Signed string: `"{webhook-id}.{webhook-timestamp}.{raw_body}"` — literal
 //!   dot joins; id and timestamp are taken verbatim from their headers so
 //!   whatever was signed is what gets verified
@@ -60,6 +67,18 @@ pub(crate) const TIMESTAMP_HEADER: &str = "webhook-timestamp";
 /// The header carrying the space-delimited versioned signatures.
 pub(crate) const SIGNATURE_HEADER: &str = "webhook-signature";
 
+/// Svix-branded aliases of the three `webhook-*` headers above. Svix-hosted
+/// senders deliver with these names (Svix, Resend, Vanta, TaskRabbit,
+/// incident.io, ...); Svix's how-to verification docs state they are aliases
+/// of the spec's `webhook-*` names with identical values, and its libraries
+/// accept either set of names
+/// (<https://docs.svix.com/receiving/verifying-payloads/how>). The verifier
+/// reads the canonical `webhook-*` spelling first and falls back to the
+/// `svix-*` alias (see [`get_header`]).
+pub(crate) const SVIX_ID_HEADER: &str = "svix-id";
+pub(crate) const SVIX_TIMESTAMP_HEADER: &str = "svix-timestamp";
+pub(crate) const SVIX_SIGNATURE_HEADER: &str = "svix-signature";
+
 /// The only signature version accepted for shared-secret verification;
 /// anything else in the list (including asymmetric `v1a`) is ignored.
 const SCHEME: &str = "v1";
@@ -83,14 +102,21 @@ static SECRET_B64: GeneralPurpose = GeneralPurpose::new(
         .with_decode_padding_mode(DecodePaddingMode::Indifferent),
 );
 
+/// First-match lookup over a header's canonical spelling and its Svix-branded
+/// alias. The canonical `webhook-*` name wins when a delivery carries both
+/// spellings, keeping the signed-string construction exactly the spec's; the
+/// `svix-*` alias only fills in for Svix-branded deliveries.
+fn get_header<'a>(headers: &'a dyn HeaderMap, canonical: &str, alias: &str) -> Option<&'a str> {
+    headers.get(canonical).or_else(|| headers.get(alias))
+}
+
 pub(crate) fn verify(
     headers: &dyn HeaderMap,
     raw_body: &[u8],
     secret: &Secret,
     options: &VerifyOptions,
 ) -> Result<(), VerifyError> {
-    let id_raw = headers
-        .get(ID_HEADER)
+    let id_raw = get_header(headers, ID_HEADER, SVIX_ID_HEADER)
         .ok_or(VerifyError::MissingHeader { header: ID_HEADER })?;
     if id_raw.is_empty() {
         return Err(VerifyError::MalformedHeader {
@@ -98,16 +124,16 @@ pub(crate) fn verify(
             reason: "header is empty",
         });
     }
-    let signature_value = headers
-        .get(SIGNATURE_HEADER)
-        .ok_or(VerifyError::MissingHeader {
+    let signature_value = get_header(headers, SIGNATURE_HEADER, SVIX_SIGNATURE_HEADER).ok_or(
+        VerifyError::MissingHeader {
             header: SIGNATURE_HEADER,
-        })?;
-    let timestamp_raw = headers
-        .get(TIMESTAMP_HEADER)
-        .ok_or(VerifyError::MissingHeader {
+        },
+    )?;
+    let timestamp_raw = get_header(headers, TIMESTAMP_HEADER, SVIX_TIMESTAMP_HEADER).ok_or(
+        VerifyError::MissingHeader {
             header: TIMESTAMP_HEADER,
-        })?;
+        },
+    )?;
 
     let key = decode_secret(secret.as_bytes())?;
     let provided_signatures = parse_signatures(signature_value)?;
@@ -224,7 +250,10 @@ fn parse_signatures(value: &str) -> Result<Vec<Vec<u8>>, VerifyError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ID_HEADER, SECRET_PREFIX, SIGNATURE_HEADER, TIMESTAMP_HEADER};
+    use super::{
+        ID_HEADER, SECRET_PREFIX, SIGNATURE_HEADER, SVIX_ID_HEADER, SVIX_SIGNATURE_HEADER,
+        SVIX_TIMESTAMP_HEADER, TIMESTAMP_HEADER,
+    };
     use crate::core::error::VerifyError;
     use crate::core::options::VerifyOptions;
     use crate::core::secret::Secret;
@@ -602,6 +631,215 @@ mod tests {
                 ("WEBHOOK-ID", MSG_ID),
                 ("Webhook-Signature", format!("v1,{SIGNATURE}").as_str()),
                 ("webhook-TIMESTAMP", TIMESTAMP.to_string().as_str()),
+            ],
+            BODY,
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    /// Official Svix training vector, delivered under the Svix-branded header
+    /// names. Svix's how-to-verify docs
+    /// (<https://docs.svix.com/receiving/verifying-payloads/how>) use exactly
+    /// the same secret (`whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw`), id
+    /// (`msg_p5jXN8AQM9LWM0D4loKWxJek`), timestamp (`1614265330`), body
+    /// (`{"test": 2432232314}`), and signature
+    /// (`v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=`) this suite already
+    /// pins via [`SECRET`]/[`MSG_ID`]/[`TIMESTAMP`]/[`BODY`]/[`SIGNATURE`],
+    /// but with `svix-*` header names, and state that these values are "the
+    /// Svix-branded aliases of the spec's `webhook-id`/`webhook-timestamp`/
+    /// `webhook-signature` headers; the values are identical, and the Svix
+    /// libraries accept either set of names". A real Svix delivery carrying
+    /// `svix-*` headers must verify under this provider (§5.1 official vector
+    /// for the alias path).
+    #[test]
+    fn official_svix_vector_verifies_under_svix_header_names() {
+        let result = verify(
+            crate::Provider::StandardWebhooks,
+            &[
+                (SVIX_ID_HEADER, MSG_ID),
+                (SVIX_TIMESTAMP_HEADER, TIMESTAMP.to_string().as_str()),
+                (SVIX_SIGNATURE_HEADER, format!("v1,{SIGNATURE}").as_str()),
+            ],
+            BODY,
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    /// The same Svix vector under `svix-*` names, with the final base64
+    /// character of the signature flipped: a wrong-but-well-formed signature
+    /// must fail closed (negative §5.2 case for the alias path).
+    #[test]
+    fn official_svix_vector_negative_flip_fails_under_svix_header_names() {
+        let result = verify(
+            crate::Provider::StandardWebhooks,
+            &[
+                (SVIX_ID_HEADER, MSG_ID),
+                (SVIX_TIMESTAMP_HEADER, TIMESTAMP.to_string().as_str()),
+                (
+                    SVIX_SIGNATURE_HEADER,
+                    format!("v1,{INVALID_SIGNATURE}").as_str(),
+                ),
+            ],
+            BODY,
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(result, Err(VerifyError::SignatureMismatch));
+    }
+
+    /// The same Svix vector under `svix-*` names, with the raw body mutated
+    /// after signing: must fail (tamper §5.3 case for the alias path).
+    #[test]
+    fn official_svix_vector_tampered_body_fails_under_svix_header_names() {
+        let result = verify(
+            crate::Provider::StandardWebhooks,
+            &[
+                (SVIX_ID_HEADER, MSG_ID),
+                (SVIX_TIMESTAMP_HEADER, TIMESTAMP.to_string().as_str()),
+                (SVIX_SIGNATURE_HEADER, format!("v1,{SIGNATURE}").as_str()),
+            ],
+            br#"{"test": 2432232315}"#,
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(result, Err(VerifyError::SignatureMismatch));
+    }
+
+    /// A valid Svix-signed delivery replayed 301s later must be rejected; the
+    /// `svix-*` timestamp rides the same replay path as the canonical one
+    /// (replay §5.4 case for the alias path).
+    #[test]
+    fn svix_header_names_replay_out_of_tolerance_fails() {
+        let result = verify(
+            crate::Provider::StandardWebhooks,
+            &[
+                (SVIX_ID_HEADER, MSG_ID),
+                (SVIX_TIMESTAMP_HEADER, TIMESTAMP.to_string().as_str()),
+                (SVIX_SIGNATURE_HEADER, format!("v1,{SIGNATURE}").as_str()),
+            ],
+            BODY,
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP + 301, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(
+            result,
+            Err(VerifyError::TimestampOutOfTolerance {
+                skew: Duration::from_secs(301),
+                max_age: Duration::from_secs(300),
+            })
+        );
+    }
+
+    /// Malformed and missing `svix-*` values surface the same distinct errors
+    /// as their canonical `webhook-*` equivalents (malformed-header §5.5 case
+    /// for the alias path).
+    #[test]
+    fn svix_header_names_malformed_and_missing_error_distinctly() {
+        // A `svix-signature` list with no usable `v1` element.
+        let no_v1 = verify(
+            crate::Provider::StandardWebhooks,
+            &[
+                (SVIX_ID_HEADER, MSG_ID),
+                (SVIX_TIMESTAMP_HEADER, TIMESTAMP.to_string().as_str()),
+                (SVIX_SIGNATURE_HEADER, format!("v2,{SIGNATURE}").as_str()),
+            ],
+            BODY,
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(
+            no_v1,
+            Err(VerifyError::MalformedHeader {
+                header: SIGNATURE_HEADER,
+                reason: "no `v1,` signature present",
+            })
+        );
+
+        // A non-numeric `svix-timestamp`.
+        let bad_ts = verify(
+            crate::Provider::StandardWebhooks,
+            &[
+                (SVIX_ID_HEADER, MSG_ID),
+                (SVIX_TIMESTAMP_HEADER, "not-a-number"),
+                (SVIX_SIGNATURE_HEADER, format!("v1,{SIGNATURE}").as_str()),
+            ],
+            BODY,
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(
+            bad_ts,
+            Err(VerifyError::MalformedHeader {
+                header: TIMESTAMP_HEADER,
+                reason: "timestamp is not a valid unix timestamp",
+            })
+        );
+
+        // An empty `svix-id` is just as malformed as an empty `webhook-id`.
+        let empty_id = verify(
+            crate::Provider::StandardWebhooks,
+            &[
+                (SVIX_ID_HEADER, ""),
+                (SVIX_TIMESTAMP_HEADER, TIMESTAMP.to_string().as_str()),
+                (SVIX_SIGNATURE_HEADER, format!("v1,{SIGNATURE}").as_str()),
+            ],
+            BODY,
+            &Secret::new(SECRET),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(
+            empty_id,
+            Err(VerifyError::MalformedHeader {
+                header: ID_HEADER,
+                reason: "header is empty",
+            })
+        );
+
+        // With neither spelling present the canonical name is what the
+        // `MissingHeader` error reports, so operators can recover.
+        let missing = verify(
+            crate::Provider::StandardWebhooks,
+            &[
+                (SVIX_ID_HEADER, MSG_ID),
+                (SVIX_TIMESTAMP_HEADER, TIMESTAMP.to_string().as_str()),
+            ],
+            BODY,
+            &Secret::new(SECRET),
+            Default::default(),
+        );
+        assert_eq!(
+            missing,
+            Err(VerifyError::MissingHeader {
+                header: SIGNATURE_HEADER
+            })
+        );
+    }
+
+    /// When a delivery carries *both* header spellings with conflicting
+    /// values, the canonical `webhook-*` spelling wins deterministically —
+    /// the alias only fills in for Svix-branded deliveries, so the signed
+    /// string construction stays exactly the spec's. This pins the precedence
+    /// so it cannot silently flip.
+    #[test]
+    fn canonical_webhook_name_wins_when_svix_alias_also_present() {
+        let result = verify(
+            crate::Provider::StandardWebhooks,
+            &[
+                // Canonical names carry the real, verifiable values.
+                (ID_HEADER, MSG_ID),
+                (TIMESTAMP_HEADER, TIMESTAMP.to_string().as_str()),
+                (SIGNATURE_HEADER, format!("v1,{SIGNATURE}").as_str()),
+                // Svix aliases carry forgeries that would fail if read.
+                (SVIX_ID_HEADER, "msg_forged"),
+                (SVIX_TIMESTAMP_HEADER, (TIMESTAMP - 1).to_string().as_str()),
+                (
+                    SVIX_SIGNATURE_HEADER,
+                    format!("v1,{INVALID_SIGNATURE}").as_str(),
+                ),
             ],
             BODY,
             &Secret::new(SECRET),
