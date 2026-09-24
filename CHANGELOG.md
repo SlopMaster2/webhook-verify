@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"celitech"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: CELITECH's official webhook security docs
+  (<https://docs.celitech.com/webhooks/security>) state that every delivery
+  carries the Svix-branded `svix-id`/`svix-timestamp`/`svix-signature`
+  headers, that verification is an HMAC-SHA256 over the delivery's `svix-id`,
+  `svix-timestamp`, and raw body computed with the endpoint's per-endpoint
+  signing secret and compared in constant time, and that deliveries whose
+  `svix-timestamp` is too far in the past or future should be rejected against
+  replay attacks — the exact Standard Webhooks construction this provider
+  implements. Config files that name the provider by the sender's brand —
+  `provider: celitech` — now parse to [`Provider::StandardWebhooks`] instead
+  of erroring. (Alias accepted case-insensitively, like every other spelling.
+  CELITECH publishes no byte-exact worked example, so the test vector is
+  recipe-built per `spec.md` §5.1 from their documented construction and
+  cross-checked in two independent HMAC implementations. Source:
+  <https://docs.celitech.com/webhooks/security>.)
 - **`Provider::from_str` now also accepts `"360learning"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: 360Learning's official webhook security docs

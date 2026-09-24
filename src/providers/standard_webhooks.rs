@@ -3,7 +3,7 @@
 //! BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments,
 //! Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip,
 //! Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona,
-//! Polar, Helcim, 360Learning, ...).
+//! Polar, Helcim, 360Learning, Celitech, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -758,6 +758,83 @@ mod tests {
     #[test]
     fn official_vector_verifies() {
         assert_eq!(verify_fresh(BODY, SIGNATURE), Ok(()));
+    }
+
+    /// CELITECH webhook test vector, recipe-constructed from CELITECH's
+    /// official webhook security docs
+    /// (<https://docs.celitech.com/webhooks/security>): they describe the exact
+    /// construction this module implements — every delivery carries the
+    /// Svix-branded `svix-id`/`svix-timestamp`/`svix-signature` headers, and
+    /// verification is an HMAC-SHA256 over the delivery's `svix-id`,
+    /// `svix-timestamp`, and raw body computed with the endpoint's per-endpoint
+    /// signing secret, compared in constant time, with stale or future
+    /// timestamps rejected as replay attempts. CELITECH publishes no
+    /// byte-verifiable worked example, so this vector is built per §5.1's
+    /// recipe fallback: the signed body is a CELITECH-shaped usage-threshold
+    /// event (the scenario their official webhook overview uses to introduce
+    /// webhooks), keyed by the reference suite's public test key ([`SECRET`],
+    /// the key the official vectors above pin), and cross-checked in two
+    /// independent HMAC-SHA256 implementations.
+    #[test]
+    fn official_celitech_vector_verifies() {
+        let payload = br#"{"deviceId":"esim_9c41f2a8x3d","purchaseId":"pur_6d2e4a8c1f9","event":"usage_threshold_crossed","percentage":50}"#;
+        let id = "msg_28vKqNk9xT1Uwm5bIoS3zJc7pF";
+        let timestamp: u64 = 1_782_900_000;
+        let signature = "yGWq2eQ/VhkeQo0xtawGe3i/twBakUntg5Hphvo2yUg=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same CELITECH vector, with one base64 character of the signature
+    /// flipped: the documented construction plus a wrong-but-well-formed
+    /// signature must fail closed (negative §5.2 case).
+    #[test]
+    fn official_celitech_vector_negative_flip_fails() {
+        let payload = br#"{"deviceId":"esim_9c41f2a8x3d","purchaseId":"pur_6d2e4a8c1f9","event":"usage_threshold_crossed","percentage":50}"#;
+        let id = "msg_28vKqNk9xT1Uwm5bIoS3zJc7pF";
+        let timestamp: u64 = 1_782_900_000;
+        let flipped = "xGWq2eQ/VhkeQo0xtawGe3i/twBakUntg5Hphvo2yUg=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same CELITECH vector with the raw body mutated after signing must
+    /// fail (tamper §5.3 case).
+    #[test]
+    fn official_celitech_vector_tampered_body_fails() {
+        let payload = br#"{"deviceId":"esim_9c41f2a8x3d","purchaseId":"pur_6d2e4a8c1f9","event":"usage_threshold_crossed","percentage":51}"#;
+        let id = "msg_28vKqNk9xT1Uwm5bIoS3zJc7pF";
+        let timestamp: u64 = 1_782_900_000;
+        let signature = "yGWq2eQ/VhkeQo0xtawGe3i/twBakUntg5Hphvo2yUg=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
     }
 
     #[test]

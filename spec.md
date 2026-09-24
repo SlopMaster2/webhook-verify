@@ -2845,6 +2845,16 @@ ambiguity).
   (`v1,U5HnozIIxoqswxyYsplgMpo1w5JaUjaPDlg5dm8n1SE=`) but not the signing secret
   that produced it, so the vector suite uses the §5.1 recipe-built fallback
   pinned to the construction above.
+  CELITECH's official webhook security docs state that every delivery carries
+  the Svix-branded `svix-id`/`svix-timestamp`/`svix-signature` headers, that
+  verification is an HMAC-SHA256 over the delivery's `svix-id`,
+  `svix-timestamp`, and raw body computed with the endpoint's per-endpoint
+  signing secret and compared in constant time, and that deliveries whose
+  `svix-timestamp` is too far in the past or future should be rejected to
+  protect against replay attacks (source:
+  <https://docs.celitech.com/webhooks/security>); CELITECH publishes no
+  byte-verifiable worked example, so the vector suite uses the §5.1
+  recipe-built fallback pinned to the construction above.
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
