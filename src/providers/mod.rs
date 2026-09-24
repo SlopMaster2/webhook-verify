@@ -661,7 +661,8 @@ impl fmt::Display for Provider {
 /// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
 /// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
 /// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, `"drata"`, `"nash"`,
-/// `"render"`, `"yoco"`, `"novu"`, and `"crossmint"` all parse to it.
+/// `"render"`, `"yoco"`, `"novu"`, `"crossmint"`, and `"daytona"` all parse
+/// to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -856,6 +857,12 @@ impl fmt::Display for Provider {
 /// this provider's [`Provider::StandardWebhooks`] implementation reproduces
 /// byte-for-byte, with the same reference Svix example payload its vector suite
 /// pins.
+/// Daytona's official webhook docs describe webhook delivery configured in the
+/// Daytona dashboard, and its official open-source server delivers those
+/// webhooks through the Svix SDK (`new Svix(authToken, { serverUrl })`,
+/// `svix.message.create(...)`) — the exact Svix-served Standard Webhooks
+/// construction this provider implements — and Daytona is also listed as a
+/// Standard Webhooks-compatible sender on the official site.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -1007,7 +1014,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("render")
                 || n.eq_ignore_ascii_case("yoco")
                 || n.eq_ignore_ascii_case("novu")
-                || n.eq_ignore_ascii_case("crossmint") =>
+                || n.eq_ignore_ascii_case("crossmint")
+                || n.eq_ignore_ascii_case("daytona") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1031,7 +1039,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2125,6 +2133,9 @@ mod tests {
             ("crossmint", Provider::StandardWebhooks),
             ("Crossmint", Provider::StandardWebhooks),
             ("CROSSMINT", Provider::StandardWebhooks),
+            ("daytona", Provider::StandardWebhooks),
+            ("Daytona", Provider::StandardWebhooks),
+            ("DAYTONA", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2191,7 +2202,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2232,6 +2243,7 @@ mod tests {
             "yoco",
             "novu",
             "crossmint",
+            "daytona",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),

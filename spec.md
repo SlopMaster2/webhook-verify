@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco"/"novu"/"crossmint" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco"/"novu"/"crossmint"/"daytona" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2796,6 +2796,20 @@ ambiguity).
   libraries — the exact construction this section implements, and the same
   worked example the crate's own vector suite pins byte-for-byte (source:
   <https://docs.crossmint.com/introduction/platform/webhooks/verify-webhooks>).
+  Daytona's official webhook docs describe webhook delivery configured in the
+  Daytona dashboard (source: <https://www.daytona.io/docs/webhooks>), and its
+  official open-source server (`daytonaio/daytona`) delivers those webhooks
+  through the Svix SDK — importing `{ Svix } from 'svix'`, instantiating
+  `new Svix(authToken, { serverUrl })`, and calling `svix.message.create(...)` —
+  meaning their deliveries use the exact Svix-served construction this provider
+  verifies, with the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`) headers (or Svix's `svix-*` aliases), a signed content string
+  of `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret, and the
+  Standard Webhooks replay-window check (source:
+  <https://github.com/daytonaio/daytona/blob/46f29d5b/apps/api/src/webhook/services/webhook.service.ts>);
+  Daytona is also listed as a Standard Webhooks-compatible sender on the
+  official site (source: <https://www.standardwebhooks.com>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

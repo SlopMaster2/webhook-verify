@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"daytona"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Daytona's official webhook docs
+  (<https://www.daytona.io/docs/webhooks>) describe webhook delivery configured
+  in the Daytona dashboard, and its official open-source server
+  (`daytonaio/daytona`) delivers those webhooks through the Svix SDK — importing
+  `{ Svix } from 'svix'`, instantiating `new Svix(authToken, { serverUrl })`,
+  and calling `svix.message.create(...)` — the exact Svix-served Standard
+  Webhooks construction this provider implements, and Daytona is listed as a
+  Standard Webhooks-compatible sender on the official site. Config files that
+  name the provider by the sender's brand — `provider: daytona` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Sources:
+  <https://github.com/daytonaio/daytona/blob/46f29d5b/apps/api/src/webhook/services/webhook.service.ts>
+  and <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"crossmint"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Crossmint's official webhook docs state that "Crossmint signs
