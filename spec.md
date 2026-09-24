@@ -2824,6 +2824,17 @@ ambiguity).
   implements byte-for-byte — and Polar is an open-source funding platform
   whose outbound webhooks have followed the Standard Webhooks specification
   since its documented scheme migration.
+  Helcim's official connected-account webhooks docs state that deliverables
+  carry the `webhook-signature`/`webhook-timestamp`/`webhook-id` (`v1,<base64>`)
+  headers, that the verification payload is
+  `{webhook_id}.{webhook_timestamp}.{request_body}` (period-joined) signed with
+  HMAC-SHA256 keyed by the base64-decoded "Verifier Token" provided during
+  onboarding, and that the `v1,` prefix is stripped "if manually verifying and
+  not using the SVIX library" (source:
+  <https://devdocs.helcim.com/docs/connected-account-webhooks>); Helcim's docs
+  example signature cannot be re-derived because its example token is the
+  `CHANGE_ME` placeholder, so the vector suite uses the §5.1 recipe-built
+  fallback pinned to the construction above.
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

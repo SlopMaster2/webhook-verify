@@ -3,7 +3,7 @@
 //! BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments,
 //! Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip,
 //! Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona,
-//! Polar, ...).
+//! Polar, Helcim, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -594,6 +594,83 @@ mod tests {
                 signature,
                 &timestamp.to_string(),
                 &secret,
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// Helcim webhook test vector, recipe-constructed from Helcim's official
+    /// connected-account webhooks docs
+    /// (<https://devdocs.helcim.com/docs/connected-account-webhooks>): they
+    /// sign with the exact Standard Webhooks construction this module
+    /// implements — the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+    /// (`v1,<base64>`) headers, a verification payload of
+    /// `{webhook_id}.{webhook_timestamp}.{request_body}`, HMAC-SHA256 keyed by
+    /// the base64-decoded Verifier Token — and even note the Svix compatibility
+    /// themselves: "with the 'v1,' removed if manually verifying and not using
+    /// the SVIX library". Helcim publishes no byte-verifiable worked example
+    /// (the signing token in their docs example is the `CHANGE_ME` placeholder),
+    /// so this vector is built per §5.1's recipe fallback: the signed body is
+    /// the docs' example payload compacted to one line, keyed by the reference
+    /// suite's public test key ([`SECRET`], the key the official vectors above
+    /// pin), and cross-checked in two independent HMAC-SHA256 implementations.
+    #[test]
+    fn official_helcim_vector_verifies() {
+        let payload = br#"{"apiToken":"87S6gojkd98lhh2h23f2vqmJ","event":"approved","connectedAccountId":"abc-123_def-456"}"#;
+        let id = "msg_67sdf768sfjklLHSIyopUsiKFdfsyuP";
+        let timestamp: u64 = 1_716_412_291;
+        let signature = "hJGvai67b80oDIgyBhrrR0qd3BGmEQf4bOhqODU8WdI=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Helcim vector, with one base64 character of the signature
+    /// flipped: the documented inputs plus a wrong-but-well-formed signature
+    /// must fail closed (negative §5.2 case).
+    #[test]
+    fn official_helcim_vector_negative_flip_fails() {
+        let payload = br#"{"apiToken":"87S6gojkd98lhh2h23f2vqmJ","event":"approved","connectedAccountId":"abc-123_def-456"}"#;
+        let id = "msg_67sdf768sfjklLHSIyopUsiKFdfsyuP";
+        let timestamp: u64 = 1_716_412_291;
+        let flipped = "gJGvai67b80oDIgyBhrrR0qd3BGmEQf4bOhqODU8WdI=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Helcim vector with the raw body mutated after signing must
+    /// fail (tamper §5.3 case).
+    #[test]
+    fn official_helcim_vector_tampered_body_fails() {
+        let payload = br#"{"apiToken":"87S6gojkd98lhh2h23f2vqmJ","event":"approved","connectedAccountId":"abc-123_def-457"}"#;
+        let id = "msg_67sdf768sfjklLHSIyopUsiKFdfsyuP";
+        let timestamp: u64 = 1_716_412_291;
+        let signature = "hJGvai67b80oDIgyBhrrR0qd3BGmEQf4bOhqODU8WdI=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
                 clocked_at(timestamp, Some(Duration::from_secs(300))),
             ),
             Err(VerifyError::SignatureMismatch)
