@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"liveblocks"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Liveblocks' official webhook docs describe the exact same
+  construction — the `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`) headers, a signed content string of
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret, a
+  space-delimited versioned signature list, a five-minute replay tolerance
+  window, and a constant-time comparison recommendation — directing receivers
+  to the Svix end-to-end tooling. Config files that name the provider by the
+  sender's brand — `provider: liveblocks` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://liveblocks.io/docs/platform/webhooks>.)
 - **`Provider::from_str` now also accepts `"taskrabbit"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: TaskRabbit's official webhook docs state that its deliveries are
