@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"novu"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Novu's official webhook docs state that "Novu signs webhook
+  requests so you can verify that payloads were sent by Novu", attach the same
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers,
+  publish the reference Svix example payload as "all sent from the server", and
+  direct receivers to verify with the Svix/Standard Webhooks client libraries —
+  the exact construction this provider implements and the same worked example
+  its vector suite pins byte-for-byte. Config files that name the provider by
+  the sender's brand — `provider: novu` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Sources:
+  <https://docs.novu.co/platform/developer/webhooks> and
+  <https://docs.novu.co/platform/developer/webhooks/webhooks>.)
 - **`Provider::from_str` now also accepts `"yoco"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Yoco's official webhook docs direct receivers to verify every

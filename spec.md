@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco"/"novu" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2769,6 +2769,19 @@ ambiguity).
   (sources: <https://developer.yoco.com/docs/api/webhooks/verifying-events>,
   <https://yoco.docs.buildwithfern.com/docs/api/webhooks/handling-events>, and
   <https://www.standardwebhooks.com>).
+  Novu's official webhook docs state that "Novu signs webhook requests so you
+  can verify that payloads were sent by Novu", attach the same three
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers, publish the reference Svix example payload (`msg_p5jXN8AQM9LWM0D4loKWxJek`
+  / `1614265330` / `{"test": 2432232314}` /
+  `v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=`) as "all sent from the
+  server", and direct receivers to verify with the Svix/Standard Webhooks
+  client libraries — the exact construction this section implements, and the
+  same worked example the crate's own vector suite pins byte-for-byte; Novu
+  is an open-source notification platform whose outbound webhook deliveries
+  are powered by the same Svix-infrastructure construction (sources:
+  <https://docs.novu.co/platform/developer/webhooks> and
+  <https://docs.novu.co/platform/developer/webhooks/webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
