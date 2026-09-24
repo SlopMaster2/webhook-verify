@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"drata"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Drata's official workflow docs state that its outbound webhook
+  deliveries are sent "using Svix" — the exact Svix-served Standard Webhooks
+  construction this provider implements (the `webhook-id`/
+  `webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers or the Svix
+  `svix-*` aliases, HMAC-SHA256 over
+  `{webhook-id}.{webhook-timestamp}.{raw_body}` keyed by a `whsec_`-prefixed
+  signing secret, with a five-minute replay tolerance window) — and Drata is
+  listed as a Standard Webhooks-compatible sender on the official site.
+  Config files that name the provider by the sender's brand —
+  `provider: drata` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling.
+  Sources:
+  <https://help.drata.com/en/articles/11751113-automate-actions-with-drata-s-workflows>
+  and <https://www.standardwebhooks.com>.)
 - **`Provider::from_str` now also accepts `"inai"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: inai's official webhook docs describe the exact same

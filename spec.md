@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2727,6 +2727,17 @@ ambiguity).
   tolerance window — and publish a byte-exact worked example that verifies
   against this implementation (source:
   <https://docs.inai.io/docs/verifying-your-webhooks>).
+  Drata's official workflow docs state that its outbound webhook deliveries
+  are sent "using Svix" (source:
+  <https://help.drata.com/en/articles/11751113-automate-actions-with-drata-s-workflows>),
+  meaning they use the exact Svix-served construction this provider verifies —
+  the `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers (or Svix's `svix-*` aliases), a signed content string of
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+  base64-decoded remainder of a `whsec_`-prefixed signing secret, and a
+  five-minute replay tolerance window; Drata is also listed as a Standard
+  Webhooks-compatible sender on the official site
+  (source: <https://www.standardwebhooks.com>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

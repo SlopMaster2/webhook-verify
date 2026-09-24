@@ -660,7 +660,8 @@ impl fmt::Display for Provider {
 /// `"big-commerce"`), `"lithic"`, `"incident.io"` (also `"incident"`),
 /// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
 /// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
-/// `"liveblocks"`, `"flip"`, `"replicate"`, and `"inai"` all parse to it.
+/// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, and `"drata"` all parse
+/// to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -809,6 +810,10 @@ impl fmt::Display for Provider {
 /// space-delimited versioned signature list, and a ±300-second replay
 /// tolerance window — and publish a byte-exact worked example that verifies
 /// against this implementation.
+/// Drata's official workflow docs state that its outbound webhook deliveries
+/// are sent "using Svix" — the exact Svix-served Standard Webhooks
+/// construction this provider implements — and Drata is also listed as a
+/// Standard Webhooks-compatible sender on the official site.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -954,7 +959,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("liveblocks")
                 || n.eq_ignore_ascii_case("flip")
                 || n.eq_ignore_ascii_case("replicate")
-                || n.eq_ignore_ascii_case("inai") =>
+                || n.eq_ignore_ascii_case("inai")
+                || n.eq_ignore_ascii_case("drata") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -978,7 +984,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2054,6 +2060,9 @@ mod tests {
             ("inai", Provider::StandardWebhooks),
             ("Inai", Provider::StandardWebhooks),
             ("INAI", Provider::StandardWebhooks),
+            ("drata", Provider::StandardWebhooks),
+            ("Drata", Provider::StandardWebhooks),
+            ("DRATA", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2120,7 +2129,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2155,6 +2164,7 @@ mod tests {
             "flip",
             "replicate",
             "inai",
+            "drata",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
