@@ -661,7 +661,7 @@ impl fmt::Display for Provider {
 /// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
 /// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
 /// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, `"drata"`, `"nash"`,
-/// `"render"`, `"yoco"`, and `"novu"` all parse to it.
+/// `"render"`, `"yoco"`, `"novu"`, and `"crossmint"` all parse to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -845,6 +845,17 @@ impl fmt::Display for Provider {
 /// byte-for-byte); Novu is an open-source notification platform whose outbound
 /// webhooks are delivered through the same Svix-served construction the
 /// reference implementation ships.
+/// Crossmint's official webhook docs state that "Crossmint signs every webhook
+/// and its metadata with a unique key for each endpoint", deliver every call
+/// with the same three `svix-id`/`svix-timestamp`/`svix-signature`
+/// (`v1,<base64>`) headers, document signing `{svix-id}.{svix-timestamp}.{body}`
+/// (the raw request body) with HMAC-SHA256 keyed by the base64-decoded
+/// remainder of a `whsec_`-prefixed signing secret, recommend a constant-time
+/// comparison and a timestamp-tolerance check, and direct receivers to verify
+/// with the Svix/Standard Webhooks client libraries — the exact construction
+/// this provider's [`Provider::StandardWebhooks`] implementation reproduces
+/// byte-for-byte, with the same reference Svix example payload its vector suite
+/// pins.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -995,7 +1006,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("nash")
                 || n.eq_ignore_ascii_case("render")
                 || n.eq_ignore_ascii_case("yoco")
-                || n.eq_ignore_ascii_case("novu") =>
+                || n.eq_ignore_ascii_case("novu")
+                || n.eq_ignore_ascii_case("crossmint") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1019,7 +1031,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2110,6 +2122,9 @@ mod tests {
             ("novu", Provider::StandardWebhooks),
             ("Novu", Provider::StandardWebhooks),
             ("NOVU", Provider::StandardWebhooks),
+            ("crossmint", Provider::StandardWebhooks),
+            ("Crossmint", Provider::StandardWebhooks),
+            ("CROSSMINT", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2176,7 +2191,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2216,6 +2231,7 @@ mod tests {
             "render",
             "yoco",
             "novu",
+            "crossmint",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
