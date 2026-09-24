@@ -659,8 +659,8 @@ impl fmt::Display for Provider {
 /// `"gemini"`, `"brex"`, `"bigcommerce"` (also `"big commerce"`/
 /// `"big-commerce"`), `"lithic"`, `"incident.io"` (also `"incident"`),
 /// `"supabase"`, `"etsy"`, `"sardine"`, `"dodo"`, `"dodopayments"`,
-/// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`, and
-/// `"liveblocks"` all parse to it.
+/// `"zapier"`, `"vanta"`, `"safetykit"`, `"prescience"`, `"taskrabbit"`,
+/// `"liveblocks"`, and `"flip"` all parse to it.
 /// (Svix is
 /// the reference implementation whose scheme StandardWebhooks implements;
 /// Resend signs every delivery with the same `svix-signature` construction and
@@ -781,6 +781,14 @@ impl fmt::Display for Provider {
 /// space-delimited versioned signature list, a five-minute replay tolerance
 /// window, and a constant-time comparison recommendation — and point receivers
 /// at the Svix end-to-end tooling to test their endpoint.
+/// Flip Energy's official webhook docs state that its deliveries follow the
+/// Standard Webhooks specification, attaching the same three
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+/// headers and a signed content string of
+/// `{webhook-id}.{webhook-timestamp}.{raw_body}`, HMAC-SHA256 keyed by the
+/// base64-decoded remainder of a `whsec_`-prefixed signing secret, and
+/// directing receivers to reject any request whose timestamp is more than
+/// five minutes older than local time.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -923,7 +931,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("safetykit")
                 || n.eq_ignore_ascii_case("prescience")
                 || n.eq_ignore_ascii_case("taskrabbit")
-                || n.eq_ignore_ascii_case("liveblocks") =>
+                || n.eq_ignore_ascii_case("liveblocks")
+                || n.eq_ignore_ascii_case("flip") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -947,7 +956,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2011,6 +2020,9 @@ mod tests {
             ("liveblocks", Provider::StandardWebhooks),
             ("Liveblocks", Provider::StandardWebhooks),
             ("LIVEBLOCKS", Provider::StandardWebhooks),
+            ("flip", Provider::StandardWebhooks),
+            ("Flip", Provider::StandardWebhooks),
+            ("FLIP", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2077,7 +2089,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2109,6 +2121,7 @@ mod tests {
             "prescience",
             "taskrabbit",
             "liveblocks",
+            "flip",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
