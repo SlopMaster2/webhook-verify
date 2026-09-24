@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"taskrabbit"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: TaskRabbit's official webhook docs state that its deliveries are
+  "delivered via Svix" and that "Svix signs every webhook payload with a secret
+  key unique to your endpoint", directing receivers to verify the signature
+  with the Svix/Standard Webhooks libraries and to discard unverified
+  webhooks; TaskRabbit is also listed as a Standard Webhooks-compatible sender
+  on the [official site](https://www.standardwebhooks.com). Config files that
+  name the provider by the sender's brand — `provider: taskrabbit` — now parse
+  to [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Source:
+  <https://developer.taskrabbit.com/docs/webhooks>.)
 - **`Provider::from_str` now also accepts `"prescience"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Prescience's official webhook docs state that signatures "follow

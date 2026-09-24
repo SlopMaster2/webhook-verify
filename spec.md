@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2672,6 +2672,18 @@ ambiguity).
   tolerance window, and a constant-time comparison recommendation — directing
   receivers to verify with the Svix/Standard Webhooks client libraries
   (source: <https://docs.safetykit.com/webhooks/verifying-signatures>).
+  TaskRabbit's official webhook docs state that its event deliveries are
+  "delivered via Svix", that "Svix signs every webhook payload with a secret
+  key unique to your endpoint", and that receivers "should always verify the
+  signature before processing the payload" using the Svix/Standard Webhooks
+  verification libraries "available for most languages", discarding unverified
+  webhooks — the same Svix-served construction this provider implements
+  (`webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers,
+  HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw_body}` keyed by a
+  `whsec_`-prefixed signing secret, space-delimited rotation list); TaskRabbit
+  is also listed as a Standard Webhooks-compatible sender on the official site
+  (sources: <https://developer.taskrabbit.com/docs/webhooks> and
+  <https://www.standardwebhooks.com>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
