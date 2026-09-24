@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"polar"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Polar's official webhook docs state that "Our webhook
+  implementation follows the Standard Webhooks specification"
+  (<https://polar.sh/docs/integrate/webhooks/endpoints>), attach the same
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers and a signature over `{webhook-id}.{webhook-timestamp}.{body}`, and
+  direct receivers to "use a Standard Webhooks library or follow the
+  specification" while passing the `whsec_`-prefixed secret to that library
+  as-is (<https://polar.sh/docs/integrate/webhooks/delivery>) — the exact
+  Standard Webhooks construction this provider implements, with the same
+  signed content and five-minute replay window enforced by Polar's own
+  official SDKs. Config files that name the provider by the sender's brand —
+  `provider: polar` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling.
+  Sources: <https://polar.sh/docs/integrate/webhooks/delivery> and
+  <https://github.com/polarsource/polar/blob/main/sdk/python/polar/webhooks.py>.)
 - **`Provider::from_str` now also accepts `"daytona"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Daytona's official webhook docs

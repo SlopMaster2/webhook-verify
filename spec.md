@@ -174,7 +174,7 @@ impl core::str::FromStr for Provider {
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
     // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco"/"novu"/"crossmint"/"daytona" (adopters that sign
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco"/"novu"/"crossmint"/"daytona"/"polar" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes
@@ -2810,6 +2810,20 @@ ambiguity).
   <https://github.com/daytonaio/daytona/blob/46f29d5b/apps/api/src/webhook/services/webhook.service.ts>);
   Daytona is also listed as a Standard Webhooks-compatible sender on the
   official site (source: <https://www.standardwebhooks.com>).
+  Polar's official webhook docs state that "Our webhook implementation
+  follows the Standard Webhooks specification", attach the same three
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers and a single versioned signature over
+  `{webhook-id}.{webhook-timestamp}.{raw_body}`, direct receivers to "use a
+  Standard Webhooks library or follow the specification" and to pass the
+  `whsec_`-prefixed secret to that library as-is, and document the spec's
+  five-minute replay window (sources:
+  <https://polar.sh/docs/integrate/webhooks/endpoints> and
+  <https://polar.sh/docs/integrate/webhooks/delivery>); Polar's official
+  SDKs sign and verify exactly this construction — the one this section
+  implements byte-for-byte — and Polar is an open-source funding platform
+  whose outbound webhooks have followed the Standard Webhooks specification
+  since its documented scheme migration.
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
