@@ -1480,6 +1480,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Contentful: bare request paths containing `://` are preserved.** A
+  `VerifyOptions::request_url` value beginning with `/` is now treated as the
+  bare path documented by Contentful instead of being truncated at an embedded
+  scheme delimiter. Full-URL normalization is unchanged.
 - **Docs: the built-in SHA-1 scheme enumerations now include Mailchimp
   Transactional.** Three places undercounted the built-in HMAC-SHA1 providers
   (the actual set is Vercel, Twilio, Intercom, Expo EAS, and Mailchimp

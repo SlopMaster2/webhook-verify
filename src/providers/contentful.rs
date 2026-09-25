@@ -326,12 +326,16 @@ fn append_signed_headers_segment(
 ///   (JavaScript `encodeURIComponent` set), with the pathname passed through
 ///   as UTF-8 bytes; with no query, nothing is re-encoded.
 fn normalized_request_path(url: &str) -> String {
-    let path_and_query: &str = match url.split_once("://") {
-        Some((_, rest)) => match rest.find('/') {
-            Some(i) => &rest[i..],
-            None => "/",
-        },
-        None => url,
+    let path_and_query: &str = if url.starts_with('/') {
+        url
+    } else {
+        match url.split_once("://") {
+            Some((_, rest)) => match rest.find('/') {
+                Some(i) => &rest[i..],
+                None => "/",
+            },
+            None => url,
+        }
     };
     let path_and_query: &str = match path_and_query.split_once('#') {
         Some((path, _)) => &path_and_query[..path.len()],
@@ -526,6 +530,18 @@ mod tests {
             clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
             METHOD,
             "/webhooks/content-management",
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn bare_path_containing_scheme_delimiter_is_not_truncated() {
+        let result = verify_with(
+            BODY,
+            "feebede21c3f5baaf07d2dcd4c6afb620a259599ecdcd03c1d668463032e6ba2",
+            clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+            METHOD,
+            "/redirect/https://example.com/hook",
         );
         assert_eq!(result, Ok(()));
     }
