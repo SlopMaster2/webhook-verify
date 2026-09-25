@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"openlayer"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Openlayer's official webhook security docs
+  (<https://docs.openlayer.com/security/webhooks/verify-signatures>) state that
+  "Openlayer follows the Standard Webhooks specification", attaching the same
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers, signing an HMAC-SHA256 over
+  `{webhook-id}.{webhook-timestamp}.{raw_body}` keyed by the signing secret
+  "with the `whsec_` prefix removed and the remainder Base64-decoded", with a
+  ±5-minute replay window — the exact Standard Webhooks construction this
+  provider implements. Config files that name the provider by the sender's
+  brand — `provider: openlayer` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Openlayer publishes no
+  byte-exact body/secret pair, so the test vector is recipe-built per
+  `spec.md` §5.1 from their documented construction and a body shaped exactly
+  like their published `test.created` example event, and cross-checked in two
+  independent HMAC implementations. Source:
+  <https://docs.openlayer.com/security/webhooks/verify-signatures>,
+  <https://docs.openlayer.com/security/webhooks/events>.)
 - **`Provider::from_str` now also accepts `"parallel"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Parallel's official webhook setup guide

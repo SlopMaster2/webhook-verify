@@ -663,7 +663,7 @@ impl fmt::Display for Provider {
 /// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, `"drata"`, `"nash"`,
 /// `"render"`, `"yoco"`, `"novu"`, `"crossmint"`, `"daytona"`, `"polar"`,
 /// `"helcim"`, `"celitech"`, `"360learning"`, `"natural"`, `"origami"`,
-/// and `"parallel"` all parse to it.
+/// `"parallel"`, and `"openlayer"` all parse to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -931,6 +931,16 @@ impl fmt::Display for Provider {
 /// `whsec_…` string used raw as the HMAC key — still supported for earlier
 /// integrations; new deliveries follow the Standard Webhooks construction,
 /// and this provider verifies those.)
+/// Openlayer's official webhook security docs
+/// (<https://docs.openlayer.com/security/webhooks/verify-signatures>) describe
+/// the exact same construction — every delivery carries the canonical
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`) headers,
+/// the signed content is `{webhook-id}.{webhook-timestamp}.{raw_body}`, the key
+/// is the subscription's signing secret with the `whsec_` prefix removed and the
+/// remainder base64-decoded, and deliveries outside a ±5-minute tolerance
+/// window should be rejected against replay — so Openlayer is a Standard
+/// Webhooks sender and `openlayer` is accepted as a brand alias for this
+/// provider.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -1090,7 +1100,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("360learning")
                 || n.eq_ignore_ascii_case("natural")
                 || n.eq_ignore_ascii_case("origami")
-                || n.eq_ignore_ascii_case("parallel") =>
+                || n.eq_ignore_ascii_case("parallel")
+                || n.eq_ignore_ascii_case("openlayer") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1114,7 +1125,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning`, `natural`, `origami`, `parallel` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning`, `natural`, `origami`, `parallel`, `openlayer` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2232,6 +2243,9 @@ mod tests {
             ("parallel", Provider::StandardWebhooks),
             ("Parallel", Provider::StandardWebhooks),
             ("PARALLEL", Provider::StandardWebhooks),
+            ("openlayer", Provider::StandardWebhooks),
+            ("Openlayer", Provider::StandardWebhooks),
+            ("OPENLAYER", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2298,7 +2312,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning`/`natural`/`origami`/`parallel` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning`/`natural`/`origami`/`parallel`/`openlayer` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2347,6 +2361,7 @@ mod tests {
             "natural",
             "origami",
             "parallel",
+            "openlayer",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
