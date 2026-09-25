@@ -219,6 +219,12 @@ Implementation status (kept in sync with the code — do not let this drift):
   applies with the shared symmetric tolerance semantics (`|now - t| <=
   max_age`) used by the built-in timestamped schemes; when it is `None`,
   no clock is consulted (mirroring GitHub/Linear).
+- The shared RFC 3339 parser accepts second `60` when applying the numeric
+  offset yields UTC `23:59:60`, as required by
+  [RFC 3339 §5.7](https://www.rfc-editor.org/rfc/rfc3339.txt#section-5.7). It
+  represents that instant as the following Unix-second day boundary, so
+  offset-form leap seconds such as `1990-12-31T15:59:60-08:00` are valid;
+  offset-normalized values that do not land at that boundary remain malformed.
 
 ### 2.1 `VerifyError`
 
