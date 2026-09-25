@@ -1844,6 +1844,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the `verify_any` rotation loop. `spec.md` §5.6 requires every
   provider's parsing path in the shared target; adding `Provider::PayPal` to
   `IMPLEMENTED` restores both. The target rebuilds and runs clean.
+- **StandardWebhooks: the Openlayer vector tests now follow the module's
+  `official_*` naming convention.** Every other brand-alias vector in
+  `src/providers/standard_webhooks.rs` — `official_brex_*`,
+  `official_lithic_*`, `official_prescience_*`, `official_helcim_*`,
+  `official_360learning_*`, `official_natural_*`, `official_origami_*`,
+  `official_parallel_*`, and `official_celitech_*`, whether backed by a
+  publisher-provided example or by the §5.1 recipe fallback — is named
+  `official_<brand>_vector_<purpose>`. The Openlayer tests added with the
+  alias (PR #204) dropped the prefix (`openlayer_vector_verifies`/`…_negative_flip_fails`/`…_tampered_body_fails`),
+  making them the only vectors in the module that read differently from their
+  siblings despite being built the same way. They are renamed to
+  `official_openlayer_*`, keeping the module's test names greppable by brand
+  and honest about the §5.1 recipe provenance the doc comments already state.
+  Test-name-only change; no verification behavior, fixture values, or vector
+  signatures are touched.
 
 ## [0.1.0] - Unreleased
 
