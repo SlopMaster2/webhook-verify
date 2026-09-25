@@ -1480,6 +1480,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **HMAC rotation lists now compute one digest per signed string.** The
+  Stripe, Paddle, PagerDuty, Mux, Tailscale, and Standard Webhooks paths
+  previously recomputed HMAC-SHA256 for every candidate in a signature list.
+  They now compute the digest once and perform constant-time comparisons
+  against every candidate, preserving match-any rotation behavior while
+  removing the per-candidate hashing work.
 - **RFC 3339 offset-form leap seconds are accepted.** The shared parser used
   by PayPal, Twitch, Zendesk, and Box previously rejected a valid timestamp
   such as `1990-12-31T15:59:60-08:00` because it required the local clock to

@@ -28,7 +28,7 @@
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha256;
+use crate::core::crypto::verify_hmac_sha256_any;
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::secret::Secret;
@@ -58,9 +58,11 @@ pub(crate) fn verify(
 
     // The HMAC is computed once and compared in constant time against every
     // presented signature; no early exit depends on *how* wrong one is.
-    let matched = signatures
-        .iter()
-        .any(|sig| verify_hmac_sha256(secret.as_bytes(), raw_body, sig));
+    let matched = verify_hmac_sha256_any(
+        secret.as_bytes(),
+        raw_body,
+        signatures.iter().map(|signature| signature.as_slice()),
+    );
 
     if matched {
         Ok(())
