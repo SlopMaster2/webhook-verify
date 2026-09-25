@@ -1009,7 +1009,7 @@ mod tests {
     /// vectors above pin), and cross-checked in two independent HMAC-SHA256
     /// implementations.
     #[test]
-    fn openlayer_vector_verifies() {
+    fn official_openlayer_vector_verifies() {
         let payload = br#"{"type":"test.created","timestamp":"2026-01-21T10:30:00Z","data":{"test":{"id":"3fa85f64-5717-4562-b3fc-2c963f66afa6","number":1,"name":"No duplicate rows","description":"This test checks for duplicate rows in the dataset.","type":"integrity","subtype":"duplicateRowCount","dateCreated":"2026-01-21T10:30:00Z","dateUpdated":"2026-01-21T10:30:00Z","creatorId":"589ece63-49a2-41b4-98e1-10547761d4b0","originProjectVersionId":"3fa85f64-5717-4562-b3fc-2c963f66afa6","thresholds":[{"measurement":"duplicateRowCount","insightName":"duplicateRowCount","insightParameters":[],"operator":"<=","value":0}],"evaluationWindow":3600,"delayWindow":0,"suggested":false,"archived":false}}}"#;
         let id = "wh_3fa85f64-5717-4562-b3fc-2c963f66afa6";
         let timestamp: u64 = 1_768_991_400;
@@ -1031,7 +1031,7 @@ mod tests {
     /// flipped: the documented construction plus a wrong-but-well-formed
     /// signature must fail closed (negative §5.2 case).
     #[test]
-    fn openlayer_vector_negative_flip_fails() {
+    fn official_openlayer_vector_negative_flip_fails() {
         let payload = br#"{"type":"test.created","timestamp":"2026-01-21T10:30:00Z","data":{"test":{"id":"3fa85f64-5717-4562-b3fc-2c963f66afa6","number":1,"name":"No duplicate rows","description":"This test checks for duplicate rows in the dataset.","type":"integrity","subtype":"duplicateRowCount","dateCreated":"2026-01-21T10:30:00Z","dateUpdated":"2026-01-21T10:30:00Z","creatorId":"589ece63-49a2-41b4-98e1-10547761d4b0","originProjectVersionId":"3fa85f64-5717-4562-b3fc-2c963f66afa6","thresholds":[{"measurement":"duplicateRowCount","insightName":"duplicateRowCount","insightParameters":[],"operator":"<=","value":0}],"evaluationWindow":3600,"delayWindow":0,"suggested":false,"archived":false}}}"#;
         let id = "wh_3fa85f64-5717-4562-b3fc-2c963f66afa6";
         let timestamp: u64 = 1_768_991_400;
@@ -1052,7 +1052,7 @@ mod tests {
     /// The same Openlayer vector with the raw body mutated after signing must
     /// fail (tamper §5.3 case).
     #[test]
-    fn openlayer_vector_tampered_body_fails() {
+    fn official_openlayer_vector_tampered_body_fails() {
         let payload = br#"{"type":"test.created","timestamp":"2026-01-21T10:30:00Z","data":{"test":{"id":"3fa85f64-5717-4562-b3fc-2c963f66afa6","number":2,"name":"No duplicate rows","description":"This test checks for duplicate rows in the dataset.","type":"integrity","subtype":"duplicateRowCount","dateCreated":"2026-01-21T10:30:00Z","dateUpdated":"2026-01-21T10:30:00Z","creatorId":"589ece63-49a2-41b4-98e1-10547761d4b0","originProjectVersionId":"3fa85f64-5717-4562-b3fc-2c963f66afa6","thresholds":[{"measurement":"duplicateRowCount","insightName":"duplicateRowCount","insightParameters":[],"operator":"<=","value":0}],"evaluationWindow":3600,"delayWindow":0,"suggested":false,"archived":false}}}"#;
         let id = "wh_3fa85f64-5717-4562-b3fc-2c963f66afa6";
         let timestamp: u64 = 1_768_991_400;
