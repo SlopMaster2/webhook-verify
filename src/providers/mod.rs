@@ -2948,6 +2948,137 @@ mod tests {
         }
     }
 
+    /// Whether `name` is a syntactically valid HTTP field name — RFC 9110
+    /// §5.1's `field-name = token`, i.e. one or more `tchar`s from a
+    /// non-empty, delimiter-free, no-space byte set. Test helper, kept
+    /// dependency-free so the guard below runs in every adapter
+    /// configuration (`actix` does not imply the `http` feature).
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    fn is_valid_field_name(name: &str) -> bool {
+        !name.is_empty()
+            && name.bytes().all(|b| {
+                b.is_ascii_alphanumeric()
+                    || matches!(
+                        b,
+                        b'!' | b'#'
+                            | b'$'
+                            | b'%'
+                            | b'&'
+                            | b'\''
+                            | b'*'
+                            | b'+'
+                            | b'-'
+                            | b'.'
+                            | b'^'
+                            | b'_'
+                            | b'`'
+                            | b'|'
+                            | b'~'
+                    )
+            })
+    }
+
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[test]
+    fn signature_header_names_are_valid_http_field_names() {
+        // The guard above pins *which* headers each provider's ambiguity scan
+        // covers; this one pins that every one of those names is a name the
+        // `http`/`actix-web` header maps can actually represent. Both adapters
+        // turn the scan list into a `HeaderName` via `HeaderName::from_bytes`,
+        // and an unparseable name there is **indistinguishable from a smuggled
+        // duplicate**: `MultiValueHeaders::get_all_bytes` returns `None` and
+        // `conflicting_signature_header` reports the header as ambiguous
+        // (pinned by `unparseable_scan_name_reads_as_ambiguous` below). So a
+        // single typo'd constant — a space, a stray `\r`, a non-ASCII byte —
+        // does not merely weaken the check, it makes the adapters reject
+        // *every* delivery for that provider with a 400 whose body is empty by
+        // design ("no error detail leaks over the wire"), leaving an operator
+        // with a total, undiagnosable outage. `verify()` called directly would
+        // still pass, because the crate's own `HeaderMap` impls compare header
+        // names as plain case-insensitive strings.
+        //
+        // RFC 9110 §5.1 `field-name = token` is checked here directly rather
+        // than through `HeaderName::from_bytes` so the guard holds in the
+        // `actix`-only configuration too, where the `http` feature is off.
+        for provider in provider_list() {
+            for name in signature_header_names(&provider) {
+                assert!(
+                    is_valid_field_name(name),
+                    "`{provider}` lists `{name:?}`, which is not a valid HTTP field \
+                     name (RFC 9110 §5.1 `field-name = token`); the framework adapters \
+                     would fail to parse it and reject every delivery as an ambiguous \
+                     duplicate header"
+                );
+            }
+        }
+    }
+
+    /// A scan name the framework's header map cannot parse must read as
+    /// *ambiguous*, not as "nothing to scan".
+    ///
+    /// This is the fail-closed contract that makes the guard above necessary
+    /// rather than cosmetic: an unparseable name can never be read, so it can
+    /// never be proven unambiguous, and the only safe answer is to reject.
+    /// Pinned because the tempting "fix" — returning `false` for an
+    /// unparseable name — would silently disable the ambiguity check for that
+    /// header instead of failing loudly.
+    #[cfg(feature = "http")]
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[test]
+    fn unparseable_scan_name_reads_as_ambiguous() {
+        use crate::core::adapter_utils::conflicting_signature_header;
+
+        // A well-formed, single-valued request: nothing here is ambiguous.
+        let mut headers = ::http::HeaderMap::new();
+        headers.insert(
+            "X-Hub-Signature-256",
+            ::http::HeaderValue::from_static("sha256=ab"),
+        );
+        assert_eq!(
+            conflicting_signature_header(&headers, &["X-Hub-Signature-256"]),
+            None
+        );
+
+        // The same request scanned under a name the header map cannot parse
+        // (a space is not a `tchar`) must be reported ambiguous rather than
+        // passing the scan — the "reject everything" behavior that makes a
+        // typo'd constant an outage instead of a silent hole.
+        assert_eq!(
+            conflicting_signature_header(&headers, &["X-Hub-Signature 256"]),
+            Some("X-Hub-Signature 256")
+        );
+        // ...and so must a parseable name, when the request really does carry
+        // it twice with differing values — the actual smuggling case the §4.4
+        // check exists to catch.
+        let mut duplicated = ::http::HeaderMap::new();
+        duplicated.append(
+            "X-Hub-Signature-256",
+            ::http::HeaderValue::from_static("sha256=ab"),
+        );
+        duplicated.append(
+            "X-Hub-Signature-256",
+            ::http::HeaderValue::from_static("sha256=cd"),
+        );
+        assert_eq!(
+            conflicting_signature_header(&duplicated, &["X-Hub-Signature-256"]),
+            Some("X-Hub-Signature-256")
+        );
+        // Identical duplicates are not ambiguous: nothing is being smuggled.
+        let mut identical = ::http::HeaderMap::new();
+        identical.append(
+            "X-Hub-Signature-256",
+            ::http::HeaderValue::from_static("sha256=ab"),
+        );
+        identical.append(
+            "X-Hub-Signature-256",
+            ::http::HeaderValue::from_static("sha256=ab"),
+        );
+        assert_eq!(
+            conflicting_signature_header(&identical, &["X-Hub-Signature-256"]),
+            None
+        );
+    }
+
     /// Every name-constructible [`Provider`] variant, in declaration order.
     ///
     /// The single source of truth for the provider-bookkeeping tests: both the

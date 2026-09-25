@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New test guard: every header name the framework adapters scan for
+  conflicting duplicates must be a valid HTTP field name.** The adapters
+  (`tower`, `actix`) turn `signature_header_names` into a `HeaderName` via
+  `HeaderName::from_bytes`, and an unparseable name there is
+  *indistinguishable from a smuggled duplicate*:
+  `MultiValueHeaders::get_all_bytes` returns `None` and
+  `conflicting_signature_header` reports the header as ambiguous, so the
+  request is rejected. A single typo'd header constant — a space, a stray
+  `\r`, a non-ASCII byte — would therefore not merely weaken the §4.4
+  ambiguity check, it would make the adapters reject **every** delivery for
+  that provider with a `400` whose body is empty by design ("no error detail
+  leaks over the wire"): a total, undiagnosable outage. Critically,
+  `verify()` called directly keeps working, because the crate's own
+  `HeaderMap` impls compare header names as plain case-insensitive strings,
+  so no existing test covered the adapter-only regression.
+  `signature_header_names_are_valid_http_field_names`
+  (`src/providers/mod.rs`) now checks RFC 9110 §5.1 `field-name = token`
+  dependency-free — so the guard also holds in the `actix`-only
+  configuration, where the `http` feature is off — and
+  `unparseable_scan_name_reads_as_ambiguous` pins the fail-closed "reject,
+  don't skip" contract that makes the guard necessary: the tempting
+  alternative (treating an unparseable scan name as "nothing to scan") would
+  silently disable the ambiguity check instead of failing loudly. No
+  behavior change, no new dependency; spec §5 gains item 8.
+
 - **`Provider::from_str` now also accepts `"lexe"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Lexe's official sidecar webhook docs state that "Lexe's sidecar
