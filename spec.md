@@ -455,6 +455,13 @@ the SDK and reference examples disambiguate its details.
   a bare path (`/webhooks/...`) is used verbatim. `#fragment` is dropped.
   (Deliberately *not* replicated: the reference SDK's double-encode corner
   when the caller passes an already percent-encoded query.)
+  The authority is delimited per RFC 3986 §3.2: it ends at the **first** `/`,
+  `?`, or `#` after `scheme://` — never at the first `/` alone. When that
+  delimiter is `?` or `#` the path is empty, so the root `/` is synthesized
+  ahead of the query (an empty path and the root path are the same request
+  target, and the SDK's `new URL(...).pathname` reports `/`). A `/` *inside* a
+  query or fragment therefore belongs to neither the authority nor the path and
+  must not be mistaken for the path start (issue #216).
 - Algorithm: HMAC-SHA256, hex-encoded (lowercase). Key: the space's
   64-character webhook signing secret, used as its UTF-8 bytes verbatim.
   Documented secret class: `^[0-9a-zA-Z+/=_-]+$`, 64 characters.

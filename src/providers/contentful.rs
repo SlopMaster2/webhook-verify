@@ -320,7 +320,14 @@ fn append_signed_headers_segment(
 /// Mirrors the documentation's pseudo-code and the SDK's path handling:
 ///
 /// - a full URL's `scheme://authority` is stripped (they never enter the
-///   signed string), leaving everything from the first `/` onwards;
+///   signed string). The authority ends at the first `/`, `?`, or `#`
+///   (RFC 3986 §3.2), *not* at the first `/` anywhere in the remainder — a
+///   `/` inside a query or fragment belongs to neither and must not be
+///   mistaken for the path start;
+/// - when that delimiter is `?` or `#` the path is empty, so the root `/` is
+///   synthesized ahead of the query (an empty path and the root path are the
+///   same request target, and Contentful signs what the SDK's `new URL(...).pathname`
+///   reports, i.e. `/`);
 /// - any `#fragment` is dropped;
 /// - a bare path (`/webhooks/...`) is used verbatim;
 /// - if a `?query` is present, only the query portion is percent-encoded
@@ -331,17 +338,20 @@ fn normalized_request_path(url: &str) -> String {
         Cow::Borrowed(url)
     } else {
         match url.split_once("://") {
-            Some((_, rest)) => match rest.find('/') {
-                Some(i) => Cow::Borrowed(&rest[i..]),
-                None => match rest.find(['?', '#']) {
-                    Some(i) => {
-                        let mut rooted = String::with_capacity(rest.len() - i + 1);
-                        rooted.push('/');
-                        rooted.push_str(&rest[i..]);
-                        Cow::Owned(rooted)
-                    }
-                    None => Cow::Borrowed("/"),
-                },
+            // One scan for the authority's end: a `/` starts the path, while
+            // a `?`/`#` means the path is empty and only the query/fragment
+            // follow. Searching for `/` alone would mis-read a `/` inside
+            // either of those as the path start, dropping the query or signing
+            // part of the fragment.
+            Some((_, rest)) => match rest.find(['/', '?', '#']) {
+                Some(i) if rest.as_bytes()[i] == b'/' => Cow::Borrowed(&rest[i..]),
+                Some(i) => {
+                    let mut rooted = String::with_capacity(rest.len() - i + 1);
+                    rooted.push('/');
+                    rooted.push_str(&rest[i..]);
+                    Cow::Owned(rooted)
+                }
+                None => Cow::Borrowed("/"),
             },
             None => Cow::Borrowed(url),
         }
@@ -524,6 +534,157 @@ mod tests {
             "https://www.example.com?source=webhook&v=2",
         );
         assert_eq!(result, Ok(()));
+    }
+
+    // --- issue #216: the authority ends at the first `/`, `?`, or `#` ---------
+    //
+    // The authority scan used to look for the first `/` anywhere in the
+    // remainder, so a `/` inside a query or fragment was mistaken for the path
+    // start: the query was dropped outright and part of the fragment was
+    // signed. Both silently produced a canonical string Contentful never
+    // signed, so every delivery mismatched.
+
+    #[test]
+    fn root_url_query_containing_slash_is_not_mistaken_for_the_path() {
+        let url = "https://www.example.com?a=/b";
+        // Path is empty (so the root `/`), and the query is encoded whole:
+        // `encodeURIComponent("a=/b")` is `a%3D%2Fb`.
+        assert_eq!(super::normalized_request_path(url), "/?a%3D%2Fb");
+        assert_eq!(
+            verify_with(
+                BODY,
+                "7d0cdbd97937d5ed8c5781a4e1c8512cc861d6fbba914d7c86960468bcec53d0",
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                url,
+            ),
+            Ok(())
+        );
+        // The pre-fix canonical path (`/b`, query dropped) must not verify.
+        assert_eq!(
+            verify_with(
+                BODY,
+                "0c3c4a6fea9b788ffcb905806c02b5595691d8318f6b483f6f4cf85b18a0a12c",
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                url,
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn root_url_fragment_containing_slash_is_dropped_entirely() {
+        let url = "https://www.example.com#frag/x";
+        // The whole fragment is dropped, including the `/` inside it.
+        assert_eq!(super::normalized_request_path(url), "/");
+        assert_eq!(
+            verify_with(
+                BODY,
+                "b995aa6eb1331f4f2d3264eda4fe18802d662e4dd05288e78cda104c4617b697",
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                url,
+            ),
+            Ok(())
+        );
+        // The pre-fix canonical path (`/x`, fragment content signed) must not.
+        assert_eq!(
+            verify_with(
+                BODY,
+                "040115334cad413e31e73b2b23158e4949f348a10a139b7eb96e7fc17318d03c",
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                url,
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn non_root_path_query_containing_slash_keeps_the_whole_path() {
+        let url = "https://www.example.com/webhooks/cms?next=/hook";
+        assert_eq!(
+            super::normalized_request_path(url),
+            "/webhooks/cms?next%3D%2Fhook"
+        );
+        assert_eq!(
+            verify_with(
+                BODY,
+                "1ecb8f9c2a5b20f61f21ffffa63f58591060f3bea20f7152dd241ad88f849884",
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                url,
+            ),
+            Ok(())
+        );
+        // The pre-fix canonical path (`/hook`, path and query both lost) must
+        // not verify.
+        assert_eq!(
+            verify_with(
+                BODY,
+                "09e14d23ab40c98d542df2c20dece72b0589287534d6a947035dcdaadfbf1e22",
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                url,
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn non_root_path_fragment_containing_slash_is_dropped() {
+        let url = "https://www.example.com/webhooks/cms#frag/x";
+        assert_eq!(super::normalized_request_path(url), "/webhooks/cms");
+        assert_eq!(
+            verify_with(
+                BODY,
+                "add119a59b03ca2d5dc6af2376b2cb53a11f96beb0f0762f8a4e5ed8e25aa645",
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                url,
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn authority_ends_at_the_first_slash_question_mark_or_hash() {
+        // The path-start rule itself, table-pinned so a future refactor cannot
+        // reintroduce a `/`-only scan. `urlsplit`-equivalent shapes: the
+        // authority is everything up to the first `/`, `?`, or `#`.
+        for (url, expected) in [
+            // Ordinary path: first delimiter is `/`.
+            ("https://example.com/webhooks/x", "/webhooks/x"),
+            ("https://user:pw@example.com/hook", "/hook"),
+            ("https://example.com//double", "//double"),
+            // Empty path, query present: root + encoded query.
+            ("https://example.com?a=b", "/?a%3Db"),
+            ("https://example.com?a=/b", "/?a%3D%2Fb"),
+            ("https://example.com:8443?a=/b", "/?a%3D%2Fb"),
+            // Empty path, fragment only: root, fragment dropped.
+            ("https://example.com#f", "/"),
+            ("https://example.com#frag/x", "/"),
+            // Query *and* fragment: the fragment goes, the query is encoded.
+            ("https://example.com?a=/b#frag/x", "/?a%3D%2Fb"),
+            ("https://example.com/hook?a=/b#f/x", "/hook?a%3D%2Fb"),
+            // No path, no query, no fragment.
+            ("https://example.com", "/"),
+            // Bare paths are used verbatim and never authority-stripped.
+            ("/webhooks/x?a=/b", "/webhooks/x?a%3D%2Fb"),
+            (
+                "/redirect/https://example.com/hook",
+                "/redirect/https://example.com/hook",
+            ),
+            // A `#` inside a query is a literal, not a fragment delimiter.
+            ("/hook?a=b%23c", "/hook?a%3Db%2523c"),
+        ] {
+            assert_eq!(
+                super::normalized_request_path(url),
+                expected,
+                "request_url {url:?}"
+            );
+        }
     }
 
     #[test]

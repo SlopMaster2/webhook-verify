@@ -1505,6 +1505,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Contentful: a `/` inside a query or fragment is no longer mistaken for the
+  start of the request path.** `normalized_request_path` located the path by
+  searching the whole post-`scheme://` remainder for the first `/`, but RFC 3986
+  §3.2 ends the authority at the first `/`, `?`, **or** `#`. When the path was
+  empty and the query or fragment contained a `/`, that later `/` was taken as
+  the path start: `https://example.com?a=/b` canonicalized as `/b` (the whole
+  `?a=` query silently dropped) and `https://example.com#frag/x` canonicalized
+  as `/x` (part of the fragment signed, though `spec.md` §3 says a fragment is
+  dropped). The authority scan now terminates at whichever of the three
+  delimiters comes first, synthesizing the root `/` when the path is empty —
+  matching the SDK's `new URL(...).pathname`, and preserving the already-shipped
+  root-URL-with-query behavior. Both shapes previously produced a canonical
+  string Contentful never signed, so deliveries to such an endpoint failed with
+  `SignatureMismatch` (a fail-closed availability bug, not a bypass). New
+  end-to-end vectors over a slash-bearing root query/fragment plus a
+  table-pinned `normalized_request_path` case list; the vectors come from an
+  independent Python reimplementation of the documented pseudo-code, verified to
+  reproduce every pre-existing Contentful vector exactly. Issue #216.
 - **HMAC rotation lists now compute one digest per signed string.** The
   Stripe, Paddle, PagerDuty, Mux, Tailscale, and Standard Webhooks paths
   previously recomputed HMAC-SHA256 for every candidate in a signature list.
