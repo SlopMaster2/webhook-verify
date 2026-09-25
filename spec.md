@@ -3047,6 +3047,28 @@ A provider implementation is not mergeable until it has:
    with `cargo test --release --all-features -- constant_time_comparison
    --ignored`. Ships in CI as a non-blocking informational job
    (`.github/workflows/ci.yml`).*
+8. **Adapter-visible header names are valid HTTP field names** for any
+   provider reachable through a framework adapter: every name in
+   `signature_header_names` satisfies RFC 9110 §5.1 `field-name = token`.
+   Both adapters turn that list into a `HeaderName` via
+   `HeaderName::from_bytes`, and an unparseable name there is
+   **indistinguishable from a smuggled duplicate** —
+   `MultiValueHeaders::get_all_bytes` returns `None`, and
+   `conflicting_signature_header` reports the header as ambiguous
+   (§4.4), so a single typo'd constant would make the adapters reject
+   *every* delivery for that provider with a body-less 400. `verify()`
+   called directly would still pass, since the crate's own `HeaderMap`
+   impls compare names as plain case-insensitive strings — so only the
+   adapter path regresses, and nothing else in the test bar would notice.
+   *Implemented (2026-09):
+   `signature_header_names_are_valid_http_field_names` in
+   `src/providers/mod.rs` checks the `token` grammar dependency-free, so
+   the guard also holds in the `actix`-only configuration where the `http`
+   feature is off; `unparseable_scan_name_reads_as_ambiguous` pins the
+   fail-closed "reject, don't skip" contract that makes the guard
+   necessary rather than cosmetic. The existing
+   `signature_header_names_cover_every_provider_header` guard pins *which*
+   headers are scanned; this one pins that those names are representable.*
 
 ---
 
