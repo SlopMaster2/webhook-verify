@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New test guard: `spec.md` §3 must name every header its provider's
+  implementation reads.** §3 ("Per-provider signing schemes") is this crate's
+  normative per-provider contract — header names, signed-string construction,
+  hash, encoding, and replay protection — and `AGENTS.md` §4.2 asks for the spec
+  entry to be written *before* the implementation, §6 for spec.md and the code
+  not to drift. But §3 was the one hand-maintained doc surface here with no
+  drift guard: the §2 enum sketch, the §2 `FromStr` alias list, the
+  README/crate-doc provider tables, the fuzz `IMPLEMENTED` pool, and
+  `signature_header_names`' own provider coverage each already have one, and the
+  alias-list guard had claimed to be "the last" without §3.
+
+  The failure mode is concrete rather than cosmetic. A provider can ship with a
+  §3 entry that omits a header its implementation reads, and the normative
+  contract then under-describes the wire format — which is exactly the drift
+  `AGENTS.md` §6 exists to prevent. A *renamed or added* header constant is the
+  sharper case: the `tower`/`actix` adapters build their §4.4 conflicting-
+  duplicate scan from `signature_header_names`, so a header §3 does not name is
+  a header a reader of the spec would not know to check for duplicates.
+  `spec_section_three_documents_every_signature_header`
+  (`src/providers/mod.rs`) parses §3's `### ` entries, attributes each to the
+  provider whose `Display` brand its heading names (reusing the same
+  brand-matching as the README/crate-doc table guard, so qualified headings like
+  `Tally (form webhooks)`, `X (formerly Twitter)`, `Standard Webhooks spec`,
+  and `Mailchimp Transactional (Mandrill)` are all fine), and asserts both
+  directions: every provider has exactly one entry and every entry documents
+  exactly one provider, and each entry names every header
+  `signature_header_names` lists for that provider. The header set is read from
+  `signature_header_names` — the same canonical list the adapters scan — rather
+  than a duplicated test table, so the guard cannot drift from the code it
+  guards; feature-disabled providers contribute an empty list and are checked
+  for entry coverage only. The guard is gated on `tower`/`actix` with the
+  function it reads, so the `no_std` test configurations compile it out rather
+  than leaving dead helpers behind.
+
+  `spec.md` itself needed no correction: all 58 entries already name every
+  header their implementation reads. Verified by mutation — dropping
+  `x-contentful-timestamp` from Contentful's entry, adding an undocumented
+  header to Zoom's scan list, renaming `### GoCardless` to a heading matching no
+  brand, and deleting §3's Ripple entry each fail the guard with the offending
+  provider and header named. No behavior change, no new dependency.
+
 - **New test guard: `spec.md` §2 must name every alias
   `Provider::from_str` accepts.** §2's `FromStr` sketch documents the parser
   as "Case-insensitive match on the canonical Display name of each variant

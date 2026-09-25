@@ -2593,6 +2593,133 @@ mod tests {
         );
     }
 
+    /// One `spec.md` §3 entry: its `### ` heading, the provider brand it
+    /// documents (`None` when the heading names no single provider), and its
+    /// body.
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    struct SpecEntry {
+        heading: String,
+        owner: Option<String>,
+        body: String,
+    }
+
+    /// Parses §3's `### ` entries and attributes each to the provider it
+    /// documents.
+    ///
+    /// The section is delimited by its own `## 3. Per-provider signing schemes`
+    /// heading and the next top-level `## ` heading, so the guard reads only the
+    /// provider entries and not §2 or §4. An entry's body runs from its heading
+    /// to the next `### ` (or the end of §3). Attribution uses the same
+    /// `Display`-brand matching as the README/crate-doc table guard, so a
+    /// heading may qualify the brand (`Tally (form webhooks)`, `X (formerly
+    /// Twitter)`, `Standard Webhooks spec`, `Mailchimp Transactional
+    /// (Mandrill)`) but must not name two providers or none. Test helper over
+    /// compile-time `include_str!` data; the `panic!` names the section marker
+    /// this depends on.
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    fn spec_section_three_entries(spec: &str) -> Vec<SpecEntry> {
+        let start = match spec.find("## 3. Per-provider signing schemes") {
+            Some(start) => start,
+            None => panic!("spec.md must keep its `## 3. Per-provider signing schemes` heading"),
+        };
+        let end = spec[start..]
+            .find("\n## ")
+            .map_or(spec.len(), |at| start + at);
+
+        let mut entries: Vec<SpecEntry> = Vec::new();
+        let mut pending: Option<String> = None;
+        let mut body = String::new();
+        for line in spec[start..end].lines() {
+            if let Some(heading) = line.strip_prefix("### ") {
+                if let Some(previous) = pending.take() {
+                    entries.push(spec_entry(previous, core::mem::take(&mut body)));
+                }
+                pending = Some(heading.trim().to_string());
+            } else if pending.is_some() {
+                body.push_str(line);
+                body.push('\n');
+            }
+        }
+        if let Some(previous) = pending {
+            entries.push(spec_entry(previous, body));
+        }
+        entries
+    }
+
+    /// Attributes one §3 entry to the provider whose `Display` brand its
+    /// heading names, or to none when the match is not unique.
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    fn spec_entry(heading: String, body: String) -> SpecEntry {
+        let mut owners = provider_list()
+            .iter()
+            .map(|provider| provider.to_string())
+            .filter(|brand| brand_cell_matches(&heading, brand))
+            .collect::<Vec<_>>();
+        let owner = if owners.len() == 1 {
+            Some(owners.remove(0))
+        } else {
+            None
+        };
+        SpecEntry {
+            heading,
+            owner,
+            body,
+        }
+    }
+
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[test]
+    fn spec_section_three_documents_every_signature_header() {
+        // §3 is the one hand-maintained doc surface in this crate with no drift
+        // guard: the §2 enum sketch, the §2 alias list, the README/crate-doc
+        // provider tables, the fuzz `IMPLEMENTED` pool, and
+        // `signature_header_names`' own coverage are all pinned, but nothing
+        // checked §3. The failure mode is concrete. A provider can ship with a
+        // §3 entry that omits a header its implementation reads, and the
+        // normative contract then under-describes the wire format — the reason
+        // `AGENTS.md` §4.2 asks for the spec entry *before* the implementation
+        // and §6 for the two not to drift. A *renamed or added* header constant
+        // is the sharper case: the adapters' §4.4 ambiguity scan is built from
+        // `signature_header_names`, so a header §3 does not name is a header a
+        // reader of the spec would not know to check for conflicting duplicates.
+        //
+        // The header set is read from `signature_header_names` — the same
+        // canonical list the adapters scan — rather than from a duplicated test
+        // table, so the guard cannot drift from the code it guards, and
+        // feature-disabled providers contribute an empty list and are checked
+        // for entry coverage only.
+        let entries = spec_section_three_entries(include_str!("../../spec.md"));
+        assert_eq!(
+            entries.len(),
+            provider_list().len(),
+            "spec.md §3 must have exactly one entry per provider"
+        );
+
+        for entry in &entries {
+            assert!(
+                entry.owner.is_some(),
+                "spec.md §3 entry `{}` must name exactly one provider's brand",
+                entry.heading,
+            );
+        }
+
+        for provider in provider_list() {
+            let brand = provider.to_string();
+            let entry = entries
+                .iter()
+                .find(|entry| entry.owner.as_deref() == Some(brand.as_str()))
+                .unwrap_or_else(|| panic!("spec.md §3 must have an entry documenting `{brand}`"));
+            for header in signature_header_names(&provider) {
+                assert!(
+                    entry.body.contains(header),
+                    "spec.md §3 entry `{brand}` must name the `{header}` header its \
+                     implementation reads (spec.md is the normative per-provider contract, \
+                     and the framework adapters scan it for conflicting duplicates per §4.4)"
+                );
+            }
+        }
+    }
+
     #[test]
     fn fuzz_implemented_pool_covers_every_nameable_provider() {
         use std::fs;
