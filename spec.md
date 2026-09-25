@@ -173,8 +173,9 @@ impl core::str::FromStr for Provider {
     // "hub spot"/"hub-spot" → HubSpot, "pager duty"/"pager-duty" →
     // PagerDuty, "circle ci"/"circle-ci" → CircleCi, "woo commerce"/
     // "woo-commerce" → WooCommerce, "launch darkly"/"launch-darkly" →
-    // LaunchDarkly). Brand aliases are also accepted: StandardWebhooks
-    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco"/"novu"/"crossmint"/"daytona"/"polar" (adopters that sign
+    // LaunchDarkly, "big commerce"/"big-commerce" → BigCommerce). Brand
+    // aliases are also accepted: StandardWebhooks
+    // takes "svix"/"resend"/"messagebird"/"bird"/"gitlab"/"clerk"/"openai"/"warp"/"loops"/"anthropic"/"gemini"/"brex"/"bigcommerce"/"lithic"/"incident.io"/"incident"/"supabase"/"etsy"/"sardine"/"dodo"/"dodopayments"/"zapier"/"vanta"/"safetykit"/"prescience"/"taskrabbit"/"liveblocks"/"flip"/"replicate"/"inai"/"drata"/"nash"/"render"/"yoco"/"novu"/"crossmint"/"daytona"/"polar"/"helcim"/"celitech"/"360learning"/"natural"/"origami"/"parallel"/"openlayer"/"acolad"/"allo"/"lexe" (adopters that sign
     // deliveries with the same scheme), Mandrill takes "mailchimp"/
     // "mailchimp transactional"/"mailchimp-transactional" (its current brand
     // name), and X takes

@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New test guard: `spec.md` §2 must name every alias
+  `Provider::from_str` accepts.** §2's `FromStr` sketch documents the parser
+  as "Case-insensitive match on the canonical Display name of each variant
+  … plus the space-separated and hyphenated human-readable forms … Brand
+  aliases are also accepted: …", but nothing pinned that hand-written list to
+  the match arms, and it had drifted: the Standard Webhooks adopters Helcim,
+  CELITECH, 360Learning, Natural, Origami, Parallel, Openlayer, Acolad, Allo,
+  and Lexe all shipped as accepted aliases — with §3 adopter entries and
+  `FromStr` unit tests — while being absent from §2, as were BigCommerce's
+  space/hyphen spellings. The normative contract therefore under-described the
+  parser: `"helcim"`, `"celitech"`, `"360learning"`, `"natural"`, `"origami"`,
+  `"parallel"`, `"openlayer"`, `"acolad"`, `"allo"`, `"lexe"`, `"big
+  commerce"`, and `"big-commerce"` all verified deliveries while §2 did not
+  list them. The §2 list is corrected, and
+  `spec_section_two_documents_every_accepted_alias` (`src/providers/mod.rs`)
+  reads the alias set out of `from_str`'s own source — rather than a
+  duplicated test table, so the guard cannot drift from the parser it guards —
+  and fails CI if a future alias ships without being named in §2. The two
+  spellings that are canonical rather than aliases (the `Display` names
+  `LemonSqueezy`/`StandardWebhooks` and their lowercase forms) are excluded by
+  construction. `AGENTS.md` §6 requires `spec.md` and the code not to drift,
+  and this was the last hand-maintained doc surface here without a guard — the
+  §2 enum sketch, the README/crate-doc provider tables, and the fuzz
+  `IMPLEMENTED` pool each already have one. No behavior change, no new
+  dependency.
+
 - **New test guard: every header name the framework adapters scan for
   conflicting duplicates must be a valid HTTP field name.** The adapters
   (`tower`, `actix`) turn `signature_header_names` into a `HeaderName` via
