@@ -2901,6 +2901,21 @@ ambiguity).
   uses the §5.1 recipe-built fallback pinned to the construction above with a
   body shaped exactly like its published `test.created` example event
   (source: <https://docs.openlayer.com/security/webhooks/events>).
+  Acolad's official Public API webhook docs state that "The Public API uses a
+  webhook service called Svix" to deliver `project.*` lifecycle events, that
+  receivers are "strongly recommended" to verify every delivery, and that
+  "Svix provides a number of libraries to easily verify events" plus manual
+  verification instructions — i.e. the same Svix-served construction this
+  section covers, with the `svix-id`/`svix-timestamp`/`svix-signature` (or
+  canonical `webhook-*`) headers, an HMAC-SHA256 over
+  `{id}.{timestamp}.{raw_body}` keyed by the `whsec_`-prefixed signing
+  secret, and a ±5-minute replay window (sources:
+  <https://eu1.anypoint.mulesoft.com/exchange/portals/acolad/24e64f00-e5a9-4989-a410-e8cc1c143297/public-x-api/minor/2.2/pages/4u7-it6/Webhooks/>
+  and the Svix verification construction those pages defer to,
+  <https://docs.svix.com/receiving/verifying-payloads/how-manual>); Acolad
+  publishes no byte-verifiable worked example, so the vector suite uses the
+  §5.1 recipe-built fallback pinned to the construction above with a body
+  shaped like its documented `project.delivery_complete` lifecycle event.
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

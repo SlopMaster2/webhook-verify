@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"acolad"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Acolad's official Public API webhook docs state that "The Public
+  API uses a webhook service called Svix" to deliver `project.*` lifecycle
+  events, that receivers are "strongly recommended" to verify every delivery,
+  and that "Svix provides a number of libraries to easily verify events" plus
+  manual verification instructions
+  (<https://eu1.anypoint.mulesoft.com/exchange/portals/acolad/24e64f00-e5a9-4989-a410-e8cc1c143297/public-x-api/minor/2.2/pages/4u7-it6/Webhooks/>) —
+  i.e. the exact Standard Webhooks construction this provider implements
+  (`svix-id`/`svix-timestamp`/`svix-signature` or canonical `webhook-*`
+  headers, HMAC-SHA256 over `{id}.{timestamp}.{raw_body}` keyed by the
+  `whsec_`-prefixed, base64-decoded signing secret, ±5-minute replay window).
+  Config files that name the provider by the sender's brand —
+  `provider: acolad` — now parse to [`Provider::StandardWebhooks`] instead of
+  erroring. (Alias accepted case-insensitively, like every other spelling.
+  Acolad publishes no byte-exact body/secret pair, so the test vector is
+  recipe-built per `spec.md` §5.1 from their documented construction and a body
+  shaped like their documented `project.delivery_complete` lifecycle event, and
+  cross-checked in two independent HMAC implementations. Source:
+  <https://eu1.anypoint.mulesoft.com/exchange/portals/acolad/24e64f00-e5a9-4989-a410-e8cc1c143297/public-x-api/minor/2.2/pages/4u7-it6/Webhooks/>,
+  <https://docs.svix.com/receiving/verifying-payloads/how-manual>.)
 - **`Provider::from_str` now also accepts `"openlayer"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Openlayer's official webhook security docs
