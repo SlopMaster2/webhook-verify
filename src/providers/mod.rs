@@ -663,7 +663,8 @@ impl fmt::Display for Provider {
 /// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, `"drata"`, `"nash"`,
 /// `"render"`, `"yoco"`, `"novu"`, `"crossmint"`, `"daytona"`, `"polar"`,
 /// `"helcim"`, `"celitech"`, `"360learning"`, `"natural"`, `"origami"`,
-/// `"parallel"`, `"openlayer"`, `"acolad"`, and `"allo"` all parse to it.
+/// `"parallel"`, `"openlayer"`, `"acolad"`, `"allo"`, and `"lexe"` all parse
+/// to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -959,6 +960,17 @@ impl fmt::Display for Provider {
 /// (source: <https://help.withallo.com/en/v2/api-reference/webhooks/verifying-signatures>)
 /// — the exact Standard Webhooks construction this provider implements, so
 /// `allo` is accepted as a brand alias for it.
+/// Lexe's official sidecar webhook docs state that "Lexe's sidecar signs
+/// outbound webhooks using the Standard Webhooks HMAC-SHA256 scheme", that
+/// when a shared secret is configured every delivery carries the canonical
+/// `webhook-id`/`webhook-timestamp`/`webhook-signature` headers, that the
+/// shared secret is a random 24–64 byte string base64-encoded and
+/// "conventionally prefixed with `whsec_`", and that the
+/// `webhook-signature` value is `"v1," + base64(HMAC-SHA256(<secret>,
+/// "<webhook-id>.<webhook-timestamp>.<raw body>"))`
+/// (source: <https://docs.lexe.tech/sidecar/webhooks/>) — the exact Standard
+/// Webhooks construction this provider implements, so `lexe` is accepted as a
+/// brand alias for it.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -1121,7 +1133,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("parallel")
                 || n.eq_ignore_ascii_case("openlayer")
                 || n.eq_ignore_ascii_case("acolad")
-                || n.eq_ignore_ascii_case("allo") =>
+                || n.eq_ignore_ascii_case("allo")
+                || n.eq_ignore_ascii_case("lexe") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1145,7 +1158,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning`, `natural`, `origami`, `parallel`, `openlayer`, `acolad`, `allo` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning`, `natural`, `origami`, `parallel`, `openlayer`, `acolad`, `allo`, `lexe` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2272,6 +2285,9 @@ mod tests {
             ("allo", Provider::StandardWebhooks),
             ("Allo", Provider::StandardWebhooks),
             ("ALLO", Provider::StandardWebhooks),
+            ("lexe", Provider::StandardWebhooks),
+            ("Lexe", Provider::StandardWebhooks),
+            ("LEXE", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2338,7 +2354,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning`/`natural`/`origami`/`parallel`/`openlayer`/`acolad`/`allo` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning`/`natural`/`origami`/`parallel`/`openlayer`/`acolad`/`allo`/`lexe` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2390,6 +2406,7 @@ mod tests {
             "openlayer",
             "acolad",
             "allo",
+            "lexe",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),

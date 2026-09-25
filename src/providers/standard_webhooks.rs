@@ -4,7 +4,7 @@
 //! Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip,
 //! Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona,
 //! Polar, Helcim, 360Learning, Celitech, Natural, Origami, Parallel,
-//! Openlayer, Acolad, Allo, ...).
+//! Openlayer, Acolad, Allo, Lexe, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -1217,6 +1217,86 @@ mod tests {
         let id = "msg_2NfDKEm9sF8xK3pQr1Zt";
         let timestamp: u64 = 1_710_510_600;
         let signature = "8ZfIiEY4mAl+k+dr24rQbGjrfrmC5wlq21ruf7BPwO0=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// Lexe webhook test vector, recipe-constructed from Lexe's official
+    /// sidecar webhook docs
+    /// (<https://docs.lexe.tech/sidecar/webhooks/>): they state that "Lexe's
+    /// sidecar signs outbound webhooks using the Standard Webhooks HMAC-SHA256
+    /// scheme", that when a shared secret is configured every delivery carries
+    /// the canonical `webhook-id`/`webhook-timestamp`/`webhook-signature`
+    /// headers, that the shared secret is a random 24–64 byte string
+    /// base64-encoded and "conventionally prefixed with `whsec_`", and that
+    /// the `webhook-signature` value is `"v1," + base64(HMAC-SHA256(<secret>,
+    /// "<webhook-id>.<webhook-timestamp>.<raw body>"))` — the exact Standard
+    /// Webhooks construction this module implements. Lexe publishes no
+    /// byte-verifiable worked example, so this vector is built per §5.1's
+    /// recipe fallback: the signed body is Lexe's documented
+    /// `payment.finalized` example payload verbatim (the docs' `index`/`hash`/
+    /// `finalized_at`/`timestamp` delivery-identity fields shape the
+    /// `webhook-id` and `webhook-timestamp`), keyed by the reference suite's
+    /// public test key ([`SECRET`], the key the official vectors above pin),
+    /// and cross-checked in two independent HMAC-SHA256 implementations.
+    #[test]
+    fn official_lexe_vector_verifies() {
+        let payload = br#"{"type":"payment.finalized","timestamp":"2025-04-17T21:54:17.989Z","user_pk":"63ad1661bfc23ad25f5bcc6f610f8fd70d7426de51be74766c24e47f4b4fcfca","index":"0000001744926519917-ln_9be5e4e3a0356cc4a7a1dce5a4af39e2896b7eb7b007ec6ca8c2f8434f21a63a","rail":"invoice","kind":"invoice","direction":"inbound","hash":"9be5e4e3a0356cc4a7a1dce5a4af39e2896b7eb7b007ec6ca8c2f8434f21a63a","preimage":"a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd","offer_id":null,"txid":null,"amount":"1000","fees":"0","partner_pk":null,"partner_prop_fee":null,"partner_base_fee":null,"status":"completed","status_msg":"completed","address":null,"invoice":"lnbc10n1p5qz7z2dq...","tx":null,"client_pk":null,"payer_name":null,"message":null,"personal_note":null,"priority":null,"expires_at":1744930119917,"finalized_at":1744926857989,"created_at":1744926519917,"updated_at":1744926857989}"#;
+        let id = "wh_0000001744926519917";
+        let timestamp: u64 = 1_744_926_857;
+        let signature = "i3Dg4vVPlKVl16IvuM/Gw+Lb7az5rJNWH998ObOfP44=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Lexe vector, with one base64 character of the signature
+    /// flipped: the documented construction plus a wrong-but-well-formed
+    /// signature must fail closed (negative §5.2 case).
+    #[test]
+    fn official_lexe_vector_negative_flip_fails() {
+        let payload = br#"{"type":"payment.finalized","timestamp":"2025-04-17T21:54:17.989Z","user_pk":"63ad1661bfc23ad25f5bcc6f610f8fd70d7426de51be74766c24e47f4b4fcfca","index":"0000001744926519917-ln_9be5e4e3a0356cc4a7a1dce5a4af39e2896b7eb7b007ec6ca8c2f8434f21a63a","rail":"invoice","kind":"invoice","direction":"inbound","hash":"9be5e4e3a0356cc4a7a1dce5a4af39e2896b7eb7b007ec6ca8c2f8434f21a63a","preimage":"a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd","offer_id":null,"txid":null,"amount":"1000","fees":"0","partner_pk":null,"partner_prop_fee":null,"partner_base_fee":null,"status":"completed","status_msg":"completed","address":null,"invoice":"lnbc10n1p5qz7z2dq...","tx":null,"client_pk":null,"payer_name":null,"message":null,"personal_note":null,"priority":null,"expires_at":1744930119917,"finalized_at":1744926857989,"created_at":1744926519917,"updated_at":1744926857989}"#;
+        let id = "wh_0000001744926519917";
+        let timestamp: u64 = 1_744_926_857;
+        let flipped = "j3Dg4vVPlKVl16IvuM/Gw+Lb7az5rJNWH998ObOfP44=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Lexe vector with the raw body mutated after signing must fail
+    /// (tamper §5.3 case).
+    #[test]
+    fn official_lexe_vector_tampered_body_fails() {
+        let payload = br#"{"type":"payment.finalized","timestamp":"2025-04-17T21:54:17.989Z","user_pk":"63ad1661bfc23ad25f5bcc6f610f8fd70d7426de51be74766c24e47f4b4fcfca","index":"0000001744926519917-ln_9be5e4e3a0356cc4a7a1dce5a4af39e2896b7eb7b007ec6ca8c2f8434f21a63a","rail":"invoice","kind":"invoice","direction":"inbound","hash":"9be5e4e3a0356cc4a7a1dce5a4af39e2896b7eb7b007ec6ca8c2f8434f21a63a","preimage":"a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd","offer_id":null,"txid":null,"amount":"1001","fees":"0","partner_pk":null,"partner_prop_fee":null,"partner_base_fee":null,"status":"completed","status_msg":"completed","address":null,"invoice":"lnbc10n1p5qz7z2dq...","tx":null,"client_pk":null,"payer_name":null,"message":null,"personal_note":null,"priority":null,"expires_at":1744930119917,"finalized_at":1744926857989,"created_at":1744926519917,"updated_at":1744926857989}"#;
+        let id = "wh_0000001744926519917";
+        let timestamp: u64 = 1_744_926_857;
+        let signature = "i3Dg4vVPlKVl16IvuM/Gw+Lb7az5rJNWH998ObOfP44=";
         assert_eq!(
             verify_with(
                 payload,
