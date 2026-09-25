@@ -2930,6 +2930,19 @@ ambiguity).
   (`1710510600`) from its docs' worked header example and a body shaped
   exactly like its documented `call.completed` event payload (source:
   <https://help.withallo.com/en/integrations/webhooks>).
+  Lexe's official sidecar webhook docs state that "Lexe's sidecar signs
+  outbound webhooks using the Standard Webhooks HMAC-SHA256 scheme", that when
+  a shared secret is configured every delivery carries the canonical
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` headers, that the shared
+  secret is a random 24–64 byte string base64-encoded and "conventionally
+  prefixed with `whsec_`", and that the `webhook-signature` value is
+  `"v1," + base64(HMAC-SHA256(<secret>, "<webhook-id>.<webhook-timestamp>.<raw
+  body>"))` (source: <https://docs.lexe.tech/sidecar/webhooks/>); Lexe
+  publishes no byte-verifiable worked example, so the vector suite uses the
+  §5.1 recipe-built fallback pinned to the construction above: the signed body
+  is Lexe's documented `payment.finalized` example payload verbatim, with the
+  docs' `index`/`finalized_at` delivery-identity fields shaping the
+  `webhook-id` and `webhook-timestamp`.
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---

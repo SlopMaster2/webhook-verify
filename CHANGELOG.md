@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"lexe"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Lexe's official sidecar webhook docs state that "Lexe's sidecar
+  signs outbound webhooks using the Standard Webhooks HMAC-SHA256 scheme",
+  that when a shared secret is configured every delivery carries the canonical
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` headers, that the
+  shared secret is a random 24–64 byte string base64-encoded and
+  "conventionally prefixed with `whsec_`", and that the `webhook-signature`
+  value is `"v1," + base64(HMAC-SHA256(<secret>,
+  "<webhook-id>.<webhook-timestamp>.<raw body>"))`
+  (<https://docs.lexe.tech/sidecar/webhooks/>) — the exact Standard Webhooks
+  construction this provider implements. Config files that name the provider
+  by the sender's brand — `provider: lexe` — now parse to
+  [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Lexe publishes no
+  byte-verifiable worked example, so the test vector is recipe-built per
+  `spec.md` §5.1 from their documented construction — a `payment.finalized`
+  body matching their docs' example payload verbatim, with the delivery
+  `webhook-id`/`webhook-timestamp` shaped from the docs' own `index`/
+  `finalized_at` fields — and cross-checked in two independent HMAC-SHA256
+  implementations. Source: <https://docs.lexe.tech/sidecar/webhooks/>.)
 - **`Provider::from_str` now also accepts `"allo"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Allo's official webhook signature docs state that every delivery
