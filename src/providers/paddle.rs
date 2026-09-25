@@ -27,7 +27,7 @@
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha256;
+use crate::core::crypto::verify_hmac_sha256_any;
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::replay::{check_replay, parse_timestamp};
@@ -67,10 +67,14 @@ pub(crate) fn verify(
     signed_string.push(b':');
     signed_string.extend_from_slice(raw_body);
 
-    let matched = parsed
-        .signatures
-        .iter()
-        .any(|sig| verify_hmac_sha256(secret.as_bytes(), &signed_string, sig));
+    let matched = verify_hmac_sha256_any(
+        secret.as_bytes(),
+        &signed_string,
+        parsed
+            .signatures
+            .iter()
+            .map(|signature| signature.as_slice()),
+    );
 
     if !matched {
         return Err(VerifyError::SignatureMismatch);

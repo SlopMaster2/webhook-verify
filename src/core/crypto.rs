@@ -46,6 +46,19 @@ const ED25519_KEY_LEN: usize = 32;
 /// Ed25519 signature length in bytes (`R` || `S`).
 const ED25519_SIG_LEN: usize = 64;
 
+fn hmac_sha256_matches<F>(key: &[u8], signed_string: &[u8], compare: F) -> bool
+where
+    F: FnOnce(&[u8]) -> bool,
+{
+    let mut mac = match HmacSha256::new_from_slice(key) {
+        Ok(mac) => mac,
+        Err(_) => return false,
+    };
+    mac.update(signed_string);
+    let expected = mac.finalize().into_bytes();
+    compare(expected.as_slice())
+}
+
 /// Verifies `provided_signature` against HMAC-SHA256(`key`, `signed_string`)
 /// using a constant-time comparison.
 ///
@@ -60,13 +73,27 @@ pub(crate) fn verify_hmac_sha256(
     signed_string: &[u8],
     provided_signature: &[u8],
 ) -> bool {
-    let mut mac = match HmacSha256::new_from_slice(key) {
-        Ok(mac) => mac,
-        Err(_) => return false,
-    };
-    mac.update(signed_string);
-    let expected = mac.finalize().into_bytes();
-    expected.as_slice().ct_eq(provided_signature).into()
+    hmac_sha256_matches(key, signed_string, |expected| {
+        bool::from(expected.ct_eq(provided_signature))
+    })
+}
+
+#[must_use]
+pub(crate) fn verify_hmac_sha256_any<'a, I>(
+    key: &[u8],
+    signed_string: &[u8],
+    provided_signatures: I,
+) -> bool
+where
+    I: IntoIterator<Item = &'a [u8]>,
+{
+    hmac_sha256_matches(key, signed_string, move |expected| {
+        let mut matched = false;
+        for signature in provided_signatures {
+            matched |= bool::from(expected.ct_eq(signature));
+        }
+        matched
+    })
 }
 
 /// Verifies `provided_signature` against HMAC-SHA1(`key`, `signed_string`)
@@ -459,7 +486,10 @@ pub(crate) fn check_rsa_pkcs1v15_sha256(
 
 #[cfg(test)]
 mod tests {
-    use super::{verify_ed25519, verify_hmac_sha1, verify_hmac_sha256, verify_hmac_sha512};
+    use super::{
+        verify_ed25519, verify_hmac_sha1, verify_hmac_sha256, verify_hmac_sha256_any,
+        verify_hmac_sha512,
+    };
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
 
@@ -479,6 +509,37 @@ mod tests {
         let data = b"what do ya want for nothing?";
         let sig = decode("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
         assert!(verify_hmac_sha256(key, data, &sig));
+    }
+
+    #[test]
+    fn hmac_sha256_any_checks_every_candidate() {
+        let key = b"Jefe";
+        let data = b"what do ya want for nothing?";
+        let signature = decode("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+        let wrong = [0_u8; 32];
+        let candidates = [&wrong[..], signature.as_slice(), &wrong[..]];
+        let mut visits = 0;
+
+        let matched = verify_hmac_sha256_any(
+            key,
+            data,
+            candidates.iter().copied().inspect(|_| visits += 1),
+        );
+        assert!(matched);
+        assert_eq!(visits, candidates.len());
+
+        let mut flipped = signature.clone();
+        flipped[0] ^= 1;
+        assert!(!verify_hmac_sha256_any(
+            key,
+            data,
+            [&wrong[..], flipped.as_slice()],
+        ));
+        assert!(!verify_hmac_sha256_any(
+            key,
+            data,
+            core::iter::empty::<&[u8]>(),
+        ));
     }
 
     #[test]

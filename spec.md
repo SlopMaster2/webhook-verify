@@ -2957,7 +2957,10 @@ ambiguity).
 
 1. **Constant-time comparison.** All signature comparisons use
    `subtle::ConstantTimeEq` (or equivalent) — never `==` on the decoded
-   bytes or the encoded strings.
+   bytes or the encoded strings. For the multi-signature rotation-list
+   providers (Stripe, Paddle, PagerDuty, Mux, Tailscale, and Standard Webhooks),
+   compute the HMAC digest once per signed string and compare every candidate
+   against that digest; do not recompute the HMAC for each candidate.
 2. **Verify against raw bytes only.** No implementation may re-serialize,
    re-encode, or normalize the body before hashing. The `raw_body: &[u8]`
    passed in is hashed exactly as received.
