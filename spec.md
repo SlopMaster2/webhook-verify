@@ -2889,6 +2889,18 @@ ambiguity).
   API `task_run.status` example event (source:
   <https://docs.parallel.ai/resources/webhook-setup>,
   <https://docs.parallel.ai/task-api/webhooks>).
+  Openlayer's official webhook security docs state that "Openlayer follows the
+  Standard Webhooks specification", attaching the same three
+  `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`)
+  headers, signing an HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw_body}`
+  keyed by the subscription's signing secret "with the `whsec_` prefix removed
+  and the remainder Base64-decoded", with deliveries outside a ±5-minute
+  tolerance window rejected against replay
+  (source: <https://docs.openlayer.com/security/webhooks/verify-signatures>);
+  Openlayer publishes no byte-verifiable worked example, so the vector suite
+  uses the §5.1 recipe-built fallback pinned to the construction above with a
+  body shaped exactly like its published `test.created` example event
+  (source: <https://docs.openlayer.com/security/webhooks/events>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
