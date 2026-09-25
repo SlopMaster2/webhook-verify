@@ -157,13 +157,6 @@ pub(crate) fn parse_rfc3339_timestamp(
     if hour > 23 || minute > 59 || second > 60 {
         return Err(malformed());
     }
-    // RFC 3339 §5.7 allows second 60 only as a leap second, expressed at the
-    // end of the local day (`23:59:60`); a `60` at any other clock position
-    // is not a valid calendar time and must fail closed.
-    if second == 60 && (hour != 23 || minute != 59) {
-        return Err(malformed());
-    }
-
     // Optional fractional seconds: `.digits` — truncated, never rounded.
     let mut i = 19;
     if b.get(i) == Some(&b'.') {
@@ -216,17 +209,6 @@ pub(crate) fn parse_rfc3339_timestamp(
     if unix_seconds < 0 {
         return Err(malformed());
     }
-    // RFC 3339 §5.7 allows second 60 only as a leap second, and a leap second
-    // is only ever held at the *end of a UTC day* (UTC 23:59:60). The
-    // local-clock gate above spots a `60` at a non-final local position, but
-    // a numeric offset can still push a local `23:59:60` off that instant:
-    // `23:59:60+02:00` normalizes to UTC 22:00:00 and `23:59:60-05:00` to
-    // 04:59:60 the next day — neither is a time where a leap second exists.
-    // Given the strict local gate, only a zero offset leaves the value on the
-    // genuine UTC leap-second instant, so require the normalized instant to
-    // sit on a UTC day boundary (`≡ 0 mod 86400` in the carry arithmetic
-    // above, which holds iff it is UTC 23:59:60) and fail everything else
-    // closed instead of silently normalizing it into a replayable instant.
     if second == 60 && unix_seconds % 86_400 != 0 {
         return Err(malformed());
     }
@@ -496,10 +478,7 @@ mod tests {
         }
 
         #[test]
-        fn leap_second_only_at_end_of_day() {
-            // RFC 3339 §5.7 allows second 60 only as a leap second expressed
-            // at the end of the local day (23:59:60); 05:19:60 is not a valid
-            // calendar time.
+        fn leap_second_must_normalize_to_utc_end_of_day() {
             assert_eq!(parse_header("2024-05-16T23:59:60Z"), Ok(1_715_904_000));
             assert_eq!(
                 parse_header("2024-05-16T05:19:60Z"),
@@ -516,12 +495,12 @@ mod tests {
         }
 
         #[test]
+        fn accepts_offset_form_leap_second() {
+            assert_eq!(parse_header("1990-12-31T15:59:60-08:00"), Ok(662_688_000));
+        }
+
+        #[test]
         fn leap_second_must_land_on_utc_end_of_day() {
-            // A local 23:59:60 shifted by a numeric offset no longer marks the
-            // real leap-second instant (which only ever occurs at UTC
-            // 23:59:60): `23:59:60+02:00` normalizes to UTC 22:00:00 and
-            // `23:59:60-05:00` to 04:59:60 the next day, so both fail closed
-            // instead of being silently normalized into a replayable instant.
             assert_eq!(
                 parse_header("2024-05-16T23:59:60+02:00"),
                 malformed("2024-05-16T23:59:60+02:00")
@@ -530,9 +509,6 @@ mod tests {
                 parse_header("2024-05-16T23:59:60-05:00"),
                 malformed("2024-05-16T23:59:60-05:00")
             );
-            // `+00:00` is the numeric spelling of `Z` — the same UTC
-            // 23:59:60 instant — so it still resolves to the same conveyor
-            // midnight as the existing `Z` assertion above.
             assert_eq!(parse_header("2024-05-16T23:59:60+00:00"), Ok(1_715_904_000));
         }
 

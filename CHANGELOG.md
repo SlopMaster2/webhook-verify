@@ -1480,6 +1480,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **RFC 3339 offset-form leap seconds are accepted.** The shared parser used
+  by PayPal, Twitch, Zendesk, and Box previously rejected a valid timestamp
+  such as `1990-12-31T15:59:60-08:00` because it required the local clock to
+  be `23:59:60`. RFC 3339 §5.7 shifts the leap-second instant by the numeric
+  UTC offset, and §5.8 publishes this exact example. The parser now keeps the
+  post-normalization UTC-day-boundary check while accepting offset spellings
+  that land at UTC `23:59:60`; values that normalize elsewhere still fail
+  closed. Source: <https://www.rfc-editor.org/rfc/rfc3339.txt#section-5.7>
+  and <https://www.rfc-editor.org/rfc/rfc3339.txt#section-5.8>.
 - **Contentful: full URLs without an explicit path preserve query strings.** A
   URL such as `https://example.com?source=webhook` now canonicalizes its request
   path as `/?source%3Dwebhook` instead of dropping the query, matching
