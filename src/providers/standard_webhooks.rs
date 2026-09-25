@@ -4,7 +4,7 @@
 //! Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip,
 //! Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona,
 //! Polar, Helcim, 360Learning, Celitech, Natural, Origami, Parallel,
-//! Openlayer, Acolad, ...).
+//! Openlayer, Acolad, Allo, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -1136,6 +1136,87 @@ mod tests {
         let id = "msg_4f6d8c50-2d7e-4a9b-8c1a-7e3f9d2b5f11";
         let timestamp: u64 = 1_768_991_400;
         let signature = "ItOU1VJVrtgfQgzJsbA8I4h7E16rwNU4jbyHwyTjfu4=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// Allo webhook test vector, recipe-constructed from Allo's official
+    /// webhook signature docs
+    /// (<https://help.withallo.com/en/v2/api-reference/webhooks/verifying-signatures>):
+    /// they state that every delivery carries the canonical
+    /// `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`,
+    /// space-delimited during rotation) headers, that the signed content is the
+    /// string `{webhook-id}.{webhook-timestamp}.{raw_body}`, that the signing
+    /// secret has the `whsec_<base64key>` format with the prefix stripped and
+    /// the remainder base64-decoded for the HMAC-SHA256 key, and that a ±5-minute
+    /// replay window applies — the exact Standard Webhooks construction this
+    /// module implements. Allo publishes no byte-verifiable worked example, so
+    /// this vector is built per §5.1's recipe fallback: the `webhook-id`
+    /// (`msg_2NfDKEm9sF8xK3pQr1Zt`) and `webhook-timestamp` (`1710510600`) are
+    /// the docs' own worked-header example values, the signed body is the docs'
+    /// documented `call.completed` event payload
+    /// (<https://help.withallo.com/en/integrations/webhooks>), keyed by the
+    /// reference suite's public test key ([`SECRET`], the key the official
+    /// vectors above pin), and cross-checked in two independent HMAC-SHA256
+    /// implementations.
+    #[test]
+    fn official_allo_vector_verifies() {
+        let payload = br#"{"topic":"call.completed","version":"2.0","timestamp":"2025-03-15T14:45:00.000Z","data":{"id":"cll_2NfDKEm9sF8xK3pQr1Zt","from_number":"+33612345678","to":"+33112345678","type":"INBOUND","result":"ANSWERED","summary":"Customer called about a billing question.","recording_url":"https://storage.withallo.com/recordings/abc123.mp3"}}"#;
+        let id = "msg_2NfDKEm9sF8xK3pQr1Zt";
+        let timestamp: u64 = 1_710_510_600;
+        let signature = "8ZfIiEY4mAl+k+dr24rQbGjrfrmC5wlq21ruf7BPwO0=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Allo vector, with one base64 character of the signature
+    /// flipped: the documented construction plus a wrong-but-well-formed
+    /// signature must fail closed (negative §5.2 case).
+    #[test]
+    fn official_allo_vector_negative_flip_fails() {
+        let payload = br#"{"topic":"call.completed","version":"2.0","timestamp":"2025-03-15T14:45:00.000Z","data":{"id":"cll_2NfDKEm9sF8xK3pQr1Zt","from_number":"+33612345678","to":"+33112345678","type":"INBOUND","result":"ANSWERED","summary":"Customer called about a billing question.","recording_url":"https://storage.withallo.com/recordings/abc123.mp3"}}"#;
+        let id = "msg_2NfDKEm9sF8xK3pQr1Zt";
+        let timestamp: u64 = 1_710_510_600;
+        let flipped = "9ZfIiEY4mAl+k+dr24rQbGjrfrmC5wlq21ruf7BPwO0=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Allo vector with the raw body mutated after signing must fail
+    /// (tamper §5.3 case).
+    #[test]
+    fn official_allo_vector_tampered_body_fails() {
+        let payload = br#"{"topic":"call.completed","version":"2.0","timestamp":"2025-03-15T14:45:00.000Z","data":{"id":"cll_2NfDKEm9sF8xK3pQr1Zt","from_number":"+33612345678","to":"+33112345678","type":"INBOUND","result":"ANSWERED","summary":"Customer called about a billing question.","recording_url":"https://storage.withallo.com/recordings/abc124.mp3"}}"#;
+        let id = "msg_2NfDKEm9sF8xK3pQr1Zt";
+        let timestamp: u64 = 1_710_510_600;
+        let signature = "8ZfIiEY4mAl+k+dr24rQbGjrfrmC5wlq21ruf7BPwO0=";
         assert_eq!(
             verify_with(
                 payload,

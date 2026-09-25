@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Provider::from_str` now also accepts `"allo"`** for
+  [`Provider::StandardWebhooks`], matching the brand name of another signer of
+  the scheme: Allo's official webhook signature docs state that every delivery
+  carries the canonical `webhook-id`/`webhook-timestamp`/`webhook-signature`
+  (`v1,<base64>`, space-delimited during rotation) headers, that the signed
+  content is the string `{webhook-id}.{webhook-timestamp}.{raw_body}`, that
+  the signing secret has the `whsec_<base64key>` format with the prefix
+  stripped and the remainder base64-decoded for the HMAC-SHA256 key, and that
+  a ±5-minute replay window applies
+  (<https://help.withallo.com/en/v2/api-reference/webhooks/verifying-signatures>) —
+  the exact Standard Webhooks construction this provider implements. Config
+  files that name the provider by the sender's brand — `provider: allo` — now
+  parse to [`Provider::StandardWebhooks`] instead of erroring. (Alias accepted
+  case-insensitively, like every other spelling. Allo publishes no byte-exact
+  body/secret pair, so the test vector is recipe-built per `spec.md` §5.1 from
+  their documented construction — the `webhook-id` and `webhook-timestamp`
+  from their docs' worked header example and a body shaped like their
+  documented `call.completed` event payload — and cross-checked in two
+  independent HMAC implementations. Sources:
+  <https://help.withallo.com/en/v2/api-reference/webhooks/verifying-signatures>,
+  <https://help.withallo.com/en/integrations/webhooks>.)
 - **`Provider::from_str` now also accepts `"acolad"`** for
   [`Provider::StandardWebhooks`], matching the brand name of another signer of
   the scheme: Acolad's official Public API webhook docs state that "The Public
