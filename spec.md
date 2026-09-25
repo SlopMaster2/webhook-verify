@@ -2916,6 +2916,20 @@ ambiguity).
   publishes no byte-verifiable worked example, so the vector suite uses the
   §5.1 recipe-built fallback pinned to the construction above with a body
   shaped like its documented `project.delivery_complete` lifecycle event.
+  Allo's official webhook signature docs state that every delivery carries the
+  canonical `webhook-id`/`webhook-timestamp`/`webhook-signature` (`v1,<base64>`,
+  space-delimited during rotation) headers, that the signed content is the
+  string `{webhook-id}.{webhook-timestamp}.{raw_body}`, that the signing
+  secret has the `whsec_<base64key>` format with the prefix stripped and the
+  remainder base64-decoded for the HMAC-SHA256 key, and that a ±5-minute
+  replay window applies (source:
+  <https://help.withallo.com/en/v2/api-reference/webhooks/verifying-signatures>);
+  Allo publishes no byte-verifiable worked example, so the vector suite uses
+  the §5.1 recipe-built fallback pinned to the construction above — the
+  `webhook-id` (`msg_2NfDKEm9sF8xK3pQr1Zt`) and `webhook-timestamp`
+  (`1710510600`) from its docs' worked header example and a body shaped
+  exactly like its documented `call.completed` event payload (source:
+  <https://help.withallo.com/en/integrations/webhooks>).
   This is a growing list of adopters — implementing this once covers all of them.
 
 ---
