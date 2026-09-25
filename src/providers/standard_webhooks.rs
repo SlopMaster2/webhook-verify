@@ -4,7 +4,7 @@
 //! Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip,
 //! Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona,
 //! Polar, Helcim, 360Learning, Celitech, Natural, Origami, Parallel,
-//! Openlayer, ...).
+//! Openlayer, Acolad, ...).
 //!
 //! Scheme, per the Standard Webhooks specification
 //! (<https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md>)
@@ -1057,6 +1057,85 @@ mod tests {
         let id = "wh_3fa85f64-5717-4562-b3fc-2c963f66afa6";
         let timestamp: u64 = 1_768_991_400;
         let signature = "0nqGOVJur0CcJ7FioshrSPWLrLah28iLm/cbCTw7oB0=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// Acolad webhook test vector, recipe-constructed from Acolad's official
+    /// Public API webhook docs
+    /// (<https://eu1.anypoint.mulesoft.com/exchange/portals/acolad/24e64f00-e5a9-4989-a410-e8cc1c143297/public-x-api/minor/2.2/pages/4u7-it6/Webhooks/>):
+    /// they state that "The Public API uses a webhook service called Svix" to
+    /// deliver `project.*` lifecycle events, that receivers are "strongly
+    /// recommended" to verify every delivery, and that "Svix provides a number
+    /// of libraries to easily verify events" plus manual-verification
+    /// instructions (the Svix scheme this section documents: `svix-id`/
+    /// `svix-timestamp`/`svix-signature` or the canonical `webhook-*` headers,
+    /// an HMAC-SHA256 over `{id}.{timestamp}.{raw_body}` keyed by the
+    /// `whsec_`-prefixed, base64-decoded signing secret, and a ±5-minute replay
+    /// window). Acolad publishes no byte-verifiable worked example, so this
+    /// vector is built per §5.1's recipe fallback from a body shaped like the
+    /// documented `project.delivery_complete` lifecycle event, keyed by the
+    /// reference suite's public test key ([`SECRET`], the key the official
+    /// vectors above pin), and cross-checked in two independent HMAC-SHA256
+    /// implementations.
+    #[test]
+    fn official_acolad_vector_verifies() {
+        let payload = br#"{"type":"event.webhook","data":{"type":"project.delivery_complete","projectId":"4f6d8c50-2d7e-4a9b-8c1a-7e3f9d2b5f11","clientReference":"ACME-ORD-2026","name":"ACME website launch","status":"delivery_complete","targetLanguages":["en-US","fr-FR"],"createdAt":"2026-01-21T10:30:00Z"}}"#;
+        let id = "msg_4f6d8c50-2d7e-4a9b-8c1a-7e3f9d2b5f11";
+        let timestamp: u64 = 1_768_991_400;
+        let signature = "ItOU1VJVrtgfQgzJsbA8I4h7E16rwNU4jbyHwyTjfu4=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{signature}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    /// The same Acolad vector, with one base64 character of the signature
+    /// flipped: the documented construction plus a wrong-but-well-formed
+    /// signature must fail closed (negative §5.2 case).
+    #[test]
+    fn official_acolad_vector_negative_flip_fails() {
+        let payload = br#"{"type":"event.webhook","data":{"type":"project.delivery_complete","projectId":"4f6d8c50-2d7e-4a9b-8c1a-7e3f9d2b5f11","clientReference":"ACME-ORD-2026","name":"ACME website launch","status":"delivery_complete","targetLanguages":["en-US","fr-FR"],"createdAt":"2026-01-21T10:30:00Z"}}"#;
+        let id = "msg_4f6d8c50-2d7e-4a9b-8c1a-7e3f9d2b5f11";
+        let timestamp: u64 = 1_768_991_400;
+        let flipped = "JtOU1VJVrtgfQgzJsbA8I4h7E16rwNU4jbyHwyTjfu4=";
+        assert_eq!(
+            verify_with(
+                payload,
+                id,
+                &format!("v1,{flipped}"),
+                &timestamp.to_string(),
+                &Secret::new(SECRET),
+                clocked_at(timestamp, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    /// The same Acolad vector with the raw body mutated after signing must
+    /// fail (tamper §5.3 case).
+    #[test]
+    fn official_acolad_vector_tampered_body_fails() {
+        let payload = br#"{"type":"event.webhook","data":{"type":"project.delivery_complete","projectId":"4f6d8c50-2d7e-4a9b-8c1a-7e3f9d2b5f11","clientReference":"ACME-ORD-2026","name":"ACME website launch (updated)","status":"delivery_complete","targetLanguages":["en-US","fr-FR"],"createdAt":"2026-01-21T10:30:00Z"}}"#;
+        let id = "msg_4f6d8c50-2d7e-4a9b-8c1a-7e3f9d2b5f11";
+        let timestamp: u64 = 1_768_991_400;
+        let signature = "ItOU1VJVrtgfQgzJsbA8I4h7E16rwNU4jbyHwyTjfu4=";
         assert_eq!(
             verify_with(
                 payload,

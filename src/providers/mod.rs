@@ -663,7 +663,7 @@ impl fmt::Display for Provider {
 /// `"liveblocks"`, `"flip"`, `"replicate"`, `"inai"`, `"drata"`, `"nash"`,
 /// `"render"`, `"yoco"`, `"novu"`, `"crossmint"`, `"daytona"`, `"polar"`,
 /// `"helcim"`, `"celitech"`, `"360learning"`, `"natural"`, `"origami"`,
-/// `"parallel"`, and `"openlayer"` all parse to it.
+/// `"parallel"`, `"openlayer"`, and `"acolad"` all parse to it.
 /// Both header spellings are accepted in real deliveries: the canonical
 /// `webhook-id`/`webhook-timestamp`/`webhook-signature` names or the
 /// Svix-branded aliases `svix-id`/`svix-timestamp`/`svix-signature` (an
@@ -941,6 +941,14 @@ impl fmt::Display for Provider {
 /// window should be rejected against replay — so Openlayer is a Standard
 /// Webhooks sender and `openlayer` is accepted as a brand alias for this
 /// provider.
+/// Acolad's official Public API webhook docs state that it "uses a webhook
+/// service called Svix" to deliver events, that receivers "strongly
+/// recommended" verify every delivery, and that "Svix provides a number of
+/// libraries to easily verify events" plus manual-verification instructions
+/// (sources: <https://eu1.anypoint.mulesoft.com/exchange/portals/acolad/24e64f00-e5a9-4989-a410-e8cc1c143297/public-x-api/minor/2.2/pages/4u7-it6/Webhooks/>
+/// and the Svix scheme those pages defer to, <https://docs.svix.com/receiving/verifying-payloads/how-manual>)
+/// — Svix-hosted senders sign with the exact Standard Webhooks construction
+/// this provider implements, so `acolad` is accepted as a brand alias for it.
 /// [`Provider::Mandrill`] additionally accepts its current documented brand
 /// name, `"mailchimp"`/`"mailchimp transactional"`/`"mailchimp-transactional"`
 /// (Mailchimp Transactional is the name the docs/README use for the
@@ -1101,7 +1109,8 @@ impl core::str::FromStr for Provider {
                 || n.eq_ignore_ascii_case("natural")
                 || n.eq_ignore_ascii_case("origami")
                 || n.eq_ignore_ascii_case("parallel")
-                || n.eq_ignore_ascii_case("openlayer") =>
+                || n.eq_ignore_ascii_case("openlayer")
+                || n.eq_ignore_ascii_case("acolad") =>
             {
                 Ok(Provider::StandardWebhooks)
             }
@@ -1125,7 +1134,7 @@ impl fmt::Display for ProviderParseError {
              or `standardwebhooks` (or `standard webhooks`) \
              (case-insensitive; hyphenated/space-separated multi-word spellings like `standard-webhooks` or \
              `mailchimp-transactional` are also accepted, as are the brand aliases `mailchimp` (for `mandrill`), \
-             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning`, `natural`, `origami`, `parallel`, `openlayer` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
+             `svix`, `resend`, `messagebird`, `bird`, `gitlab`, `clerk`, `openai`, `warp`, `loops`, `anthropic`, `gemini`, `brex`, `bigcommerce`, `lithic`, `incident.io`/`incident`, `supabase`, `etsy`, `sardine`, `dodo`/`dodopayments`, `zapier`, `vanta`, `safetykit`, `prescience`, `taskrabbit`, `liveblocks`, `flip`, `replicate`, `inai`, `drata`, `nash`, `render`, `yoco`, `novu`, `crossmint`, `daytona`, `polar`, `helcim`, `celitech`, `360learning`, `natural`, `origami`, `parallel`, `openlayer`, `acolad` (for `standardwebhooks`)); `custom` requires a `CustomScheme` and must be built directly",
         )
     }
 }
@@ -2246,6 +2255,9 @@ mod tests {
             ("openlayer", Provider::StandardWebhooks),
             ("Openlayer", Provider::StandardWebhooks),
             ("OPENLAYER", Provider::StandardWebhooks),
+            ("acolad", Provider::StandardWebhooks),
+            ("Acolad", Provider::StandardWebhooks),
+            ("ACOLAD", Provider::StandardWebhooks),
             ("twitter", Provider::X),
             ("x twitter", Provider::X),
             ("x-twitter", Provider::X),
@@ -2312,7 +2324,7 @@ mod tests {
         // `openai`/`warp`/`loops`/`anthropic`/`gemini`/`brex`/`bigcommerce`/
         // `lithic`/`incident.io`/`incident`/`supabase`/`etsy`/`sardine`/
         // `dodo`/`dodopayments`/`zapier`/`vanta`/`safetykit`/`prescience`/
-        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning`/`natural`/`origami`/`parallel`/`openlayer` ↔ StandardWebhooks); the
+        // `taskrabbit`/`liveblocks`/`flip`/`replicate`/`inai`/`drata`/`nash`/`render`/`yoco`/`novu`/`crossmint`/`daytona`/`polar`/`helcim`/`celitech`/`360learning`/`natural`/`origami`/`parallel`/`openlayer`/`acolad` ↔ StandardWebhooks); the
         // message names them too so an operator who typed a rejected alias
         // sees it echoed back, instead of only the canonical spellings.
         for alias in [
@@ -2362,6 +2374,7 @@ mod tests {
             "origami",
             "parallel",
             "openlayer",
+            "acolad",
         ] {
             assert!(
                 message.contains(&format!("`{alias}`")),
