@@ -3062,7 +3062,7 @@ mod tests {
         // turn the scan list into a `HeaderName` via `HeaderName::from_bytes`,
         // and an unparseable name there is **indistinguishable from a smuggled
         // duplicate**: `MultiValueHeaders::get_all_bytes` returns `None` and
-        // `conflicting_signature_header` reports the header as ambiguous
+        // `has_conflicting_duplicates` reports the header as ambiguous
         // (pinned by `unparseable_scan_name_reads_as_ambiguous` below). So a
         // single typo'd constant — a space, a stray `\r`, a non-ASCII byte —
         // does not merely weaken the check, it makes the adapters reject
@@ -3101,7 +3101,7 @@ mod tests {
     #[cfg(any(feature = "tower", feature = "actix"))]
     #[test]
     fn unparseable_scan_name_reads_as_ambiguous() {
-        use crate::core::adapter_utils::conflicting_signature_header;
+        use crate::core::adapter_utils::has_conflicting_duplicates;
 
         // A well-formed, single-valued request: nothing here is ambiguous.
         let mut headers = ::http::HeaderMap::new();
@@ -3109,19 +3109,13 @@ mod tests {
             "X-Hub-Signature-256",
             ::http::HeaderValue::from_static("sha256=ab"),
         );
-        assert_eq!(
-            conflicting_signature_header(&headers, &["X-Hub-Signature-256"]),
-            None
-        );
+        assert!(!has_conflicting_duplicates(&headers, "X-Hub-Signature-256"));
 
         // The same request scanned under a name the header map cannot parse
         // (a space is not a `tchar`) must be reported ambiguous rather than
         // passing the scan — the "reject everything" behavior that makes a
         // typo'd constant an outage instead of a silent hole.
-        assert_eq!(
-            conflicting_signature_header(&headers, &["X-Hub-Signature 256"]),
-            Some("X-Hub-Signature 256")
-        );
+        assert!(has_conflicting_duplicates(&headers, "X-Hub-Signature 256"));
         // ...and so must a parseable name, when the request really does carry
         // it twice with differing values — the actual smuggling case the §4.4
         // check exists to catch.
@@ -3134,10 +3128,10 @@ mod tests {
             "X-Hub-Signature-256",
             ::http::HeaderValue::from_static("sha256=cd"),
         );
-        assert_eq!(
-            conflicting_signature_header(&duplicated, &["X-Hub-Signature-256"]),
-            Some("X-Hub-Signature-256")
-        );
+        assert!(has_conflicting_duplicates(
+            &duplicated,
+            "X-Hub-Signature-256"
+        ));
         // Identical duplicates are not ambiguous: nothing is being smuggled.
         let mut identical = ::http::HeaderMap::new();
         identical.append(
@@ -3148,10 +3142,10 @@ mod tests {
             "X-Hub-Signature-256",
             ::http::HeaderValue::from_static("sha256=ab"),
         );
-        assert_eq!(
-            conflicting_signature_header(&identical, &["X-Hub-Signature-256"]),
-            None
-        );
+        assert!(!has_conflicting_duplicates(
+            &identical,
+            "X-Hub-Signature-256"
+        ));
     }
 
     /// Every name-constructible [`Provider`] variant, in declaration order.

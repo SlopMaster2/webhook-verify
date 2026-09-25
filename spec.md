@@ -438,15 +438,20 @@ the SDK and reference examples disambiguate its details.
   whichever order) it names is what was signed. Every name it lists must be
   present in the request; a list referencing an absent header fails closed as
   `MalformedHeader`.
-- Ambiguity scan carve-out: because the signed-header list is self-describing,
-  the framework adapters' duplicate-ambiguity scan (§4.4) statically covers
-  only the three fixed headers (`x-contentful-signature`,
-  `x-contentful-signed-headers`, `x-contentful-timestamp`). Additional headers
-  the list names at delivery time are read first-match and folded into the
-  canonical string; duplicate-conflicting values in *those* are not detected
-  by the adapter — the same carve-out granted to `CustomScheme`'s closure-read
-  headers. Verification always uses the first value, matching what
-  `http`/`actix` handlers read via `.get()`.
+- Ambiguity scan: the framework adapters' duplicate-ambiguity scan (§4.4)
+  covers the three fixed headers (`x-contentful-signature`,
+  `x-contentful-signed-headers`, `x-contentful-timestamp`) *and* follows the
+  self-describing `x-contentful-signed-headers` list into the request, so a
+  header the delivery declares as signed is scanned exactly like a fixed one.
+  A conflicting duplicate of a listed header is rejected as `MalformedHeader`
+  on `x-contentful-signed-headers` — the request-controlled header that named
+  it, and the only name available for the error payload's `&'static str`.
+  A header the list does *not* name is not signing material and is not
+  scanned. Names that fail to parse as HTTP field names are treated as
+  ambiguous (fail closed); empty entries are skipped, since `verify()` rejects
+  a list containing one on its own. The residual carve-out is
+  `CustomScheme`'s closure-read headers, which no caller-declared list
+  enumerates.
 - Path encoding: the docs' pseudo-code url-encodes only the *query* portion
   (`query = urlEncode(query)`), with the pathname used as its UTF-8 bytes.
   The crate implements exactly that: the query's percent-encoding uses
@@ -2982,21 +2987,23 @@ ambiguity).
    `tower` and `actix` features) check the raw header map against the
    provider's scheme-relevant signature headers before verifying; identical
    repeats are not ambiguous and verify normally. For built-in providers the
-   scan covers every header the scheme declares — with one exception:
-   Contentful's signed-header list (`x-contentful-signed-headers`) is
-   **self-describing** and arrives with the request, so the additional
-   headers it names at delivery time (e.g. `content-type`,
-   `x-contentful-topic`) cannot be known statically and are not
-   ambiguity-scanned. Duplicate-conflicting values in those
-   dynamically-named headers are folded into the signed string first-match
-   and are **not** detected by the adapter — the same carve-out `Custom`
-   schemes below get, and the reason the Contentful row (§3) documents it
-   (Contentful's signer always emits the list, and an attacker who can forge
-   a fresh signature over the first value already controls the request
-   stream). For `Custom` providers the scan covers only `signature_header` and
-   `timestamp_header` — if the user's `signed_string` closure reads
+   scan covers every header the scheme declares. One scheme declares its
+   headers in the request rather than in a constant: Contentful's
+   `x-contentful-signed-headers` list is **self-describing**, so the adapters
+   parse the list and scan the headers it names alongside the three fixed
+   ones. A conflicting duplicate of a listed header (e.g. `content-type`,
+   `x-contentful-topic`) is rejected before any signature work, reported
+   against `x-contentful-signed-headers` because that is the request-controlled
+   header that named it and the error payload carries a `&'static str`. Headers
+   the list does not name are not signing material and are not scanned; a name
+   that fails to parse as an HTTP field name is treated as ambiguous (fail
+   closed), while an empty entry is skipped and left for `verify()` to reject
+   on the list header. This closes the previously documented Contentful
+   carve-out (see §3, Contentful row). The one carve-out that remains is
+   `Custom` providers: the scan covers only `signature_header` and
+   `timestamp_header`, and if the user's `signed_string` closure reads
    additional headers, duplicates in those are **not** detected (see
-   `CustomScheme` docs).
+   `CustomScheme` docs) — nothing in the request enumerates them.
 5. **No panics on attacker-controlled input.** Every parsing path
    (`base64::decode`, `hex::decode`, header splitting, integer parsing of
    timestamps) must return `Result`, not `unwrap()`/`expect()`, and this is

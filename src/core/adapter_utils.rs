@@ -5,6 +5,15 @@
 //! variants are added.
 
 use super::VerifyError;
+use crate::providers::{Provider, signature_header_names};
+
+/// Contentful's self-describing signed-header list: the header whose *value*
+/// names the other headers folded into the canonical string
+/// (`spec.md` §3, Contentful row).
+///
+/// Unlike every other provider's header set, these cannot live in
+/// `signature_header_names`: they are only known once the request is in hand.
+const CONTENTFUL_SIGNED_HEADERS_HEADER: &str = "x-contentful-signed-headers";
 
 /// Raw, multi-value header access for the framework adapters.
 ///
@@ -13,7 +22,7 @@ use super::VerifyError;
 /// adapter layer. Adapters still need every value of a header to reject
 /// conflicting duplicates, and they run on two different `http` versions
 /// (tower/axum on `http` 1.x, actix-web 4 on `http` 0.2), so this private
-/// trait unifies the multi-value iteration [`conflicting_signature_header`]
+/// trait unifies the multi-value iteration [`has_conflicting_duplicates`]
 /// needs across both. Keeping the implementations here — rather than one
 /// copy of the scan per adapter — is what guarantees a hardening applied to
 /// one framework's ambiguity check cannot be skipped for the other.
@@ -72,29 +81,94 @@ impl MultiValueHeaders for actix_web::http::header::HeaderMap {
     }
 }
 
-/// Returns the name of the first header in `names` that occurs in `headers`
-/// more than once with *differing* values — the ambiguity `spec.md` §4.4
-/// requires rejecting — or `None` when none is ambiguous.
+/// Returns true when `name` occurs in `headers` more than once with *differing*
+/// values — the ambiguity `spec.md` §4.4 requires rejecting — or false when it
+/// occurs at most once (or not at all).
 ///
 /// Values are compared as raw bytes: the scan must reject two lines carrying
 /// different bytes, and opaque-byte values that could never parse as a
 /// signature are still ambiguous when duplicated with differing bytes.
 ///
 /// Static header-name constants always parse, so the unparseable-name arm is
-/// unreachable in practice and simply fails closed (reported as ambiguous).
-pub(crate) fn conflicting_signature_header<H: MultiValueHeaders + ?Sized>(
+/// unreachable for the names `signature_header_names` returns and simply fails
+/// closed (reported as ambiguous). It *is* reachable for the names a request
+/// supplies (Contentful's signed-header list), and failing closed there is
+/// still the only safe answer: such a name can never be verified against.
+///
+/// `pub(crate)` so each adapter's tests can pin the behavior of *its own*
+/// `MultiValueHeaders` impl (the two `http` versions) against this predicate,
+/// rather than only through a provider's static header list.
+pub(crate) fn has_conflicting_duplicates<H: MultiValueHeaders + ?Sized>(
     headers: &H,
-    names: &[&'static str],
+    name: &str,
+) -> bool {
+    let Some(mut values) = headers.get_all_bytes(name) else {
+        return true;
+    };
+    let Some(first) = values.next() else {
+        return false;
+    };
+    values.any(|value| *value != *first)
+}
+
+/// Returns the name of the signature header of `provider` that is ambiguous in
+/// `headers`, or `None` when none is.
+///
+/// This is the single entry point the framework adapters use, so the
+/// `spec.md` §4.4 ambiguity contract cannot be applied to one adapter and
+/// skipped for the other. It has two halves:
+///
+/// 1. the **static** scan over [`signature_header_names`], which covers every
+///    header a provider's scheme declares for all built-in providers; and
+/// 2. a **dynamic** scan for [`Provider::Contentful`], whose
+///    `x-contentful-signed-headers` value is self-describing — the headers it
+///    names are folded into the canonical string, so a conflicting duplicate of
+///    any of them is just as ambiguous as a duplicate of the signature header
+///    itself. The list is in the request, so the adapter can enumerate it
+///    instead of giving up on those headers (which is the remaining carve-out,
+///    for [`Provider::Custom`], whose `signed_string` closure reads headers
+///    nothing outside the closure can enumerate).
+///
+/// A rejection of the dynamic half is reported against
+/// `x-contentful-signed-headers` — the request-controlled header that *named*
+/// the ambiguous value, and the only name available as the `&'static str` the
+/// [`VerifyError::MalformedHeader`] payload requires.
+pub(crate) fn ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
+    headers: &H,
+    provider: &Provider,
 ) -> Option<&'static str> {
-    names.iter().copied().find(|name| {
-        let Some(mut values) = headers.get_all_bytes(name) else {
-            return true;
-        };
-        let Some(first) = values.next() else {
-            return false;
-        };
-        values.any(|value| *value != *first)
-    })
+    signature_header_names(provider)
+        .iter()
+        .copied()
+        .find(|name| has_conflicting_duplicates(headers, name))
+        .or_else(|| dynamically_named_ambiguity(headers, provider))
+}
+
+/// The dynamic half of [`ambiguous_signature_header`]: headers the provider's
+/// scheme reads that are enumerated by the request itself.
+///
+/// Today only Contentful has any, and it has exactly one source — the
+/// self-describing `x-contentful-signed-headers` list. A list that is absent or
+/// not decodable as visible ASCII contributes nothing here: `verify()` then
+/// reports it missing or malformed on its own, so this scan never has to guess
+/// at a shape it cannot read.
+fn dynamically_named_ambiguity<H: MultiValueHeaders + ?Sized>(
+    headers: &H,
+    provider: &Provider,
+) -> Option<&'static str> {
+    if !matches!(provider, Provider::Contentful) {
+        return None;
+    }
+    let list = headers.get_first_str(CONTENTFUL_SIGNED_HEADERS_HEADER)?;
+    // Empty names are skipped rather than reported here: `verify()` rejects a
+    // list containing one as `MalformedHeader` on the list header itself, and
+    // an empty name can never match a real header anyway.
+    let ambiguous = list
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .any(|name| has_conflicting_duplicates(headers, name));
+    ambiguous.then_some(CONTENTFUL_SIGNED_HEADERS_HEADER)
 }
 
 /// The request's declared `Content-Length`, when present and decodable.
@@ -212,6 +286,199 @@ mod tests {
             status_of(VerifyError::MissingContext { reason: "boom" }),
             500
         );
+    }
+
+    /// Contentful's self-describing signed-header list: the ambiguity scan must
+    /// follow it into the request, not stop at the three fixed headers.
+    ///
+    /// Mirrors the `http` 1.x header map; `src/actix.rs` pins the actix
+    /// (`http` 0.2) side of the same helper end-to-end.
+    #[cfg(feature = "http")]
+    mod contentful_dynamic_scan {
+        use super::super::ambiguous_signature_header;
+        use crate::Provider;
+
+        const LIST: &str = "x-contentful-signed-headers";
+
+        fn headers_with(pairs: &[(&str, &str)]) -> ::http::HeaderMap {
+            let mut headers = ::http::HeaderMap::new();
+            for (name, value) in pairs {
+                headers.append(
+                    ::http::header::HeaderName::from_bytes(name.as_bytes())
+                        .unwrap_or_else(|_| panic!("{name:?} must be a valid field name")),
+                    ::http::HeaderValue::from_bytes(value.as_bytes())
+                        .unwrap_or_else(|_| panic!("{value:?} must be a valid header value")),
+                );
+            }
+            headers
+        }
+
+        /// A well-formed Contentful delivery: the list names `content-type` and
+        /// `x-contentful-topic`, each present exactly once.
+        fn clean() -> ::http::HeaderMap {
+            headers_with(&[
+                ("x-contentful-signature", "ab"),
+                (
+                    LIST,
+                    "content-type,x-contentful-timestamp,x-contentful-topic",
+                ),
+                ("x-contentful-timestamp", "1704391525000"),
+                ("content-type", "application/json"),
+                ("x-contentful-topic", "ContentManagement.Entry.publish"),
+            ])
+        }
+
+        #[test]
+        fn clean_delivery_is_not_ambiguous() {
+            assert_eq!(
+                ambiguous_signature_header(&clean(), &Provider::Contentful),
+                None
+            );
+        }
+
+        #[test]
+        fn conflicting_duplicate_of_a_listed_header_is_rejected() {
+            // The whole point of the dynamic half: `content-type` is folded into
+            // the canonical string, so two differing copies of it are exactly as
+            // ambiguous as two copies of the signature header. Reported against
+            // the list header, the only name the error payload can carry.
+            let mut headers = clean();
+            headers.append(
+                "content-type",
+                ::http::HeaderValue::from_static("text/plain"),
+            );
+            assert_eq!(
+                ambiguous_signature_header(&headers, &Provider::Contentful),
+                Some(LIST)
+            );
+
+            // Any position in the list is covered, not just the first name.
+            let mut last = clean();
+            last.append(
+                "x-contentful-topic",
+                ::http::HeaderValue::from_static("ContentManagement.Entry.unpublish"),
+            );
+            assert_eq!(
+                ambiguous_signature_header(&last, &Provider::Contentful),
+                Some(LIST)
+            );
+        }
+
+        #[test]
+        fn identical_duplicate_of_a_listed_header_is_not_ambiguous() {
+            // Nothing is being smuggled: two identical values resolve to the
+            // same header everywhere, so the delivery still verifies.
+            let mut headers = clean();
+            headers.append(
+                "content-type",
+                ::http::HeaderValue::from_static("application/json"),
+            );
+            assert_eq!(
+                ambiguous_signature_header(&headers, &Provider::Contentful),
+                None
+            );
+        }
+
+        #[test]
+        fn duplicate_of_an_unlisted_header_is_not_rejected() {
+            // Only headers the delivery *declares* as signed are scanned. An
+            // unlisted header is not signing material, so ambiguity there is
+            // out of this check's scope.
+            let mut headers = clean();
+            headers.append("x-unrelated", ::http::HeaderValue::from_static("a"));
+            headers.append("x-unrelated", ::http::HeaderValue::from_static("b"));
+            assert_eq!(
+                ambiguous_signature_header(&headers, &Provider::Contentful),
+                None
+            );
+        }
+
+        #[test]
+        fn a_list_naming_an_absent_header_does_not_reject() {
+            // `verify()` reports a list referencing a header the request does
+            // not carry as `MalformedHeader`; the ambiguity scan must not
+            // pre-empt that with a different diagnosis for the same request.
+            let headers = headers_with(&[
+                ("x-contentful-signature", "ab"),
+                (LIST, "content-type,x-contentful-absent"),
+                ("content-type", "application/json"),
+            ]);
+            assert_eq!(
+                ambiguous_signature_header(&headers, &Provider::Contentful),
+                None
+            );
+        }
+
+        #[test]
+        fn empty_names_in_the_list_are_skipped_not_scanned() {
+            // An empty name can never match a real header, and `verify()`
+            // rejects the list shape itself; scanning it would report an
+            // ambiguity the request does not have.
+            let headers = headers_with(&[
+                (LIST, "content-type,,x-contentful-topic"),
+                ("content-type", "application/json"),
+            ]);
+            assert_eq!(
+                ambiguous_signature_header(&headers, &Provider::Contentful),
+                None
+            );
+        }
+
+        #[test]
+        fn missing_or_undecodable_list_contributes_nothing() {
+            // No list at all: `verify()` reports `MissingHeader` on its own.
+            assert_eq!(
+                ambiguous_signature_header(
+                    &headers_with(&[("x-contentful-signature", "ab")]),
+                    &Provider::Contentful
+                ),
+                None
+            );
+            // A non-visible-ASCII list value is unreadable to both this scan and
+            // `verify()`, which reports it as a malformed/missing header. The
+            // scan must not guess at the names it cannot read.
+            let mut headers = clean();
+            headers.insert(
+                LIST,
+                ::http::HeaderValue::from_bytes(b"content-type,\xff")
+                    .unwrap_or_else(|_| panic!("0xFF is a permitted header-value byte")),
+            );
+            assert_eq!(
+                ambiguous_signature_header(&headers, &Provider::Contentful),
+                None
+            );
+        }
+
+        #[test]
+        fn static_scan_still_applies_to_contentful_and_the_dynamic_half_is_contentful_only() {
+            // The static half is unchanged: a conflicting duplicate of any of
+            // the three fixed headers is still caught, and reported against
+            // that header rather than the list.
+            let mut headers = clean();
+            headers.append(
+                "x-contentful-timestamp",
+                ::http::HeaderValue::from_static("1704391525001"),
+            );
+            assert_eq!(
+                ambiguous_signature_header(&headers, &Provider::Contentful),
+                Some("x-contentful-timestamp")
+            );
+
+            // Another provider's delivery carrying a Contentful-shaped list must
+            // not be scanned through it — the list is not signing material for
+            // any other scheme.
+            let mut github = headers_with(&[("x-hub-signature-256", "sha256=ab")]);
+            github.insert(LIST, ::http::HeaderValue::from_static("content-type"));
+            github.append(
+                "content-type",
+                ::http::HeaderValue::from_static("application/json"),
+            );
+            github.append(
+                "content-type",
+                ::http::HeaderValue::from_static("text/plain"),
+            );
+            assert_eq!(ambiguous_signature_header(&github, &Provider::GitHub), None);
+        }
     }
 
     #[cfg(feature = "http")]

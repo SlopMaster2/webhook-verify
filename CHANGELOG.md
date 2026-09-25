@@ -1531,6 +1531,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Adapters: Contentful's dynamically named signed headers are now
+  ambiguity-scanned.** `spec.md` §4.4 requires rejecting any header present
+  more than once with different values, and the `tower`/`actix` adapters
+  applied that to each provider's statically known signature headers. Contentful
+  was the documented exception: `x-contentful-signed-headers` is
+  **self-describing**, so the headers a delivery declares as signed
+  (`content-type` and `x-contentful-topic` in Contentful's own deliveries) were
+  folded into the canonical string first-match, with no check that a second,
+  differing copy of one of them had not been smuggled alongside. A request that
+  pinned a conflicting duplicate of a listed header was accepted on the first
+  value's signature while a downstream handler reading the same header could
+  observe the other. The shared scan helper
+  (`core::adapter_utils::ambiguous_signature_header`, so the two `http`
+  versions cannot diverge) now parses the list and scans the names it names
+  alongside the three fixed ones, reporting a conflict as `MalformedHeader` on
+  `x-contentful-signed-headers` — the request-controlled header that named it
+  and the only name the error payload's `&'static str` allows. Preserved:
+  identical repeats still verify, headers the list does *not* name are not
+  scanned (they are not signing material), an absent or non-visible-ASCII list
+  contributes nothing and is left for `verify()` to report, and a list entry
+  that cannot parse as an HTTP field name fails closed. Verification itself is
+  untouched — this is a pre-verification rejection in the adapters only, so
+  `verify()` callers see no behavior difference. The carve-out this closes is
+  narrowed in `spec.md` §3 and §4.4 and in the Contentful module docs; the only
+  one that remains is a `CustomScheme` `signed_string` closure, whose headers
+  no request-declared list enumerates. Covered by a new
+  `core::adapter_utils` test module over the `http` 1.x map plus end-to-end
+  tower and actix tests that a locally constructed Contentful vector verifies,
+  is rejected with a conflicting duplicate of a listed header, and still
+  verifies with an identical repeat. Issue #219.
 - **Contentful: a `/` inside a query or fragment is no longer mistaken for the
   start of the request path.** `normalized_request_path` located the path by
   searching the whole post-`scheme://` remainder for the first `/`, but RFC 3986

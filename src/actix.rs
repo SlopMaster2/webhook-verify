@@ -112,11 +112,9 @@ use actix_web::{
 };
 
 use crate::core::adapter_utils::{
-    conflicting_signature_header, declared_content_length, rejection_status,
+    ambiguous_signature_header, declared_content_length, rejection_status,
 };
-use crate::{
-    HeaderMap, Provider, Secret, VerifyError, VerifyOptions, providers::signature_header_names,
-};
+use crate::{HeaderMap, Provider, Secret, VerifyError, VerifyOptions};
 
 /// Configuration used by the [`VerifiedBody`] extractor: provider, secret,
 /// and verification options.
@@ -312,9 +310,11 @@ impl FromRequest for VerifiedBody {
         };
 
         // Ambiguity check first: it needs no body bytes, so conflicting
-        // duplicates are rejected without buffering or signature work.
-        let names = signature_header_names(&config.provider);
-        if let Some(header) = conflicting_signature_header(req.headers(), &names) {
+        // duplicates are rejected without buffering or signature work. Covers
+        // the provider's static signature headers plus any header the request
+        // itself enumerates as signing material (Contentful's
+        // `x-contentful-signed-headers`) — see `spec.md` §4.4.
+        if let Some(header) = ambiguous_signature_header(req.headers(), &config.provider) {
             return Box::pin(ready(Err(WebhookVerificationError(Rejection::Verify(
                 VerifyError::MalformedHeader {
                     header,
@@ -406,6 +406,7 @@ impl HeaderMap for ActixHeaderMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::adapter_utils::has_conflicting_duplicates;
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
     // Aliased: a plain `use ..::test` would make `#[test]` resolve to the
@@ -441,6 +442,20 @@ mod tests {
     const STANDARD_WEBHOOKS_TIMESTAMP: u64 = 1_614_265_330;
     const STANDARD_WEBHOOKS_BODY: &[u8] = br#"{"test": 2432232314}"#;
     const STANDARD_WEBHOOKS_SIGNATURE: &str = "g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=";
+
+    /// A Contentful delivery whose `x-contentful-signed-headers` list names
+    /// `content-type`, `x-contentful-timestamp`, and `x-contentful-topic` —
+    /// the set Contentful's own signer emits. Locally constructed over the
+    /// documented `[method, path, headers, body].join('\n')` construction
+    /// (`spec.md` §3, Contentful row; Contentful publishes no frozen vector);
+    /// see `src/providers/contentful.rs` for the full test-vector provenance.
+    const CONTENTFUL_SECRET: &str =
+        "c4a1f2b8d3e95a7f0b6c1d8e4f2a9b3c7d0e5f1a8b4c6d2e9f3a7b1c5d8e2f60";
+    const CONTENTFUL_BODY: &[u8] = br#"{"sys":{"type":"Entry"}}"#;
+    const CONTENTFUL_TIMESTAMP: &str = "1704391525000";
+    const CONTENTFUL_UNIX: u64 = 1_704_391_525;
+    const CONTENTFUL_SIGNATURE: &str =
+        "f1562694dd6b6582839a8fbe7ad9881e5c1feb68d3206be9b49385f7c080f1d4";
 
     /// Handler echoing how many body bytes it received, so tests assert the
     /// verified bytes reach handlers byte-for-byte.
@@ -682,6 +697,66 @@ mod tests {
             .to_request();
         let res = aw_test::call_service(&app, req).await;
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn contentful_dynamically_named_header_ambiguity_is_rejected() {
+        // Contentful's `x-contentful-signed-headers` is self-describing: the
+        // headers it names are folded into the canonical string, so the
+        // ambiguity scan has to follow the list into the request rather than
+        // stopping at the three fixed headers. The signature below is valid
+        // over the *first* `content-type` and the clock is pinned to the
+        // vector's timestamp, so a 400 can only come from the ambiguity check.
+        // Mirrors the tower adapter's test of the same shape, pinning the
+        // actix (`http` 0.2) side of the shared scan.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::with_options(
+                    Provider::Contentful,
+                    Secret::new(CONTENTFUL_SECRET),
+                    crate::VerifyOptions {
+                        request_method: Some("POST".to_string()),
+                        request_url: Some(
+                            "https://example.com/webhooks/content-management".to_string(),
+                        ),
+                        clock: Some(Arc::new(FixedClock(epoch(CONTENTFUL_UNIX)))),
+                        ..crate::VerifyOptions::default()
+                    },
+                ))
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let build = |extra_content_type: Option<&'static str>| {
+            let mut builder = aw_test::TestRequest::post()
+                .insert_header(("x-contentful-signature", CONTENTFUL_SIGNATURE))
+                .insert_header((
+                    "x-contentful-signed-headers",
+                    "content-type,x-contentful-timestamp,x-contentful-topic",
+                ))
+                .insert_header(("x-contentful-timestamp", CONTENTFUL_TIMESTAMP))
+                .insert_header(("content-type", "application/json"))
+                .insert_header(("x-contentful-topic", "ContentManagement.Entry.publish"));
+            if let Some(value) = extra_content_type {
+                builder = builder.append_header(("content-type", value));
+            }
+            builder
+                .set_payload(Bytes::from_static(CONTENTFUL_BODY))
+                .to_request()
+        };
+
+        // Baseline: the delivery verifies, so the vector and the pinned clock
+        // are sound and the rejection below is attributable to the duplicate.
+        let res = aw_test::call_service(&app, build(None)).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // A conflicting duplicate of a header the list names is ambiguous and
+        // must be rejected before any signature work.
+        let res = aw_test::call_service(&app, build(Some("text/plain"))).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // An *identical* repeat is not ambiguous and still verifies.
+        let res = aw_test::call_service(&app, build(Some("application/json"))).await;
+        assert_eq!(res.status(), StatusCode::OK);
     }
 
     #[actix_web::test]
@@ -1158,7 +1233,7 @@ mod tests {
             .unwrap_or_else(|_| unreachable!("permitted"));
         headers.append(name.clone(), value.clone());
         headers.append(name, value);
-        assert!(conflicting_signature_header(&headers, &["X-Hub-Signature-256"]).is_none());
+        assert!(!has_conflicting_duplicates(&headers, "X-Hub-Signature-256"));
     }
 
     #[test]
@@ -1176,10 +1251,7 @@ mod tests {
             name,
             http::header::HeaderValue::from_static(GITHUB_SIGNATURE),
         );
-        assert_eq!(
-            conflicting_signature_header(&headers, &["X-Hub-Signature-256"]),
-            Some("X-Hub-Signature-256")
-        );
+        assert!(has_conflicting_duplicates(&headers, "X-Hub-Signature-256"));
     }
 
     #[test]
@@ -1189,10 +1261,10 @@ mod tests {
         // error arm exists precisely so attacker-supplied garbage can never
         // turn into a permissive lookup.
         let headers = ActixHeaderMap::new();
-        assert_eq!(
-            conflicting_signature_header(&headers, &["x-hub-signature-256 invalid"]),
-            Some("x-hub-signature-256 invalid")
-        );
+        assert!(has_conflicting_duplicates(
+            &headers,
+            "x-hub-signature-256 invalid"
+        ));
     }
 
     #[test]
