@@ -1480,6 +1480,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Contentful: full URLs without an explicit path preserve query strings.** A
+  URL such as `https://example.com?source=webhook` now canonicalizes its request
+  path as `/?source%3Dwebhook` instead of dropping the query, matching
+  Contentful's documented path/query split and query encoding.
 - **Contentful: bare request paths containing `://` are preserved.** A
   `VerifyOptions::request_url` value beginning with `/` is now treated as the
   bare path documented by Contentful instead of being truncated at an embedded

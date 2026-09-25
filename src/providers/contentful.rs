@@ -101,6 +101,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
+use alloc::borrow::Cow;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -326,20 +327,28 @@ fn append_signed_headers_segment(
 ///   (JavaScript `encodeURIComponent` set), with the pathname passed through
 ///   as UTF-8 bytes; with no query, nothing is re-encoded.
 fn normalized_request_path(url: &str) -> String {
-    let path_and_query: &str = if url.starts_with('/') {
-        url
+    let path_and_query = if url.starts_with('/') {
+        Cow::Borrowed(url)
     } else {
         match url.split_once("://") {
             Some((_, rest)) => match rest.find('/') {
-                Some(i) => &rest[i..],
-                None => "/",
+                Some(i) => Cow::Borrowed(&rest[i..]),
+                None => match rest.find(['?', '#']) {
+                    Some(i) => {
+                        let mut rooted = String::with_capacity(rest.len() - i + 1);
+                        rooted.push('/');
+                        rooted.push_str(&rest[i..]);
+                        Cow::Owned(rooted)
+                    }
+                    None => Cow::Borrowed("/"),
+                },
             },
-            None => url,
+            None => Cow::Borrowed(url),
         }
     };
     let path_and_query: &str = match path_and_query.split_once('#') {
         Some((path, _)) => &path_and_query[..path.len()],
-        None => path_and_query,
+        None => &path_and_query,
     };
 
     match path_and_query.split_once('?') {
@@ -503,6 +512,18 @@ mod tests {
             ),
             Err(VerifyError::SignatureMismatch)
         );
+    }
+
+    #[test]
+    fn root_url_with_query_vector_verifies() {
+        let result = verify_with(
+            BODY,
+            "72b6344cbfeaa72a18ffc9bfb490ea3e8bb5953d365b86c0194341bac7e0664d",
+            clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+            METHOD,
+            "https://www.example.com?source=webhook&v=2",
+        );
+        assert_eq!(result, Ok(()));
     }
 
     #[test]
