@@ -2519,6 +2519,81 @@ mod tests {
     }
 
     #[test]
+    fn spec_section_two_documents_every_accepted_alias() {
+        // `spec.md` §2 documents the spellings `Provider::from_str` accepts
+        // ("Case-insensitive match on the canonical Display name of each
+        // variant … plus the space-separated and hyphenated human-readable
+        // forms … Brand aliases are also accepted: …"). The canonical
+        // spellings are covered by that prose, but every *alias* has to be
+        // named literally, and the list had drifted: the Standard Webhooks
+        // adopters Helcim, CELITECH, 360Learning, Natural, Origami, Parallel,
+        // Openlayer, Acolad, Allo, and Lexe all shipped as accepted aliases
+        // (and as §3 adopter entries) without ever being added to the §2 list,
+        // so the normative contract silently under-described the parser.
+        // `AGENTS.md` §6 requires spec.md and the code not to drift, and every
+        // other hand-maintained doc surface here (the §2 enum sketch, the
+        // README/crate-doc tables, the fuzz pool) already has a guard — this
+        // pins the last one.
+        //
+        // The alias set is read out of this module's own `from_str` source
+        // rather than duplicated in a test table, so the guard cannot drift
+        // from the parser it guards. The spellings that are *canonical*
+        // rather than aliases are excluded by construction — every `Display`
+        // name (`"Lemon Squeezy"`) and every variant identifier
+        // (`LemonSqueezy`, `StandardWebhooks`), which is what §2's
+        // "case-insensitive match on the canonical Display name" prose
+        // already covers. Anything else the match arms accept is an alias and
+        // must appear as a quoted string in §2.
+        let spec = include_str!("../../spec.md");
+        let Some(start) = spec.find("impl core::str::FromStr for Provider") else {
+            panic!("spec.md §2 must keep its `FromStr` sketch");
+        };
+        let Some(end) = spec[start..].find("pub trait HeaderMap") else {
+            panic!("spec.md §2 `FromStr` sketch must precede `pub trait HeaderMap`");
+        };
+        let section = &spec[start..start + end];
+
+        let this = include_str!("mod.rs");
+        let Some(fn_start) = this.find("fn from_str(name: &str) -> Result<Self, Self::Err>") else {
+            panic!("`Provider::from_str` must keep its documented signature");
+        };
+        let Some(fn_end) = this[fn_start..].find("\n    }\n") else {
+            panic!("`Provider::from_str` must close with a `}}` at four-space indent");
+        };
+        let body = &this[fn_start..fn_start + fn_end];
+
+        let mut canonical: Vec<String> = Vec::new();
+        for provider in provider_list() {
+            canonical.push(provider.to_string().to_lowercase());
+            canonical.push(format!("{provider:?}").to_lowercase());
+        }
+
+        let mut undocumented: Vec<&str> = Vec::new();
+        let mut rest = body;
+        while let Some(at) = rest.find("eq_ignore_ascii_case(\"") {
+            let after = &rest[at + "eq_ignore_ascii_case(\"".len()..];
+            let Some(quote) = after.find('"') else {
+                panic!("`from_str` match arm must close its quoted name");
+            };
+            let name = &after[..quote];
+            rest = &after[quote + 1..];
+            if canonical.iter().any(|canonical| canonical == name) {
+                continue;
+            }
+            if !section.contains(&format!("\"{name}\"")) {
+                undocumented.push(name);
+            }
+        }
+        undocumented.sort_unstable();
+        undocumented.dedup();
+        assert!(
+            undocumented.is_empty(),
+            "spec.md §2 must name every alias `Provider::from_str` accepts; \
+             undocumented: {undocumented:?}"
+        );
+    }
+
+    #[test]
     fn fuzz_implemented_pool_covers_every_nameable_provider() {
         use std::fs;
         use std::path::Path;
