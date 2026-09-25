@@ -53,18 +53,23 @@
 //! request; a list referencing an absent header fails closed
 //! (`MalformedHeader` on `x-contentful-signed-headers`).
 //!
-//! # Ambiguity-scan carve-out
+//! # Ambiguity scan
 //!
 //! Because the signed-header list is self-describing, the framework adapters'
-//! duplicate-ambiguity scan (`spec.md` §4.4) statically covers only the three
-//! fixed headers [`SIGNATURE_HEADER`], [`SIGNED_HEADERS_HEADER`], and
-//! [`TIMESTAMP_HEADER`]. Additional headers the list names at delivery time
-//! (Contentful's own signer emits `content-type` and `x-contentful-topic`) are
-//! read first-match and folded into the canonical string; duplicate-conflicting
-//! values in *those* are not detected by the adapter — the same carve-out
-//! granted to the headers a [`crate::CustomScheme`]'s `signed_string` closure
-//! reads. Verification always uses the first value, which is what
-//! `http`/`actix` handlers read via `.get()`.
+//! duplicate-ambiguity scan (`spec.md` §4.4) can enumerate it: besides the
+//! three fixed headers [`SIGNATURE_HEADER`], [`SIGNED_HEADERS_HEADER`], and
+//! [`TIMESTAMP_HEADER`], they scan every header the request's list names
+//! (Contentful's own signer emits `content-type` and `x-contentful-topic`).
+//! A conflicting duplicate of a named header is ambiguous in exactly the same
+//! way a conflicting duplicate of the signature header is, so it is rejected
+//! with `MalformedHeader` on `x-contentful-signed-headers` — the only name
+//! available for the error payload's `&'static str`. Identical repeats are not
+//! ambiguous and verify normally, and headers the list does not name are not
+//! signing material and are not scanned.
+//!
+//! This is what makes the scheme fully covered: the remaining carve-out in
+//! `spec.md` §4.4 is for a [`crate::CustomScheme`]'s `signed_string` closure,
+//! whose headers no request-declared list enumerates.
 //!
 //! # Replay protection
 //!
