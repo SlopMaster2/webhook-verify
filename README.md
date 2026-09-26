@@ -232,6 +232,31 @@ webhook-verify = { version = "0.1", features = ["actix"] }
 With the `http` feature enabled, any `http::HeaderMap` (from axum, tower, or
 hyper requests) implements `HeaderMap` and can be passed to `verify()` directly.
 
+`HeaderMap` lookup returns only the *first* value for a name, so it cannot see a
+signature header that arrived twice. The `tower` and `actix` adapters reject
+that case for you; if you are calling `verify()` yourself, run the same check
+first with `ambiguous_signature_header`:
+
+```rust
+use webhook_verify::{Provider, VerifyError, ambiguous_signature_header, verify};
+
+if let Some(header) = ambiguous_signature_header(Provider::GitHub, &headers) {
+    return Err(VerifyError::MalformedHeader {
+        header,
+        reason: "header present multiple times with different values",
+    });
+}
+verify(Provider::GitHub, &headers, &raw_body, &secret, Default::default())?;
+```
+
+It returns the provider-spelled name of the offending header, or `None` when
+the request is unambiguous — identical repeats are fine. For
+[`Provider::Contentful`](https://docs.rs/webhook-verify/latest/webhook_verify/enum.Provider.html)
+it also follows the self-describing `x-contentful-signed-headers` list, so a
+header the delivery itself declares as signed is scanned too. See
+[`spec.md` §4.4](https://github.com/SlopMaster2/webhook-verify/blob/master/spec.md)
+for the full contract and the `Custom` carve-out.
+
 ### `no_std` support
 
 The core verification path is `no_std + alloc` compatible. The `std` feature (on by default) provides the wall

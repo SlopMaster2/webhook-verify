@@ -25,7 +25,11 @@ use std::collections::HashMap;
 /// with *different* values is ambiguous and must be rejected — but detection of
 /// duplicates belongs to the caller/adapter layer, since this trait exposes
 /// only first-match lookup. Framework adapters are expected to reject
-/// duplicated signature headers before calling [`crate::verify()`].
+/// duplicated signature headers before calling [`crate::verify()`]. A caller
+/// extracting headers itself gets the same check from
+/// `webhook_verify::ambiguous_signature_header` (the `http` feature, for an
+/// `http::HeaderMap`); for every other map type the caller compares the
+/// values it holds for the same name.
 ///
 /// # `HashMap` caveat
 ///

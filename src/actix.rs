@@ -112,7 +112,7 @@ use actix_web::{
 };
 
 use crate::core::adapter_utils::{
-    ambiguous_signature_header, declared_content_length, rejection_status,
+    declared_content_length, find_ambiguous_signature_header, rejection_status,
 };
 use crate::{HeaderMap, Provider, Secret, VerifyError, VerifyOptions};
 
@@ -314,7 +314,7 @@ impl FromRequest for VerifiedBody {
         // the provider's static signature headers plus any header the request
         // itself enumerates as signing material (Contentful's
         // `x-contentful-signed-headers`) — see `spec.md` §4.4.
-        if let Some(header) = ambiguous_signature_header(req.headers(), &config.provider) {
+        if let Some(header) = find_ambiguous_signature_header(req.headers(), &config.provider) {
             return Box::pin(ready(Err(WebhookVerificationError(Rejection::Verify(
                 VerifyError::MalformedHeader {
                     header,

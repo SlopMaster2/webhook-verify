@@ -205,6 +205,19 @@ pub fn verify(
     secret: &Secret,
     options: VerifyOptions,
 ) -> Result<(), VerifyError>;
+
+// The §4.4 ambiguity check, for callers who call `verify()` themselves
+// instead of going through a framework adapter (the `http` feature).
+// Returns the provider-spelled name of the signature header that is
+// duplicated with differing values, for use as
+// `VerifyError::MalformedHeader { header, .. }`; `None` means the request
+// is unambiguous. The `tower`/`actix` adapters call the same code path
+// internally, so this cannot drift from them.
+#[cfg(feature = "http")]
+pub fn ambiguous_signature_header(
+    provider: Provider,
+    headers: &::http::HeaderMap,
+) -> Option<&'static str>;
 ```
 
 Implementation status (kept in sync with the code — do not let this drift):
@@ -448,6 +461,9 @@ the SDK and reference examples disambiguate its details.
   `x-contentful-signed-headers`, `x-contentful-timestamp`) *and* follows the
   self-describing `x-contentful-signed-headers` list into the request, so a
   header the delivery declares as signed is scanned exactly like a fixed one.
+  The same scan is available to `http`-feature callers as the public
+  `ambiguous_signature_header(provider, &headers)`, so a caller doing its own
+  header extraction gets the identical behavior rather than a reduced one.
   A conflicting duplicate of a listed header is rejected as `MalformedHeader`
   on `x-contentful-signed-headers` — the request-controlled header that named
   it, and the only name available for the error payload's `&'static str`.
@@ -3021,9 +3037,13 @@ ambiguity).
 4. **Reject on ambiguity, not accept.** If a header is present multiple
    times with different values, or a required header is malformed, return
    an error — never fall back to "treat as valid" behavior. The first-match
-   `HeaderMap` lookup cannot see duplicates, so framework adapters (the
-   `tower` and `actix` features) check the raw header map against the
-   provider's scheme-relevant signature headers before verifying; identical
+   `HeaderMap` lookup cannot see duplicates, so the check happens above
+   `verify()`: the framework adapters (the `tower` and `actix` features)
+   do it automatically, and a caller driving `verify()` with an
+   `http::HeaderMap` directly calls `ambiguous_signature_header(provider,
+   &headers)` first (the `http` feature), which returns the ambiguous
+   header's name for use as `VerifyError::MalformedHeader { header, .. }`.
+   Identical
    repeats are not ambiguous and verify normally. For built-in providers the
    scan covers every header the scheme declares. One scheme declares its
    headers in the request rather than in a constant: Contentful's

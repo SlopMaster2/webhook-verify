@@ -75,10 +75,12 @@ pub use custom::{CustomScheme, Encoding, HashAlg};
 
 use core::fmt;
 
-#[cfg(any(feature = "tower", feature = "actix"))]
+// Needed by `signature_header_names`, which the `spec.md` §4.4 ambiguity check
+// needs under the `http` feature as well as both adapters.
+#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 use alloc::vec;
 
-#[cfg(any(feature = "tower", feature = "actix"))]
+#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
@@ -1169,15 +1171,21 @@ impl std::error::Error for ProviderParseError {}
 /// Header names that carry signing material for `provider`, per its row in
 /// `spec.md` §3.
 ///
-/// Used by framework adapters (behind the `tower`/`actix` features) to reject
-/// requests whose signature headers arrive duplicated with conflicting values
-/// — see the ambiguity contract on [`crate::HeaderMap`] and `spec.md` §4.4,
-/// which the first-match-only lookup cannot detect on its own.
+/// Used by the `spec.md` §4.4 ambiguity check — by the framework adapters
+/// (behind the `tower`/`actix` features) and, since the `http` feature, by
+/// `webhook_verify::ambiguous_signature_header` for callers doing their own
+/// header extraction. The check rejects requests whose signature headers arrive
+/// duplicated with conflicting values — see the ambiguity contract on
+/// [`crate::HeaderMap`], which the first-match-only lookup cannot detect on its
+/// own. (Named as plain text rather than an intra-doc link because both the
+/// `http`-feature entry point and this list are feature-gated in slightly
+/// different combinations, and a link here would break `cargo doc` for some of
+/// them.)
 ///
 /// Returns an empty list for providers whose implementation is disabled by a
 /// feature flag; their verification fails closed with
 /// [`VerifyError::UnsupportedProvider`] regardless.
-#[cfg(any(feature = "tower", feature = "actix"))]
+#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
     match provider {
         Provider::Stripe => vec![stripe::SIGNATURE_HEADER],
@@ -3643,18 +3651,19 @@ mod tests {
         false
     }
 
-    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
     #[test]
     fn signature_header_names_cover_every_provider_header() {
-        // `signature_header_names` is the list the tower/actix adapters scan
-        // for conflicting duplicate headers (spec.md §4.4) — the mechanism
-        // that stops a proxy from smuggling a forged value in a duplicate
-        // header the verifier reads while the validator does not. This guard
-        // pins each provider's adapter-visible headers to the exact constants
-        // its implementation reads, so a header dropped from the list — say
-        // `HubSpot` losing its timestamp — is caught instead of silently
-        // weakening the ambiguity check. Keep this table in lockstep with
-        // `signature_header_names` when a provider changes.
+        // `signature_header_names` is the list the tower/actix adapters — and,
+        // since the `http` feature, the public `ambiguous_signature_header` —
+        // scan for conflicting duplicate headers (spec.md §4.4). It is the
+        // mechanism that stops a proxy from smuggling a forged value in a
+        // duplicate header the verifier reads while the validator does not.
+        // This guard pins each provider's scan-visible headers to the exact
+        // constants its implementation reads, so a header dropped from the
+        // list — say `HubSpot` losing its timestamp — is caught instead of
+        // silently weakening the ambiguity check. Keep this table in lockstep
+        // with `signature_header_names` when a provider changes.
         let cases: &[(Provider, &[&str])] = &[
             (Provider::Stripe, &[stripe::SIGNATURE_HEADER]),
             (Provider::GitHub, &[github::SIGNATURE_HEADER]),
@@ -3866,9 +3875,10 @@ mod tests {
     /// Whether `name` is a syntactically valid HTTP field name — RFC 9110
     /// §5.1's `field-name = token`, i.e. one or more `tchar`s from a
     /// non-empty, delimiter-free, no-space byte set. Test helper, kept
-    /// dependency-free so the guard below runs in every adapter
-    /// configuration (`actix` does not imply the `http` feature).
-    #[cfg(any(feature = "tower", feature = "actix"))]
+    /// dependency-free so the guard below runs in every configuration that
+    /// compiles `signature_header_names` (`actix` does not imply the `http`
+    /// feature, and `http`-only callers now scan too).
+    #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
     fn is_valid_field_name(name: &str) -> bool {
         !name.is_empty()
             && name.bytes().all(|b| {
@@ -3893,24 +3903,26 @@ mod tests {
             })
     }
 
-    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
     #[test]
     fn signature_header_names_are_valid_http_field_names() {
         // The guard above pins *which* headers each provider's ambiguity scan
         // covers; this one pins that every one of those names is a name the
-        // `http`/`actix-web` header maps can actually represent. Both adapters
-        // turn the scan list into a `HeaderName` via `HeaderName::from_bytes`,
-        // and an unparseable name there is **indistinguishable from a smuggled
-        // duplicate**: `MultiValueHeaders::get_all_bytes` returns `None` and
+        // `http`/`actix-web` header maps can actually represent. The adapters
+        // and the public `ambiguous_signature_header` all turn the scan list
+        // into a `HeaderName` via `HeaderName::from_bytes`, and an unparseable
+        // name there is **indistinguishable from a smuggled duplicate**:
+        // `MultiValueHeaders::get_all_bytes` returns `None` and
         // `has_conflicting_duplicates` reports the header as ambiguous
         // (pinned by `unparseable_scan_name_reads_as_ambiguous` below). So a
         // single typo'd constant — a space, a stray `\r`, a non-ASCII byte —
-        // does not merely weaken the check, it makes the adapters reject
-        // *every* delivery for that provider with a 400 whose body is empty by
-        // design ("no error detail leaks over the wire"), leaving an operator
-        // with a total, undiagnosable outage. `verify()` called directly would
-        // still pass, because the crate's own `HeaderMap` impls compare header
-        // names as plain case-insensitive strings.
+        // does not merely weaken the check, it makes the scan reject
+        // *every* delivery for that provider: with a 400 whose body is empty by
+        // design ("no error detail leaks over the wire") in the adapters, and
+        // with a `Some(_)` a `http`-feature caller is told to reject, leaving
+        // an operator with a total, undiagnosable outage. `verify()` called
+        // directly would still pass, because the crate's own `HeaderMap` impls
+        // compare header names as plain case-insensitive strings.
         //
         // RFC 9110 §5.1 `field-name = token` is checked here directly rather
         // than through `HeaderName::from_bytes` so the guard holds in the
@@ -3938,7 +3950,6 @@ mod tests {
     /// unparseable name — would silently disable the ambiguity check for that
     /// header instead of failing loudly.
     #[cfg(feature = "http")]
-    #[cfg(any(feature = "tower", feature = "actix"))]
     #[test]
     fn unparseable_scan_name_reads_as_ambiguous() {
         use crate::core::adapter_utils::has_conflicting_duplicates;
