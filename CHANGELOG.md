@@ -36,6 +36,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Box: every delivery paid two HMAC-SHA256 computations where
+  `spec.md` §4.1 requires one** (issue #237). Box signs each delivery with both
+  its current keys and accepts it when *either* `BOX-SIGNATURE-PRIMARY` or
+  `BOX-SIGNATURE-SECONDARY` matches the caller's single `Secret` — the same
+  shape as the six rotation-list providers, but with the candidates arriving in
+  two headers instead of one comma-delimited list, which is why the conversion
+  to the shared single-digest helper (PR #214) missed it.
+  `box_webhooks::verify` called `verify_hmac_sha256` once per candidate, running
+  the identical HMAC twice over the same key and the same signed string, while
+  §4.1's parenthetical enumeration named only the list-based providers, so the
+  contract read as though Box were exempt from the rule its code broke.
+
+  It now passes both candidates to `core::crypto::verify_hmac_sha256_any`, so
+  the digest is computed once and both candidates are compared against it.
+
+  **No security regression and no behavior change.** Both comparisons were
+  already `subtle::ConstantTimeEq`, both already ran with no early exit, and
+  "either signature matches" still means exactly that — the new helper
+  accumulates the per-candidate matches the same way. What changes is the work
+  factor: one HMAC per Box delivery instead of two. A new guard fails CI if any
+  provider module calls the single-candidate helper more than once, so the
+  class of drift cannot recur silently.
+
 - **The `spec.md` §4.4 ambiguity scan re-spelled Contentful's
   `x-contentful-signed-headers` name as an independent literal, so a rename
   would have silently disabled the dynamic half of the check** (issue #235).

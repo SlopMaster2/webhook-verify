@@ -4010,6 +4010,85 @@ mod tests {
         ));
     }
 
+    /// No provider may recompute the HMAC once per candidate signature
+    /// (`spec.md` §4.1).
+    ///
+    /// A provider that accepts a delivery when *any* of several candidate
+    /// signatures matches — the rotation lists (Stripe, Paddle, PagerDuty, Mux,
+    /// Tailscale, Standard Webhooks) and Box, whose two candidates arrive in
+    /// two headers rather than one list — must compute the digest once and
+    /// compare every candidate against it, which is what `verify_hmac_sha256_any`
+    /// exists for. Calling `verify_hmac_sha256` once per candidate instead
+    /// is the exact shape §4.1 forbids, and it is easy to write by accident: the
+    /// per-candidate call still looks correct, still compares in constant time,
+    /// and no behavioral test fails. Box shipped that way for its whole life
+    /// (two calls over the same key and the same signed string) because the
+    /// rotation-list conversion that fixed the other six providers only covered
+    /// comma-delimited headers, and nothing in the suite or the spec noticed
+    /// (§4.1's enumeration did not name Box at all).
+    ///
+    /// The guard is textual, so it cannot see a call laundered through a local
+    /// wrapper; what it does buy is that a *second direct* call in a provider
+    /// module — the shape this actually regressed to — fails CI instead of
+    /// shipping. At most one call site is allowed per module, which every
+    /// provider satisfies today (the multi-candidate ones route through the
+    /// `_any` helper instead). A scheme that genuinely needs two independent
+    /// HMACs over *different* signed strings would have to widen this, and the
+    /// failure message says so.
+    #[test]
+    fn no_provider_recomputes_the_hmac_per_candidate_signature() {
+        use std::fs;
+        use std::path::Path;
+
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/providers");
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            // `src/providers` is shipped in the crates.io tarball, so this is
+            // only a guard against a packaging surprise: a repo-internal
+            // directory this crate's own tests must not fail on.
+            Err(_) => return,
+        };
+
+        let mut checked = 0_usize;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            // `mod.rs` is the dispatch table and the test module itself, not a
+            // provider implementation, and it legitimately calls the single
+            // candidate helper from its own unit tests.
+            if path.file_stem().is_some_and(|stem| stem == "mod") {
+                continue;
+            }
+            let source = match fs::read_to_string(&path) {
+                Ok(source) => source,
+                Err(_) => continue,
+            };
+            // Only the implementation counts: a test may re-derive a vector
+            // through the single-candidate helper to cross-check it.
+            let implementation = match source.find("#[cfg(test)]") {
+                Some(at) => &source[..at],
+                None => source.as_str(),
+            };
+            let calls = implementation.matches("verify_hmac_sha256(").count();
+            assert!(
+                calls <= 1,
+                "{} calls `verify_hmac_sha256` {calls} times; a provider that compares \
+                 several candidate signatures against one key and one signed string must \
+                 pass them all to `verify_hmac_sha256_any` so the digest is computed once \
+                 (spec.md §4.1)",
+                path.display(),
+            );
+            checked += 1;
+        }
+        assert!(
+            checked > 0,
+            "the HMAC-per-candidate scan found no provider modules to check under {}",
+            dir.display()
+        );
+    }
+
     /// Every name-constructible [`Provider`] variant, in declaration order.
     ///
     /// The single source of truth for the provider-bookkeeping tests: both the
