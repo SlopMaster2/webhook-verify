@@ -1322,12 +1322,17 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
 /// context (e.g. Square's notification URL) was not supplied via
 /// [`VerifyOptions`].
 ///
-/// An empty `secret` is rejected with [`VerifyError::InvalidSecret`] before
-/// any request parsing, for every provider whose scheme is keyed by it (all
-/// but PayPal and SendGrid, which verify against
-/// [`VerifyOptions::verifying_material`] instead): an empty key is not a weak
-/// key but no key at all, since anyone able to read a request could compute
-/// the signature it produces.
+/// A `secret` that is empty, or that consists only of whitespace, is rejected
+/// with [`VerifyError::InvalidSecret`] before any request parsing, for every
+/// provider whose scheme is keyed by it (all but PayPal and SendGrid, which
+/// verify against [`VerifyOptions::verifying_material`] instead): such a key is
+/// not a weak key but no usable key at all, since the signature it produces is
+/// within a couple of guesses for anyone who can read the request.
+///
+/// Only those two shapes are rejected. A secret that merely *contains*
+/// whitespace is used exactly as configured, byte for byte — the key is never
+/// trimmed before the MAC, because that would silently break every deployment
+/// that signs with a padded secret instead of reporting the problem.
 pub fn verify(
     provider: Provider,
     headers: &dyn HeaderMap,
@@ -1358,10 +1363,10 @@ pub(crate) fn verify_ref(
     secret: &Secret,
     options: &VerifyOptions,
 ) -> Result<(), VerifyError> {
-    if secret.as_bytes().is_empty() && uses_secret(provider) {
-        return Err(VerifyError::InvalidSecret {
-            reason: "secret is empty",
-        });
+    if uses_secret(provider) {
+        if let Some(reason) = unusable_secret_reason(secret) {
+            return Err(VerifyError::InvalidSecret { reason });
+        }
     }
     match provider {
         Provider::Discord => discord::verify(headers, raw_body, secret, options),
@@ -1437,11 +1442,11 @@ pub(crate) fn verify_ref(
 /// PayPal and SendGrid are the two asymmetric schemes: they check a signature
 /// against caller-supplied key material in
 /// [`VerifyOptions::verifying_material`] and ignore `Secret` entirely, so an
-/// empty `Secret` is neither a misconfiguration nor a security problem for
+/// unusable `Secret` is neither a misconfiguration nor a security problem for
 /// them (a test in `paypal`'s module pins that "any (even pathological)
 /// secret is accepted and unused"). Every other provider keys its MAC — or,
-/// for Discord, its Ed25519 verifying key — with `Secret`, so an empty one is
-/// always operator misconfiguration.
+/// for Discord, its Ed25519 verifying key — with `Secret`, so an unusable one
+/// is always operator misconfiguration.
 ///
 /// **A provider added here that ignores `Secret` must be added to this
 /// `matches!`**, and a provider added here that does use `Secret` needs no
@@ -1449,6 +1454,45 @@ pub(crate) fn verify_ref(
 /// deliberately the short side.
 fn uses_secret(provider: Provider) -> bool {
     !matches!(provider, Provider::PayPal | Provider::SendGrid)
+}
+
+/// Why `secret` may not be used as signing material, or `None` if it may
+/// (`spec.md` §4.7).
+///
+/// Two shapes are rejected, and only those two:
+///
+/// * **empty** — no key at all, so the signature is reproducible by anyone who
+///   can read the request;
+/// * **entirely whitespace** — the same failure reached one character over.
+///   The candidates that produce one are not "all possible strings" but the
+///   handful of shapes an ordinary operator mistake produces, and the two most
+///   likely are single characters: a `"\n"` from a secret file written with
+///   `echo` rather than `printf`, or a `" "` from a CI/CD variable defined as a
+///   literal space (`env::var(..).unwrap_or_default()` on a blank-but-present
+///   variable). A deployment keyed with one of them is forgeable by anyone who
+///   tries three signatures, and the failure is indistinguishable from a
+///   working integration.
+///
+/// "Entirely" is load-bearing and the *only* line drawn here: a secret that
+/// merely contains whitespace (`"hunter2 "`, `"hunter2\n"`) is a perfectly good
+/// key and is used exactly as configured. Nothing is trimmed before keying —
+/// changing the bytes fed to the MAC would silently break every deployment
+/// that legitimately signs with a padded secret, which is the opposite of this
+/// crate's bias toward failing loudly. Rejecting is likewise the loud option:
+/// it surfaces as [`VerifyError::InvalidSecret`], which the adapters report as
+/// operator misconfiguration (500) rather than as a forgery (401).
+///
+/// The whitespace test is `str::trim`'s (Unicode `White_Space`), matching what
+/// an operator can write in their own fix — `secret.trim().is_empty()` — and
+/// `Secret` is a `String`, so the test cannot be defeated by a non-UTF-8 key.
+fn unusable_secret_reason(secret: &Secret) -> Option<&'static str> {
+    if secret.as_str().is_empty() {
+        Some("secret is empty")
+    } else if secret.as_str().trim().is_empty() {
+        Some("secret is only whitespace")
+    } else {
+        None
+    }
 }
 
 /// Tries multiple secrets during a zero-downtime rotation window.
@@ -1462,10 +1506,11 @@ fn uses_secret(provider: Provider) -> bool {
 /// `Err(VerifyError::InvalidSecret)` only when *every* key was rejected for
 /// its own formatting.
 ///
-/// An empty element is one of those unusable keys rather than a forgery, so
-/// it is skipped exactly like a garbled one: a slice holding both an empty
-/// secret and the live key still verifies, and a slice of nothing but empty
-/// secrets reports `InvalidSecret { reason: "secret is empty" }`.
+/// An unusable element — an empty or whitespace-only secret, the two shapes
+/// `spec.md` §4.7 rejects — is one of those unusable keys rather than a
+/// forgery, so it is skipped exactly like a garbled one: a slice holding both
+/// one and the live key still verifies, and a slice of nothing but unusable
+/// secrets reports `InvalidSecret` naming which shape it was.
 ///
 /// For providers whose signing scheme itself embeds multiple signatures
 /// (Stripe's `v1=` list, Standard Webhooks' space-delimited `v1,<sig>`
@@ -2004,6 +2049,73 @@ mod tests {
     const EMPTY_KEY_HMAC_SHA256_HEX: &str =
         "2bbcfa9524f3218c7a34b30e6936f8b1a4516cb097f1a85a1c7d98b5977ec769";
 
+    /// Every `spec.md` §4.7 unusable secret shape, as
+    /// `(secret, HMAC-SHA256(key = secret, msg = b"Hello, World!"), reason)`.
+    ///
+    /// The MACs are computed independently with Python's `hmac`/`hashlib`
+    /// (`hmac.new(secret, b"Hello, World!", hashlib.sha256).hexdigest()`), so
+    /// an *attacker* can reproduce every row with no access to the
+    /// deployment — which is the whole reason none of them may be accepted as
+    /// an HMAC key. The first row is the empty key of
+    /// `EMPTY_KEY_HMAC_SHA256_HEX`; the single-character rows are the
+    /// realistic shapes, a secret file written with `echo` rather than `printf`
+    /// and a CI/CD variable defined as a literal space.
+    ///
+    /// The `"\u{a0}"` row pins *Unicode* whitespace rather than just ASCII: an
+    /// operator can paste a non-breaking space from a web page or a document,
+    /// and the check is `str::trim`'s for exactly that reason.
+    const UNUSABLE_SECRETS: [(&str, &str, &str); 6] = [
+        (
+            "",
+            "sha256=2bbcfa9524f3218c7a34b30e6936f8b1a4516cb097f1a85a1c7d98b5977ec769",
+            "secret is empty",
+        ),
+        (
+            " ",
+            "sha256=32c26866a95ba2351872780a2def18864f6229d0d5e1fd63b3d56ee6cedf828a",
+            "secret is only whitespace",
+        ),
+        (
+            "\n",
+            "sha256=31fb072035916891c35c0d7587a6478d7f31b6a0ccd469dc50f1896fb04ad526",
+            "secret is only whitespace",
+        ),
+        (
+            "  ",
+            "sha256=ebf949ba1ed25054c40bd913e8027ca9c67ffb90172fafccbd121f2050b9bba6",
+            "secret is only whitespace",
+        ),
+        (
+            "\t",
+            "sha256=514066f0012099dc4ab8486a64bbbb5195e6072a4fcd63a9dd4954fa8acedf1c",
+            "secret is only whitespace",
+        ),
+        (
+            "\u{a0}",
+            "sha256=18160da9439d39428128f05d7d6a73df50032fb8fac1c6bb32e35c6fba4d809d",
+            "secret is only whitespace",
+        ),
+    ];
+
+    /// Secrets that merely *contain* whitespace, as
+    /// `(secret, HMAC-SHA256(key = secret, msg = b"Hello, World!"))` — the
+    /// boundary `unusable_secret_reason` must not cross, since a padded
+    /// secret is legitimate key material and is never trimmed.
+    const PADDED_SECRETS: [(&str, &str); 3] = [
+        (
+            "It's a Secret to Everybody\n",
+            "sha256=59105a2da8182e5e7d6b699ca7f738081e03db4f55149c9af1ec7d424ca3e19c",
+        ),
+        (
+            "  padded key \t",
+            "sha256=d70fd48012d793e247cf9614cb807e8fd3f391fa28b89c3f6d52b358707b16bc",
+        ),
+        (
+            "hunter2 \u{a0}",
+            "sha256=91538b1b6293be88e5e1983fbde8f3ed94024ed949e7402573fb18cb8fbfd866",
+        ),
+    ];
+
     #[test]
     fn empty_key_hmac_vector_is_a_genuine_empty_key_mac() {
         // Non-vacuity check for the vector above: the crate's own audited
@@ -2194,6 +2306,197 @@ mod tests {
                 header: "X-Twilio-Email-Event-Webhook-Signature"
             })
         );
+    }
+
+    /// Decodes a `sha256=<hex>` table entry to the raw bytes `verify_hmac_sha256`
+    /// compares against, so the vectors can be checked against the crate's own
+    /// audited helper rather than only asserted as literals.
+    fn table_mac(mac: &str) -> Vec<u8> {
+        let Some(hex) = mac.strip_prefix("sha256=") else {
+            panic!("table vectors are stored as `sha256=<hex>`");
+        };
+        let Ok(bytes) = hex::decode(hex) else {
+            panic!("table vectors must be valid hex");
+        };
+        bytes
+    }
+
+    #[test]
+    fn unusable_secret_hmac_vectors_are_genuine_macs_for_those_keys() {
+        // Non-vacuity check for `UNUSABLE_SECRETS`, the same way
+        // `empty_key_hmac_vector_is_a_genuine_empty_key_mac` is for the empty
+        // key: the crate's own audited helper must agree that each vector is a
+        // valid HMAC-SHA256 under the key in its own row. If this ever fails,
+        // the constants were mistyped and the fail-closed tests below would be
+        // asserting nothing — the point of the table is that an attacker can
+        // compute these values, not that they are arbitrary hex.
+        for (secret, mac, _reason) in UNUSABLE_SECRETS {
+            assert!(
+                crate::core::crypto::verify_hmac_sha256(
+                    secret.as_bytes(),
+                    b"Hello, World!",
+                    &table_mac(mac),
+                ),
+                "the table's MAC for this secret is not an HMAC under that key"
+            );
+        }
+    }
+
+    #[test]
+    fn whitespace_only_secret_fails_closed_instead_of_accepting_a_forgery() {
+        // The bug this guards: #222 rejected the *empty* key, but a key one
+        // character over is just as guessable and still verified. `"\n"` (a
+        // secret file written with `echo` rather than `printf`) and `" "` (a
+        // CI/CD variable defined as a literal space) both used to return
+        // `Ok(())` for the publicly computable signature below, so a
+        // deployment keyed with one was forgeable by anyone who tried three
+        // signatures — and indistinguishable from a working integration.
+        // Each must now fail closed as operator misconfiguration, which the
+        // adapters map to 500 rather than 401 ("attacker").
+        for (secret, mac, reason) in UNUSABLE_SECRETS {
+            let headers = vec![("X-Hub-Signature-256".to_string(), mac.to_string())];
+            assert_eq!(
+                verify(
+                    Provider::GitHub,
+                    &headers,
+                    b"Hello, World!",
+                    &Secret::new(secret),
+                    Default::default(),
+                ),
+                Err(VerifyError::InvalidSecret { reason }),
+                "this unusable secret must fail closed, reported as {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn unusable_secret_is_rejected_for_every_provider_that_uses_one() {
+        // Drift guard: iterating `provider_list()` means a provider added
+        // later is covered by this contract the moment it is listed there, and
+        // iterating the table means both §4.7 shapes are. No headers are
+        // supplied on purpose — an unusable secret is an operator
+        // misconfiguration regardless of the request, so it is reported before
+        // any request parsing (and therefore before `MissingHeader`).
+        let no_headers: Vec<(&str, &str)> = Vec::new();
+        for provider in provider_list() {
+            if !uses_secret(provider) {
+                continue;
+            }
+            for (secret, _mac, reason) in UNUSABLE_SECRETS {
+                assert_eq!(
+                    verify(
+                        provider,
+                        &no_headers,
+                        b"{}",
+                        &Secret::new(secret),
+                        Default::default(),
+                    ),
+                    Err(VerifyError::InvalidSecret { reason }),
+                    "{provider} must reject this unusable secret"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_secret_that_merely_contains_whitespace_still_verifies() {
+        // The boundary the rule must not cross. Whitespace *inside* a secret is
+        // legitimate key material: a real key pasted with a trailing newline is
+        // a different key from the unpasted one, and the provider signs with
+        // whatever the operator configured. Rejecting it would break a working
+        // integration, and trimming it would silently break every deployment
+        // that signs with a padded secret — so the bytes must go into the MAC
+        // exactly as configured.
+        for (row, (secret, mac)) in PADDED_SECRETS.into_iter().enumerate() {
+            let headers = vec![("X-Hub-Signature-256".to_string(), mac.to_string())];
+            assert_eq!(
+                verify(
+                    Provider::GitHub,
+                    &headers,
+                    b"Hello, World!",
+                    &Secret::new(secret),
+                    Default::default(),
+                ),
+                Ok(()),
+                "PADDED_SECRETS row {row} must still verify"
+            );
+        }
+    }
+
+    #[test]
+    fn verify_any_skips_an_unusable_secret_and_uses_the_rest() {
+        // An unusable key in a rotation slice is unusable, not a forgery: a
+        // slice that also holds the real key must still verify, exactly as
+        // `verify_any`'s documented `InvalidSecret` aggregation rule requires.
+        let headers = vec![(
+            "X-Hub-Signature-256".to_string(),
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17".to_string(),
+        )];
+        let secrets = [
+            Secret::new("\n"),
+            Secret::new(" "),
+            Secret::new("It's a Secret to Everybody"),
+        ];
+        assert_eq!(
+            verify_any(
+                Provider::GitHub,
+                &headers,
+                b"Hello, World!",
+                &secrets,
+                Default::default(),
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn verify_any_reports_invalid_secret_when_every_secret_is_unusable() {
+        // No usable key remains, so the result is the operator-configuration
+        // error — never a `SignatureMismatch`, which would read as a forgery
+        // and log every rotated-out delivery as an attack.
+        let headers = vec![(
+            "X-Hub-Signature-256".to_string(),
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17".to_string(),
+        )];
+        let secrets = [Secret::new("\n"), Secret::new(" "), Secret::new("")];
+        assert_eq!(
+            verify_any(
+                Provider::GitHub,
+                &headers,
+                b"Hello, World!",
+                &secrets,
+                Default::default(),
+            ),
+            Err(VerifyError::InvalidSecret {
+                reason: "secret is only whitespace"
+            })
+        );
+    }
+
+    #[test]
+    fn an_unusable_secret_is_not_reported_to_a_provider_that_ignores_it() {
+        // The mirror of `empty_secret_does_not_mask_a_disabled_feature` for the
+        // wider §4.7 rule: the guard exists because these two schemes *key*
+        // with the secret, so it must not invent a configuration error for an
+        // argument the other 56 schemes never read. Whichever error these
+        // actually produce (a disabled feature, a missing header, missing key
+        // material), it is the honest one.
+        let no_headers: Vec<(&str, &str)> = Vec::new();
+        for provider in [Provider::PayPal, Provider::SendGrid] {
+            for (secret, _mac, reason) in UNUSABLE_SECRETS {
+                assert_ne!(
+                    verify(
+                        provider,
+                        &no_headers,
+                        b"{}",
+                        &Secret::new(secret),
+                        Default::default(),
+                    ),
+                    Err(VerifyError::InvalidSecret { reason }),
+                    "{provider} must not be told its secret is unusable"
+                );
+            }
+        }
     }
 
     #[test]
