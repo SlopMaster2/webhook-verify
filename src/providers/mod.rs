@@ -1322,17 +1322,20 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
 /// context (e.g. Square's notification URL) was not supplied via
 /// [`VerifyOptions`].
 ///
-/// A `secret` that is empty, or that consists only of whitespace, is rejected
-/// with [`VerifyError::InvalidSecret`] before any request parsing, for every
-/// provider whose scheme is keyed by it (all but PayPal and SendGrid, which
-/// verify against [`VerifyOptions::verifying_material`] instead): such a key is
-/// not a weak key but no usable key at all, since the signature it produces is
-/// within a couple of guesses for anyone who can read the request.
+/// A `secret` that is empty, that consists only of whitespace, or that consists
+/// only of NUL bytes, is rejected with [`VerifyError::InvalidSecret`] before any
+/// request parsing, for every provider whose scheme is keyed by it (all but
+/// PayPal and SendGrid, which verify against
+/// [`VerifyOptions::verifying_material`] instead): such a key is not a weak key
+/// but no usable key at all, since the signature it produces is within a couple
+/// of guesses for anyone who can read the request. An all-NUL key is not even
+/// that guessable — RFC 2104 zero-pads it to the block size, so it *is* the
+/// empty key and yields the empty key's publicly computable MAC.
 ///
-/// Only those two shapes are rejected. A secret that merely *contains*
-/// whitespace is used exactly as configured, byte for byte — the key is never
-/// trimmed before the MAC, because that would silently break every deployment
-/// that signs with a padded secret instead of reporting the problem.
+/// Only those three shapes are rejected. A secret that merely *contains*
+/// whitespace or a NUL is used exactly as configured, byte for byte — the key
+/// is never trimmed before the MAC, because that would silently break every
+/// deployment that signs with a padded secret instead of reporting the problem.
 pub fn verify(
     provider: Provider,
     headers: &dyn HeaderMap,
@@ -1459,7 +1462,7 @@ fn uses_secret(provider: Provider) -> bool {
 /// Why `secret` may not be used as signing material, or `None` if it may
 /// (`spec.md` §4.7).
 ///
-/// Two shapes are rejected, and only those two:
+/// Three shapes are rejected, and only those three:
 ///
 /// * **empty** — no key at all, so the signature is reproducible by anyone who
 ///   can read the request;
@@ -1471,25 +1474,40 @@ fn uses_secret(provider: Provider) -> bool {
 ///   literal space (`env::var(..).unwrap_or_default()` on a blank-but-present
 ///   variable). A deployment keyed with one of them is forgeable by anyone who
 ///   tries three signatures, and the failure is indistinguishable from a
-///   working integration.
+///   working integration;
+/// * **entirely NUL** — the *same* key as the empty one, reached a third way.
+///   RFC 2104 zero-pads any key shorter than the block size, so `"\0"`,
+///   `"\0\0"`, … up to the block size all produce exactly the empty key's MAC.
+///   Unlike whitespace this is not even a guessable-but-unlikely key: it is
+///   *literally the same MAC*, so the attacker-computable empty-key signature
+///   is the one that gets accepted. The reachable shapes are an operator who
+///   never noticed a trailing `\0` (a fixed-size `read_exact` into a record
+///   padded with zeros, a config value decoded from a fixed-width field), and
+///   NUL is not whitespace, so the check above cannot catch it.
 ///
 /// "Entirely" is load-bearing and the *only* line drawn here: a secret that
-/// merely contains whitespace (`"hunter2 "`, `"hunter2\n"`) is a perfectly good
-/// key and is used exactly as configured. Nothing is trimmed before keying —
-/// changing the bytes fed to the MAC would silently break every deployment
-/// that legitimately signs with a padded secret, which is the opposite of this
-/// crate's bias toward failing loudly. Rejecting is likewise the loud option:
-/// it surfaces as [`VerifyError::InvalidSecret`], which the adapters report as
-/// operator misconfiguration (500) rather than as a forgery (401).
+/// merely contains whitespace or a NUL (`"hunter2 "`, `"hunter2\n"`,
+/// `"hunter2\0"`) is a perfectly good key and is used exactly as configured.
+/// Nothing is trimmed before keying — changing the bytes fed to the MAC would
+/// silently break every deployment that legitimately signs with a padded
+/// secret, which is the opposite of this crate's bias toward failing loudly.
+/// Rejecting is likewise the loud option: it surfaces as
+/// [`VerifyError::InvalidSecret`], which the adapters report as operator
+/// misconfiguration (500) rather than as a forgery (401).
 ///
 /// The whitespace test is `str::trim`'s (Unicode `White_Space`), matching what
 /// an operator can write in their own fix — `secret.trim().is_empty()` — and
 /// `Secret` is a `String`, so the test cannot be defeated by a non-UTF-8 key.
+/// NUL is tested as bytes, for the same reason: it is the one byte RFC 2104
+/// pads with, and a `String` of nothing but NULs is valid UTF-8, so the check
+/// sees exactly the bytes the MAC would.
 fn unusable_secret_reason(secret: &Secret) -> Option<&'static str> {
     if secret.as_str().is_empty() {
         Some("secret is empty")
     } else if secret.as_str().trim().is_empty() {
         Some("secret is only whitespace")
+    } else if secret.as_str().bytes().all(|byte| byte == 0) {
+        Some("secret is only NUL bytes")
     } else {
         None
     }
@@ -1506,11 +1524,11 @@ fn unusable_secret_reason(secret: &Secret) -> Option<&'static str> {
 /// `Err(VerifyError::InvalidSecret)` only when *every* key was rejected for
 /// its own formatting.
 ///
-/// An unusable element — an empty or whitespace-only secret, the two shapes
-/// `spec.md` §4.7 rejects — is one of those unusable keys rather than a
-/// forgery, so it is skipped exactly like a garbled one: a slice holding both
-/// one and the live key still verifies, and a slice of nothing but unusable
-/// secrets reports `InvalidSecret` naming which shape it was.
+/// An unusable element — an empty, whitespace-only, or NUL-only secret, the
+/// three shapes `spec.md` §4.7 rejects — is one of those unusable keys rather
+/// than a forgery, so it is skipped exactly like a garbled one: a slice holding
+/// both one and the live key still verifies, and a slice of nothing but
+/// unusable secrets reports `InvalidSecret` naming which shape it was.
 ///
 /// For providers whose signing scheme itself embeds multiple signatures
 /// (Stripe's `v1=` list, Standard Webhooks' space-delimited `v1,<sig>`
@@ -2049,6 +2067,11 @@ mod tests {
     const EMPTY_KEY_HMAC_SHA256_HEX: &str =
         "2bbcfa9524f3218c7a34b30e6936f8b1a4516cb097f1a85a1c7d98b5977ec769";
 
+    /// SHA-256's block size in bytes, the length RFC 2104 zero-pads a shorter
+    /// HMAC key to. Spelled out here rather than taken from `sha2`, which does
+    /// not export it, and pinned by `nul_only_secret_is_the_same_key_as_the_empty_one`.
+    const SHA256_BLOCK_SIZE: usize = 64;
+
     /// Every `spec.md` §4.7 unusable secret shape, as
     /// `(secret, HMAC-SHA256(key = secret, msg = b"Hello, World!"), reason)`.
     ///
@@ -2064,7 +2087,14 @@ mod tests {
     /// The `"\u{a0}"` row pins *Unicode* whitespace rather than just ASCII: an
     /// operator can paste a non-breaking space from a web page or a document,
     /// and the check is `str::trim`'s for exactly that reason.
-    const UNUSABLE_SECRETS: [(&str, &str, &str); 6] = [
+    ///
+    /// The NUL rows carry the *same* MAC as the empty row on purpose, because
+    /// they are the same key: RFC 2104 zero-pads a short key to the block
+    /// size, so every all-NUL key up to SHA-256's 64-byte block produces
+    /// literally the empty key's MAC. That is why they are not merely
+    /// guessable but *identical* to the no-key forgery, and why NUL — not
+    /// whitespace — is the predicate that catches them.
+    const UNUSABLE_SECRETS: [(&str, &str, &str); 8] = [
         (
             "",
             "sha256=2bbcfa9524f3218c7a34b30e6936f8b1a4516cb097f1a85a1c7d98b5977ec769",
@@ -2095,6 +2125,16 @@ mod tests {
             "sha256=18160da9439d39428128f05d7d6a73df50032fb8fac1c6bb32e35c6fba4d809d",
             "secret is only whitespace",
         ),
+        (
+            "\0",
+            "sha256=2bbcfa9524f3218c7a34b30e6936f8b1a4516cb097f1a85a1c7d98b5977ec769",
+            "secret is only NUL bytes",
+        ),
+        (
+            "\0\0\0\0",
+            "sha256=2bbcfa9524f3218c7a34b30e6936f8b1a4516cb097f1a85a1c7d98b5977ec769",
+            "secret is only NUL bytes",
+        ),
     ];
 
     /// Secrets that merely *contain* whitespace, as
@@ -2113,6 +2153,27 @@ mod tests {
         (
             "hunter2 \u{a0}",
             "sha256=91538b1b6293be88e5e1983fbde8f3ed94024ed949e7402573fb18cb8fbfd866",
+        ),
+    ];
+
+    /// Secrets that merely *contain* a NUL, as
+    /// `(secret, HMAC-SHA256(key = secret, msg = b"Hello, World!"))` — the same
+    /// boundary for the all-NUL rule. A NUL is the byte RFC 2104 pads with, but
+    /// only a key made of *nothing but* NULs collapses to the empty key; one
+    /// real byte anywhere makes it an ordinary key, and the MACs below confirm
+    /// it is a different one from the empty key's.
+    const NUL_PADDED_SECRETS: [(&str, &str); 3] = [
+        (
+            "hunter2\0",
+            "sha256=2a3c60a1804275884b52271f818a890fc5e8d6360c2a17b6a50e35e953301e74",
+        ),
+        (
+            "\0hunter2",
+            "sha256=660a73b3e6dc1c2f408174292fc1a09beccbcc72e59f124ce3d30038ce183566",
+        ),
+        (
+            "hunter2\0\0",
+            "sha256=2a3c60a1804275884b52271f818a890fc5e8d6360c2a17b6a50e35e953301e74",
         ),
     ];
 
@@ -2424,6 +2485,101 @@ mod tests {
     }
 
     #[test]
+    fn nul_only_secret_is_the_same_key_as_the_empty_one() {
+        // The claim #225 rests on, checked against the crate's own audited
+        // helper rather than just the RFC text: RFC 2104 zero-pads a key
+        // shorter than the block size, so an all-NUL key produces *literally*
+        // the empty key's MAC. That makes it worse than the whitespace shape
+        // rather than a new guessable-key shape — the empty-key signature
+        // already published in `EMPTY_KEY_HMAC_SHA256_HEX` is the one a
+        // NUL-keyed deployment would accept, so a forgery needs no guessing at
+        // all.
+        let Ok(signature) = hex::decode(EMPTY_KEY_HMAC_SHA256_HEX) else {
+            panic!("the hardcoded empty-key HMAC vector must be valid hex");
+        };
+        for nul in 1..=SHA256_BLOCK_SIZE {
+            let key = vec![0u8; nul];
+            assert!(
+                crate::core::crypto::verify_hmac_sha256(&key, b"Hello, World!", &signature),
+                "a {nul}-NUL key must produce the empty key's MAC, or the \
+                 zero-padding this rule relies on does not hold"
+            );
+        }
+    }
+
+    #[test]
+    fn nul_only_secret_fails_closed_instead_of_accepting_a_forgery() {
+        // The bug this guards: #222 rejected the empty key and #224 the
+        // whitespace ones, but a key of NULs is the *same* key as the empty one
+        // and used to return `Ok(())` for the publicly computable signature
+        // carried in the `UNUSABLE_SECRETS` rows above. Each must now fail
+        // closed as operator misconfiguration, which the adapters map to 500
+        // rather than 401 ("attacker").
+        for (secret, mac, reason) in UNUSABLE_SECRETS {
+            let headers = vec![("X-Hub-Signature-256".to_string(), mac.to_string())];
+            assert_eq!(
+                verify(
+                    Provider::GitHub,
+                    &headers,
+                    b"Hello, World!",
+                    &Secret::new(secret),
+                    Default::default(),
+                ),
+                Err(VerifyError::InvalidSecret { reason }),
+                "this unusable secret must fail closed, reported as {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn nul_only_secret_is_rejected_past_the_block_size_too() {
+        // Only an all-NUL key up to SHA-256's 64-byte block is *the same key* as
+        // the empty one — a longer one gets hashed and is no longer publicly
+        // computable. Rejecting it anyway is deliberate: the crate's bias is
+        // toward failing loudly, and a 65-NUL key is not a key an operator
+        // configured on purpose. `NUL_PADDED_SECRETS` keeps the guard from
+        // widening any further.
+        let over_block_size = "\0".repeat(SHA256_BLOCK_SIZE + 1);
+        assert_eq!(
+            verify(
+                Provider::GitHub,
+                &Vec::<(&str, &str)>::new(),
+                b"Hello, World!",
+                &Secret::new(&over_block_size),
+                Default::default(),
+            ),
+            Err(VerifyError::InvalidSecret {
+                reason: "secret is only NUL bytes"
+            })
+        );
+    }
+
+    #[test]
+    fn a_secret_that_merely_contains_a_nul_still_verifies() {
+        // The boundary the all-NUL rule must not cross, and the reason the
+        // predicate is "all bytes are NUL" rather than "contains a NUL": one
+        // real byte makes an ordinary key whose MAC is a different value, so
+        // the operator's configured bytes must go into the MAC untouched.
+        // Rejecting these would break a working integration, and stripping the
+        // NUL would silently change the key — the same two options already
+        // declined for padded secrets.
+        for (row, (secret, mac)) in NUL_PADDED_SECRETS.into_iter().enumerate() {
+            let headers = vec![("X-Hub-Signature-256".to_string(), mac.to_string())];
+            assert_eq!(
+                verify(
+                    Provider::GitHub,
+                    &headers,
+                    b"Hello, World!",
+                    &Secret::new(secret),
+                    Default::default(),
+                ),
+                Ok(()),
+                "NUL_PADDED_SECRETS row {row} must still verify"
+            );
+        }
+    }
+
+    #[test]
     fn verify_any_skips_an_unusable_secret_and_uses_the_rest() {
         // An unusable key in a rotation slice is unusable, not a forgery: a
         // slice that also holds the real key must still verify, exactly as
@@ -2435,6 +2591,7 @@ mod tests {
         let secrets = [
             Secret::new("\n"),
             Secret::new(" "),
+            Secret::new("\0"),
             Secret::new("It's a Secret to Everybody"),
         ];
         assert_eq!(

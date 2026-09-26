@@ -425,6 +425,12 @@ before the body is read, but verification requires those bytes.
   A secret that merely *contains* whitespace is fine and is used byte for byte —
   nothing is trimmed before the MAC, so trim it where you read it if that's what
   you meant.
+- So does a secret that is *only* NUL bytes, and that one is not a
+  third guessable key but the **same** key as the empty one: HMAC zero-pads a
+  short key to the block size, so a `"\0"` read out of a zero-padded record
+  produces exactly the empty key's publicly computable MAC. NUL is not
+  whitespace, so the check above cannot catch it. A secret that merely
+  *contains* a NUL is fine and is used byte for byte.
 
 ## Non-goals
 
