@@ -36,6 +36,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `spec.md` §4.4 ambiguity scan re-spelled Contentful's
+  `x-contentful-signed-headers` name as an independent literal, so a rename
+  would have silently disabled the dynamic half of the check** (issue #235).
+  `core::adapter_utils` — which holds the scan, and whose module comment
+  promises that a hardening "cannot be skipped" — carried its own
+  `const CONTENTFUL_SIGNED_HEADERS_HEADER: &str = "x-contentful-signed-headers"`
+  instead of the `contentful::SIGNED_HEADERS_HEADER` the provider actually
+  reads through, and every test in the file built its fixtures from that
+  literal. Renaming the provider's constant would therefore have left
+  `contentful::verify` and the static half following the new name while the
+  dynamic half followed the old one — a header no request carries any more,
+  i.e. Contentful's dynamic ambiguity protection gone with a green test suite.
+  The constant is now re-exported from `providers` and consumed by
+  `adapter_utils`, and the scan's test fixtures use it too, so the two cannot
+  diverge.
+
+  Also pins the related invariant that had no guard: the dynamic half reads
+  the list header's *first* value, so it structurally cannot see a differing
+  second copy — only the static half catches that, which is why the list
+  header must remain in `signature_header_names(Contentful)`. A new
+  behavioral test asserts that ambiguity is rejected; removing the header from
+  that list fails it, and (checked while writing it) fails nothing else.
+
+  No behavior change today — this closes a drift hazard, not a live bypass.
+
 - **Contentful: `spec.md` and the provider docs described the divergence
   between Contentful's two published signing recipes as a caller-side "corner",
   when it fires on any URL with a query string** (issue #231). The
