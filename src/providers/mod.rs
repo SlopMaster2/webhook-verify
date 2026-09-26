@@ -3572,11 +3572,17 @@ mod tests {
         // the same class of miss as Mollie's corpus seed shipping absent
         // (PR #147, which the pool guard was written for but which this seam
         // never protected). This guard pins the two inventories to each other:
-        // the sorted doc-bullet names must equal the sorted committed file
+        // the sorted doc-bullet names must equal the sorted *committed* seed
         // names exactly, so adding, renaming, or dropping either side fails CI
         // instead of drifting. `Custom`-shaped seeds are covered too — they
-        // are explicit target configurations, not name-constructible providers,
-        // but their seeds are documented the same way.
+        // are explicit target configurations, not name-constructible
+        // providers, but their seeds are documented the same way.
+        //
+        // "Committed" is what the directory is asked for, not what it is: the
+        // fuzzer appends its own digest-named working-corpus entries there on
+        // every run (see [`is_fuzzer_discovered_input`]), so those are filtered
+        // out — otherwise any local `cargo fuzz run` left the next `cargo test`
+        // failing on a diff that is entirely fuzzer state (issue #241).
         //
         // Like the pool guard above, `fuzz/` is excluded from the crates.io
         // tarball (Cargo.toml `exclude`), so in a packaged checkout the
@@ -3610,6 +3616,7 @@ mod tests {
             Ok(entries) => entries
                 .flatten()
                 .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| !is_fuzzer_discovered_input(name))
                 .collect(),
             // `fuzz/corpus/parse_and_verify/` not present (e.g. the publish
             // tarball): same skip as above.
@@ -3620,10 +3627,73 @@ mod tests {
         assert_eq!(
             bullets,
             files,
-            "fuzz seed doc bullets ({} in `fuzz_targets/parse_and_verify.rs`) must mirror the committed `fuzz/corpus/parse_and_verify/` files ({} found) exactly — a bullet for a never-committed seed or a committed seed with no doc bullet both fail here",
+            "fuzz seed doc bullets ({} in `fuzz_targets/parse_and_verify.rs`) must mirror the committed `fuzz/corpus/parse_and_verify/` seeds ({} found, ignoring the fuzzer's own digest-named working-corpus entries) exactly — a bullet for a never-committed seed or a committed seed with no doc bullet both fail here",
             bullets.len(),
             files.len(),
         );
+    }
+
+    /// Whether `name` is a file libFuzzer discovered and wrote for itself, as
+    /// opposed to a seed this repository committed.
+    ///
+    /// `fuzz/corpus/parse_and_verify/` is the fuzzer's **working** corpus, not
+    /// a read-only fixture directory: a plain `cargo fuzz run
+    /// parse_and_verify` — the command `fuzz.yml` and `spec.md` §5.6/§6 use —
+    /// appends every newly-interesting input it finds straight into it. Those
+    /// entries are named after the hex digest of the input's contents (40
+    /// lowercase hex digits, SHA-1; libFuzzer used MD5's 32 before that) and
+    /// carry no extension, and `fuzz/.gitignore` ignores them so they are never
+    /// committed. Counting them as seeds made this guard fail on the very next
+    /// `cargo test` after any local fuzz run, with a ~1400-entry diff that
+    /// says nothing about drift. Seeds carry descriptive names instead, so an
+    /// entry that is entirely lowercase hex and at least 32 characters long is
+    /// the fuzzer's own state.
+    ///
+    /// The bound is deliberately loose, and the failure direction is loud
+    /// rather than silent: should libFuzzer ever change its naming so generated
+    /// entries stop looking like digests, they land back in the comparison and
+    /// [`fuzz_seed_bullets_and_corpus_agree`] fails again — the only way this
+    /// predicate could hide drift is a *committed* seed named with 32+ hex
+    /// characters, which no one writes by hand.
+    fn is_fuzzer_discovered_input(name: &str) -> bool {
+        name.len() >= 32
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    }
+
+    #[test]
+    fn fuzzer_discovered_inputs_are_told_apart_from_committed_seeds() {
+        // The positive side: libFuzzer's own corpus entries, in the SHA-1 (40)
+        // and MD5 (32) namings. The predicate keys off a *floor* rather than
+        // an exact length, so any hash width at or above 128 bits is covered.
+        assert!(is_fuzzer_discovered_input(
+            "003ab18a2744aa4c3440c597ac82163be5ac2106"
+        ));
+        assert!(is_fuzzer_discovered_input(
+            "d95c6b7477fbd7e9f90b1b0ef5f9c7ac"
+        ));
+
+        // The negative side: every committed seed is descriptive, so a real
+        // seed must never be classified as fuzzer state — that would silently
+        // drop an undocumented seed from the guard instead of failing on it.
+        for seed in [
+            "github-valid-delivery",
+            "standard-webhooks-shape",
+            "zoom-timestamped-delivery",
+            // Short and near-miss names: descriptive, not digests.
+            "box-two-signature-delivery",
+            "circleci-signature",
+            "deadbeef",
+            "0badc0de",
+            // Digest-shaped but not lowercase-hex throughout.
+            "003AB18A2744AA4C3440C597AC82163BE5AC2106",
+            "003ab18a2744aa4c3440c597ac82163be5ac210g",
+            "003ab18a-2744aa4c-3440c597-ac82163b-e5ac2106",
+            "003ab18a2744aa4c3440c597ac82163be5ac2106.bin",
+        ] {
+            assert!(!is_fuzzer_discovered_input(seed), "seed: {seed}");
+        }
     }
 
     /// The `Provider::<Variant>` identifiers in the fuzz target's

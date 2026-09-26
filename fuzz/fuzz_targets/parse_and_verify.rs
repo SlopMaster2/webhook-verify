@@ -14,6 +14,15 @@
 //! this target's own constants, chosen so the parsed header/body reaches a
 //! distinct provider path:
 //!
+//! (This directory doubles as libFuzzer's *working* corpus, so a local
+//! `cargo fuzz run parse_and_verify` appends every newly-interesting input it
+//! finds — named after the hex digest of that input, and git-ignored — right
+//! alongside the seeds. That is expected; `git clean -fdx fuzz/` puts the
+//! directory back to the committed 62. The doc-bullet-vs-files guard in
+//! `src/providers/mod.rs` compares *committed* seeds, so those entries no
+//! longer fail it — see issue #241.)
+//!
+//!
 //! - `github-valid-delivery` — GitHub's documented example (docs.github.com),
 //!   parser-well-formed (`Name:value`, no space) so the `sha256=` prefix, hex
 //!   decode, 32-byte gate, and constant-time HMAC comparison all run.
