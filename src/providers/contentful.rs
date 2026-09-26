@@ -1012,6 +1012,12 @@ mod tests {
         // The signature is untouched, so it still matches — and the recency
         // check passes too. This is the whole point: for this shape the replay
         // window is not merely "weaker", it provides no protection at all.
+        //
+        // The `Ok(())` here *documents the current residual risk*, it does not
+        // endorse it. If a future change hard-fails a list that omits the
+        // timestamp (strictly better, and a legitimate call to make — see
+        // AGENTS.md §5), invert this assertion deliberately rather than
+        // deleting the test, so the tradeoff stays visible.
         assert_eq!(
             verify(
                 crate::Provider::Contentful,
