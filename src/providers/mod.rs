@@ -1332,10 +1332,17 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
 /// that guessable — RFC 2104 zero-pads it to the block size, so it *is* the
 /// empty key and yields the empty key's publicly computable MAC.
 ///
-/// Only those three shapes are rejected. A secret that merely *contains*
-/// whitespace or a NUL is used exactly as configured, byte for byte — the key
-/// is never trimmed before the MAC, because that would silently break every
-/// deployment that signs with a padded secret instead of reporting the problem.
+/// This check reads the **raw** secret, which is the same bytes the MAC is
+/// keyed with for every provider except the three that hex- or base64-decode
+/// it first (Adyen, Ripple, Standard Webhooks). Those re-apply the all-NUL rule
+/// to the *decoded* key at their key-derivation sites, since a secret that is
+/// not itself all-NUL (`"0000"`, `"AAAA"`, `"whsec_AAAA"`) can decode to an
+/// all-NUL key and so is the empty key one encoding layer deeper.
+///
+/// Only those shapes are rejected. A secret that merely *contains* whitespace
+/// or a NUL is used exactly as configured, byte for byte — the key is never
+/// trimmed before the MAC, because that would silently break every deployment
+/// that signs with a padded secret instead of reporting the problem.
 pub fn verify(
     provider: Provider,
     headers: &dyn HeaderMap,
@@ -1484,6 +1491,15 @@ fn uses_secret(provider: Provider) -> bool {
 ///   never noticed a trailing `\0` (a fixed-size `read_exact` into a record
 ///   padded with zeros, a config value decoded from a fixed-width field), and
 ///   NUL is not whitespace, so the check above cannot catch it.
+///
+/// This reads the **raw** secret, which is the same byte string the MAC is
+/// keyed with for every provider except the three that hex- or base64-decode
+/// it first (Adyen, Ripple, Standard Webhooks). RFC 2104 pads the *decoded*
+/// bytes there, and a secret that is not itself all-NUL text — `"0000"`,
+/// `"AAAA"`, `"whsec_AAAA"` — can still decode to an all-NUL key, which is
+/// the empty key one encoding layer deeper and accepts its publicly
+/// computable signature. Those three re-apply the predicate to the decoded
+/// key at their key-derivation sites via `core::crypto::is_all_nul_key`.
 ///
 /// "Entirely" is load-bearing and the *only* line drawn here: a secret that
 /// merely contains whitespace or a NUL (`"hunter2 "`, `"hunter2\n"`,

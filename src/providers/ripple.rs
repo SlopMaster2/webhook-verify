@@ -55,7 +55,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::{sha256_hexdigest, verify_hmac_sha256};
+use crate::core::crypto::{is_all_nul_key, sha256_hexdigest, verify_hmac_sha256};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::replay::{check_replay, parse_millis};
@@ -264,6 +264,12 @@ fn parse_header(value: &str) -> Result<ParsedHeader<'_>, VerifyError> {
 /// did not paste the subscription value — fail closed with
 /// [`VerifyError::InvalidSecret`] rather than keying the HMAC with garbage
 /// (mirroring `adyen::decode_key`).
+///
+/// The all-NUL case is rejected too, and it is the *decoded* bytes that
+/// matter: RFC 2104 zero-pads a short key, so a secret like `"AAAAAAAAAAA="`
+/// — not all-NUL text, so it slips past the entry-point guard — decodes to a
+/// key that is literally the empty one and would accept its publicly
+/// computable signature (`spec.md` §4.7).
 fn decode_key(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
     let encoded = core::str::from_utf8(secret).map_err(|_| VerifyError::InvalidSecret {
         reason: "verification key must be base64-encoded",
@@ -276,6 +282,11 @@ fn decode_key(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
     if decoded.is_empty() {
         return Err(VerifyError::InvalidSecret {
             reason: "verification key is empty",
+        });
+    }
+    if is_all_nul_key(&decoded) {
+        return Err(VerifyError::InvalidSecret {
+            reason: "decoded verification key is only NUL bytes",
         });
     }
     Ok(decoded)
@@ -867,5 +878,65 @@ mod tests {
                 other => panic!("expected BadEncoding for {value:?}, got {other:?}"),
             }
         }
+    }
+
+    /// The all-NUL rule applies to the **decoded** key, not the raw base64
+    /// text (`spec.md` §4.7).
+    ///
+    /// `decode_key` base64-decodes the secret, and RFC 2104 zero-pads any key
+    /// shorter than the block size, so `"AAAAAAAAAAA="` decodes to three zero
+    /// bytes and is *literally the empty key*: its MAC is publicly computable,
+    /// so a deployment configured that way accepts a forgery. The entry-point
+    /// guard inspects the raw string, where `"AAAAAAAAAAA="` is neither empty,
+    /// whitespace-only, nor all-NUL bytes.
+    #[test]
+    fn all_nul_base64_secret_is_the_empty_key_and_is_rejected() {
+        // The empty key's HMAC-SHA256 over Ripple's documented signing string
+        // (`{timestamp}.{sha256(raw_body)}`, hex), computed with the same
+        // recipe as [`SIGNATURE`]:
+        //   python3 -c "import hmac,hashlib;
+        //     print(hmac.new(b'', b'1725364800123.f75c22ab...', hashlib.sha256).hexdigest())"
+        const EMPTY_KEY_SIGNATURE: &str =
+            "0287132342e92e490c8760b7a8e251ece004207b51a1a35017519a03624f5b70";
+
+        for secret in ["AAAAAAAAAAA=", "AA=="] {
+            let result = verify_with(
+                BODY,
+                &format!("t={TIME_MS},v1={EMPTY_KEY_SIGNATURE}"),
+                TIME_MS,
+                &Secret::new(secret),
+                clocked_at(1_725_364_800, Some(Duration::from_secs(300))),
+            );
+            assert_eq!(
+                result,
+                Err(VerifyError::InvalidSecret {
+                    reason: "decoded verification key is only NUL bytes"
+                }),
+                "secret: {secret:?}"
+            );
+        }
+    }
+
+    /// The "entirely" boundary, in the permissive direction: a key that
+    /// *contains* a NUL is legitimate material and must be used exactly as
+    /// configured, not rejected.
+    #[test]
+    fn base64_secret_containing_nul_but_not_only_nul_is_used_as_configured() {
+        use base64::Engine;
+
+        // 32 bytes: one leading NUL then the ASCII of the real test key. This
+        // is a different key from [`SECRET`], so it must surface as a
+        // forgery — the signature simply does not match, which is what proves
+        // the key reached the MAC instead of being rejected up front.
+        let nul_prefixed =
+            base64::engine::general_purpose::STANDARD.encode([&[0u8][..], KEY].concat());
+        let result = verify_with(
+            BODY,
+            &format!("t={TIME_MS},v1={SIGNATURE}"),
+            TIME_MS,
+            &Secret::new(nul_prefixed),
+            clocked_at(1_725_364_800, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(result, Err(VerifyError::SignatureMismatch));
     }
 }

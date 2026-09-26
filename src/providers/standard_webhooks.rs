@@ -54,7 +54,7 @@ use base64::{
 };
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha256_any;
+use crate::core::crypto::{is_all_nul_key, verify_hmac_sha256_any};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::replay::{check_replay, parse_timestamp};
@@ -173,6 +173,13 @@ pub(crate) fn verify(
 /// lenient (unpadded input, non-canonical trailing bits) exactly as their
 /// published unpadded-secret vectors require. An empty or undecodable secret
 /// fails closed.
+///
+/// An all-NUL *decoded* key fails closed too, and here the `whsec_` prefix
+/// makes the gap wider than it looks: `"whsec_"` alone is caught by the
+/// `encoded.is_empty()` check, but `"whsec_AAAAAAAA"` is not all-NUL text, so
+/// it slips past the entry-point guard and then decodes to a key that RFC 2104
+/// zero-pads into the empty one — accepting its publicly computable signature
+/// (`spec.md` §4.7).
 fn decode_secret(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
     let as_str = core::str::from_utf8(secret).map_err(|_| VerifyError::InvalidSecret {
         reason: "secret must be valid UTF-8",
@@ -194,6 +201,12 @@ fn decode_secret(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
     if key.is_empty() {
         return Err(VerifyError::InvalidSecret {
             reason: "decoded signing key must not be empty",
+        });
+    }
+
+    if is_all_nul_key(&key) {
+        return Err(VerifyError::InvalidSecret {
+            reason: "decoded signing key is only NUL bytes",
         });
     }
 
@@ -1934,6 +1947,80 @@ mod tests {
                 other => panic!("expected InvalidSecret for {variant:?}, got {other:?}"),
             }
         }
+    }
+
+    /// The all-NUL rule applies to the **decoded** key, and the `whsec_`
+    /// prefix widens the gap (`spec.md` §4.7).
+    ///
+    /// `decode_secret` strips the optional prefix and base64-decodes the rest,
+    /// and RFC 2104 zero-pads any key shorter than the block size — so
+    /// `"whsec_AAAA"` decodes to three zero bytes and is *literally the empty
+    /// key*, whose MAC is publicly computable. The bare `"whsec_"` case is
+    /// already caught by the `encoded.is_empty()` check, but `"whsec_AAAA"` is
+    /// not all-NUL text, so it slips past the entry-point guard.
+    #[test]
+    fn all_nul_decoded_secret_is_the_empty_key_and_is_rejected() {
+        // The empty key's HMAC-SHA256 over `{MSG_ID}.{TIMESTAMP}.{BODY}`:
+        //   python3 -c "import hmac,hashlib,base64;
+        //     print(base64.b64encode(hmac.new(b'',
+        //       b'msg_p5jXN8AQM9LWM0D4loKWxJek.1614265330.{\"test\": 2432232314}',
+        //       hashlib.sha256).digest()).decode())"
+        const EMPTY_KEY_SIGNATURE: &str = "woH/1mJtZGSMCmpFTxRYbStS24eLLD/oXIYr4PYyZ7g=";
+
+        // With the prefix, without it, and the all-padding-plus-zeros form the
+        // lenient decoder accepts.
+        for variant in ["whsec_AAAA", "AAAA", "whsec_AAAAAAAA"] {
+            let result = verify_with(
+                BODY,
+                MSG_ID,
+                &format!("v1,{EMPTY_KEY_SIGNATURE}"),
+                &TIMESTAMP.to_string(),
+                &Secret::new(variant),
+                clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+            );
+            assert_eq!(
+                result,
+                Err(VerifyError::InvalidSecret {
+                    reason: "decoded signing key is only NUL bytes"
+                }),
+                "secret: {variant:?}"
+            );
+        }
+    }
+
+    /// The "entirely" boundary, in the permissive direction: a decoded key
+    /// that *contains* a NUL is legitimate material and must be used exactly
+    /// as configured, not rejected.
+    #[test]
+    fn decoded_secret_containing_nul_but_not_only_nul_is_used_as_configured() {
+        use base64::Engine as _;
+
+        // The real test key with one NUL byte prepended. That is a different
+        // key, so it must surface as a forgery — the signature failing to
+        // match is what proves the key reached the MAC rather than being
+        // rejected up front.
+        let mut key_bytes = vec![0_u8];
+        let real_key = match base64::engine::general_purpose::STANDARD
+            .decode(SECRET.trim_start_matches(SECRET_PREFIX))
+        {
+            Ok(bytes) => bytes,
+            Err(_) => panic!("the official vector's secret is valid base64"),
+        };
+        key_bytes.extend_from_slice(&real_key);
+        let nul_prefixed = format!(
+            "{SECRET_PREFIX}{}",
+            base64::engine::general_purpose::STANDARD.encode(&key_bytes)
+        );
+
+        let result = verify_with(
+            BODY,
+            MSG_ID,
+            &format!("v1,{SIGNATURE}"),
+            &TIMESTAMP.to_string(),
+            &Secret::new(nul_prefixed),
+            clocked_at(TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(result, Err(VerifyError::SignatureMismatch));
     }
 
     #[test]

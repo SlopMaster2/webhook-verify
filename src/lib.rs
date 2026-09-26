@@ -150,7 +150,11 @@
 //!   secret that is only whitespace — the same failure one character over — or
 //!   one that is only NUL bytes, which HMAC zero-padding makes the *same key*
 //!   as the empty one; but a secret that merely *contains* whitespace or a NUL
-//!   is used exactly as configured: nothing is trimmed before the MAC.
+//!   is used exactly as configured: nothing is trimmed before the MAC. A
+//!   secret that is not itself all-NUL but *decodes* to an all-NUL key is the
+//!   same empty key one encoding layer deeper, so the three providers that
+//!   hex- or base64-decode it (Adyen, Ripple, Standard Webhooks) re-apply the
+//!   rule to the decoded bytes.
 //! - Parsing paths return [`VerifyError`] instead of panicking on
 //!   attacker-controlled input.
 //!

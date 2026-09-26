@@ -431,6 +431,12 @@ before the body is read, but verification requires those bytes.
   produces exactly the empty key's publicly computable MAC. NUL is not
   whitespace, so the check above cannot catch it. A secret that merely
   *contains* a NUL is fine and is used byte for byte.
+- And so does a secret that is not itself all-NUL but **decodes** to an
+  all-NUL key, which is the same empty key one encoding layer deeper. Adyen
+  hex-decodes its key and Ripple and Standard Webhooks base64-decode theirs, so
+  `"0000"`, `"AAAA"`, and `"whsec_AAAA"` are not all-NUL *text* — they reach
+  the MAC as the empty key and would accept a signature anyone can compute.
+  The three providers re-apply the rule to the decoded bytes.
 
 ## Non-goals
 

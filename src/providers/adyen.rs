@@ -53,7 +53,7 @@
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha256;
+use crate::core::crypto::{is_all_nul_key, verify_hmac_sha256};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::secret::Secret;
@@ -97,6 +97,12 @@ pub(crate) fn verify(
 /// nothing, means the operator did not paste the Customer Area value — fail
 /// closed with [`VerifyError::InvalidSecret`] rather than keying the HMAC with
 /// an empty key that anyone could reproduce.
+///
+/// The all-NUL case is rejected here too, and it is the *decoded* bytes that
+/// matter: RFC 2104 zero-pads a short key, so a secret of `"0000"` — which is
+/// not all-NUL text, and so slips past the entry-point guard — decodes to a key
+/// that is literally the empty one and would accept its publicly computable
+/// signature (`spec.md` §4.7).
 fn decode_key(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
     let key = core::str::from_utf8(secret).map_err(|_| VerifyError::InvalidSecret {
         reason: "HMAC key must be a hex-encoded string",
@@ -107,6 +113,11 @@ fn decode_key(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
     if decoded.is_empty() {
         return Err(VerifyError::InvalidSecret {
             reason: "HMAC key is empty",
+        });
+    }
+    if is_all_nul_key(&decoded) {
+        return Err(VerifyError::InvalidSecret {
+            reason: "decoded HMAC key is only NUL bytes",
         });
     }
     Ok(decoded)
@@ -284,7 +295,14 @@ mod tests {
     fn wrong_secret_fails() {
         // A different but well-formed hex key must surface as a forgery, not a
         // configuration error.
-        let other_key = "0000000000000000000000000000000000000000000000000000000000000000";
+        //
+        // This used to be 32 zero bytes, which is no longer a *well-formed*
+        // key: all-NUL decodes to the empty key, so it is now rejected as
+        // `InvalidSecret` and covered by
+        // `all_nul_hex_secret_is_the_empty_key_and_is_rejected` instead. Flip
+        // one byte so the key stays well-formed and the test keeps testing the
+        // mismatch path.
+        let other_key = "0100000000000000000000000000000000000000000000000000000000000000";
         let result = verify(
             crate::Provider::Adyen,
             &adyen_headers(SIGNATURE),
@@ -393,6 +411,65 @@ mod tests {
                 reason: "secret is empty"
             })
         );
+    }
+
+    /// The all-NUL rule has to be applied to the *decoded* key, not the raw
+    /// hex text.
+    ///
+    /// Adyen keys the HMAC with `hex::decode(secret)`, and RFC 2104 zero-pads
+    /// any key shorter than the block size, so a secret of `"0000"` decodes to
+    /// two zero bytes and is *literally the empty key*: the empty-key signature
+    /// is publicly computable, so a deployment configured that way accepts a
+    /// forgery. The uniform entry-point guard inspects the raw string, where
+    /// `"0000"` is neither empty, whitespace-only, nor all-NUL bytes.
+    #[test]
+    fn all_nul_hex_secret_is_the_empty_key_and_is_rejected() {
+        // `EMPTY_KEY_SIGNATURE` is the empty key's HMAC-SHA256 over `BODY`:
+        //   printf '%s' '<BODY>' | openssl dgst -sha256 -mac hmac \
+        //     -macopt hexkey:0000 -binary | base64
+        const ZERO_FILLED_SECRET: &str = "0000";
+        const EMPTY_KEY_SIGNATURE: &str = "beD55idvUYPqmj0qa7/umeMhUo/0u3vhnlGJqyt5D+I=";
+
+        let result = verify(
+            crate::Provider::Adyen,
+            &adyen_headers(EMPTY_KEY_SIGNATURE),
+            BODY,
+            &Secret::new(ZERO_FILLED_SECRET),
+            Default::default(),
+        );
+        assert_eq!(
+            result,
+            Err(VerifyError::InvalidSecret {
+                reason: "decoded HMAC key is only NUL bytes"
+            })
+        );
+    }
+
+    /// The "entirely" boundary, in the permissive direction: a hex key that
+    /// *contains* a NUL is legitimate material and must be used exactly as
+    /// configured, byte for byte, rather than rejected or trimmed.
+    #[test]
+    fn hex_secret_containing_nul_but_not_only_nul_is_used_as_configured() {
+        // The published key with one NUL byte prepended. That is a different
+        // key, so it must surface as a forgery — the signature failing to
+        // match is what proves the key reached the MAC rather than being
+        // rejected up front.
+        let mut key_bytes = vec![0_u8];
+        let real_key = match hex::decode(SECRET) {
+            Ok(bytes) => bytes,
+            Err(_) => panic!("the official vector's key is valid hex"),
+        };
+        key_bytes.extend_from_slice(&real_key);
+        let nul_prefixed = hex::encode(&key_bytes);
+
+        let result = verify(
+            crate::Provider::Adyen,
+            &adyen_headers(SIGNATURE),
+            BODY,
+            &Secret::new(nul_prefixed),
+            Default::default(),
+        );
+        assert_eq!(result, Err(VerifyError::SignatureMismatch));
     }
 
     #[test]

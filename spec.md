@@ -3066,6 +3066,28 @@ ambiguity).
    `secret is only NUL bytes`, so an operator can tell a missing configuration
    from a padded one from a zero-padded one.
 
+   **The all-NUL predicate applies to the *decoded* key, not the raw
+   secret.** RFC 2104 pads whatever bytes the provider actually keys with, so
+   for a provider that hex- or base64-decodes the secret first, the secret's
+   *text* is not the key. `"0000"` (Adyen, hex) and `"AAAA"` (Ripple and
+   Standard Webhooks, base64) are not all-NUL text, so the entry-point check
+   cannot see them, yet they decode to keys made of nothing but zero bytes and
+   are therefore *the empty key* — a deployment configured that way accepts
+   the publicly computable empty-key signature, with nothing to guess. The
+   reasoning is unchanged by the encoding layer in front of it, so the same
+   predicate is re-applied at the three audited key-derivation sites via
+   `core::crypto::is_all_nul_key` (Adyen's `decode_key`, Ripple's
+   `decode_key`, Standard Webhooks' `decode_secret`), each reporting
+   `decoded … is only NUL bytes` alongside the decoded-empty check that
+   already sat there. Standard Webhooks' optional `whsec_` prefix widens the
+   gap rather than closing it: `"whsec_"` alone is caught by the existing
+   `encoded.is_empty()` check, but `"whsec_AAAA"` is not all-NUL text and
+   decodes to three zero bytes. The five providers that use the raw secret
+   bytes as key material verbatim (Contentful, HubSpot, Square, Mandrill,
+   Twilio) need no second check — raw and decoded are the same bytes there —
+   and Discord's zero key is not a valid Ed25519 compressed point, so it
+   already fails closed as a malformed key.
+
    The rule is deliberately narrow in two directions, and both matter:
    - **Only if the secret is *entirely* whitespace, or *entirely* NUL.** A
      secret that merely contains either (`"hunter2 "`,
@@ -3075,7 +3097,8 @@ ambiguity).
      newline — or read from a record with a trailing NUL — is a different key
      from the unpadded one; rejecting it would break a working integration.
      The NUL predicate is therefore "every byte is zero" rather than "contains
-     a NUL", and the "entirely" boundary is tested in both directions.
+     a NUL", and the "entirely" boundary is tested in both directions, for
+     the raw secret and for each decoded key.
      An all-NUL key *longer* than the block size is rejected too, even though
      it no longer collapses to the empty key (it gets hashed): it is not a key
      an operator configured on purpose, and this crate's bias is toward the
@@ -3091,6 +3114,12 @@ ambiguity).
      `str::trim`'s definition (Unicode `White_Space`), matching what an
      operator can write in their own fix, so a pasted `U+00A0` is caught too.
 
+   `is_all_nul_key` treats empty as *not* all-NUL on purpose: `[].iter().all(..)`
+   is vacuously true, which would collapse the two shapes into one and make
+   every call site's decoded-empty branch unreachable, losing the distinct
+   `reason` strings operators rely on. Each site rejects a decoded-empty key
+   first, so the helper only has to not claim that shape.
+
    Nine provider modules already enforced the empty case locally before the
    dispatch check existed (Adyen, Contentful, HubSpot, Mandrill, Ripple,
    Square, Standard Webhooks, Twilio, and Discord for its public key); those
@@ -3102,7 +3131,9 @@ ambiguity).
    `secret is only NUL bytes` reasons instead. (Three of the nine — Adyen,
    Ripple, and Standard Webhooks — check the *decoded* key rather than the raw
    secret, and Discord's checks its Ed25519 key's format, so a whitespace-only
-   secret already failed closed there as a malformed key.)
+   secret already failed closed there as a malformed key. Those same three are
+   the ones the all-NUL predicate has to be re-applied to, since the raw secret
+   and the decoded key are different byte strings there.)
 
 ---
 
