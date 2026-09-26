@@ -50,7 +50,7 @@
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha256;
+use crate::core::crypto::verify_hmac_sha256_any;
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::replay::{check_replay, parse_rfc3339_timestamp};
@@ -113,11 +113,18 @@ pub(crate) fn verify(
 
     // Box signs every delivery with both current keys, so the caller's single
     // `Secret` — whichever key it is during a rotation — must match one of the
-    // two headers. Both comparisons run, and neither comparison's result
-    // depends on the other, so no early exit splits on *how* it fails.
-    let primary_ok = verify_hmac_sha256(secret.as_bytes(), &signed_string, &primary);
-    let secondary_ok = verify_hmac_sha256(secret.as_bytes(), &signed_string, &secondary);
-    if primary_ok || secondary_ok {
+    // two headers. `verify_hmac_sha256_any` computes the digest **once** and
+    // compares both candidates against it (`spec.md` §4.1): the two headers are
+    // two candidates for the same key over the same signed string, not two
+    // independent verifications. Every candidate is compared and the results
+    // are OR-ed without an early exit, so no comparison's outcome depends on
+    // the other's.
+    let matched = verify_hmac_sha256_any(
+        secret.as_bytes(),
+        &signed_string,
+        [primary.as_slice(), secondary.as_slice()],
+    );
+    if matched {
         check_replay(timestamp, options)
     } else {
         Err(VerifyError::SignatureMismatch)

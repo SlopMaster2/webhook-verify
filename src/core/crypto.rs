@@ -78,6 +78,25 @@ pub(crate) fn verify_hmac_sha256(
     })
 }
 
+/// Verifies `provided_signatures` — any number of candidate signatures — against
+/// HMAC-SHA256(`key`, `signed_string`), returning `true` if **any** of them
+/// matches.
+///
+/// This exists for the multi-candidate schemes (`spec.md` §4.1): Stripe,
+/// Paddle, PagerDuty, Mux, Tailscale, and Standard Webhooks accept a delivery
+/// when any comma-separated signature in one header matches, and Box accepts one
+/// when either of its two signature headers matches. Those candidates all cover
+/// the *same* key over the *same* signed string, so the HMAC is computed once
+/// and every candidate is compared against that one digest — never one HMAC per
+/// candidate. Calling [`verify_hmac_sha256`] in a loop instead would multiply
+/// the per-delivery HMAC work by the candidate count, all of it attacker-
+/// reachable.
+///
+/// The comparison keeps [`verify_hmac_sha256`]'s guarantees: constant-time per
+/// candidate, no early exit (the accumulator is OR-ed across the whole
+/// iterator), and `false` — not an error — if key construction fails or the
+/// candidate list is empty. A wrong-length candidate compares unequal, which
+/// leaks nothing secret.
 #[must_use]
 pub(crate) fn verify_hmac_sha256_any<'a, I>(
     key: &[u8],
