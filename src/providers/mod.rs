@@ -3323,6 +3323,54 @@ mod tests {
             "spec.md §2 must name every alias `Provider::from_str` accepts; \
              undocumented: {undocumented:?}"
         );
+
+        // The check above runs in one direction only — every accepted spelling
+        // must be named — and that is what let a claim about a variant that
+        // does not ship survive: §2 listed `"big commerce"/"big-commerce" →
+        // BigCommerce` in the multi-word-variant parenthetical, but there is no
+        // `Provider::BigCommerce`; those spellings are Standard Webhooks
+        // *adopter* aliases and resolve to `Provider::StandardWebhooks`
+        // (issue #239). The two quoted spellings were present, so the
+        // one-directional guard passed. Close the other direction: every `→ X`
+        // in this sketch must name a variant that actually exists, so an
+        // adopter brand can never again be documented as though it were its
+        // own scheme.
+        let mut phantom_variants: Vec<String> = Vec::new();
+        let mut cursor = 0usize;
+        while let Some(found) = section[cursor..].find('→') {
+            let arrow = cursor + found;
+            cursor = arrow + '→'.len_utf8();
+            let name: String = section[cursor..]
+                .trim_start()
+                .chars()
+                .take_while(char::is_ascii_alphanumeric)
+                .collect();
+            if name.is_empty() {
+                continue;
+            }
+            let exists = provider_list()
+                .iter()
+                .any(|provider| format!("{provider:?}") == name);
+            if !exists {
+                // Report the whole line the arrow sits on, so the failure names
+                // the claim rather than an unrelated offset.
+                let line_start = section[..arrow].rfind('\n').map_or(0, |at| at + 1);
+                let line = section[line_start..]
+                    .split('\n')
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                phantom_variants.push(line.to_string());
+            }
+        }
+        phantom_variants.sort_unstable();
+        phantom_variants.dedup();
+        assert!(
+            phantom_variants.is_empty(),
+            "every `→ Variant` claim in spec.md §2's `FromStr` sketch must name a \
+             variant that ships; claims about variants that do not exist: \
+             {phantom_variants:?}"
+        );
     }
 
     /// One `spec.md` §3 entry: its `### ` heading, the provider brand it
