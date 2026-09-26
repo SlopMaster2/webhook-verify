@@ -11,10 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Contentful's replay caveat understated the risk of a delivery whose
   signed-headers list omits `x-contentful-timestamp`; the window is bypassable
-  outright, not merely weaker.** The provider docs described the shape as
-  "an attacker who can forge a fresh signature could extend the window — the
-  same documented caveat as `CustomScheme`", which implies the attacker needs
-  the signing secret. They do not.
+  outright, not merely weaker** (issue #229). The provider docs described the
+  shape as "an attacker who can forge a fresh signature could extend the
+  window — the same documented caveat as `CustomScheme`", which implies the
+  attacker needs the signing secret. They do not.
   `x-contentful-signed-headers` is itself *not* part of Contentful's canonical
   string — only the headers it *lists* are — so with the timestamp unlisted the
   header falls entirely outside the HMAC. An attacker holding a single captured
