@@ -36,6 +36,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The fuzz seed-inventory guard compared the doc bullets against libFuzzer's
+  working corpus, so `cargo test` failed after any local fuzz run** (issue
+  #241). `providers::tests::fuzz_seed_bullets_and_corpus_agree` pins the two
+  seed inventories together — the sorted doc-bullet names in
+  `fuzz/fuzz_targets/parse_and_verify.rs` must equal the files in
+  `fuzz/corpus/parse_and_verify/`, so adding or renaming a seed on either side
+  fails CI — but it read that directory with a plain `fs::read_dir`. It is not
+  a read-only fixture directory: it is the corpus libFuzzer *writes* to, and
+  every input it discovers is appended there, named after the hex digest of
+  that input's contents (40 lowercase hex digits, SHA-1) and ignored by
+  `fuzz/.gitignore` so it is never committed. A contributor who followed the
+  documented workflow (`spec.md` §5.6/§6, `fuzz.yml`) got a 25-second local run
+  to add ~800 uncommitted entries and the *next* `cargo test` then failed on a
+  ~1400-entry diff that said nothing about drift, in every feature
+  configuration, since the guard is not feature-gated.
+
+  The guard now filters out digest-named entries before comparing, so it asks
+  the directory the question it documents — what is *committed* — and a real
+  drift diff is one line again. The failure direction stays loud: the filter
+  keys off a 32-character lowercase-hex floor rather than one exact length, so
+  any hash width libFuzzer might use is covered, and if its naming ever stops
+  looking like a digest the generated entries land back in the comparison and
+  the assertion fails rather than a committed seed being silently ignored. A
+  new test pins the discrimination from both sides (real seed names are never
+  classified as fuzzer state; 40- and 32-hex corpus entries are), and
+  verified in both directions: the guard passes with 800+ digest-named
+  working-corpus entries present, and still fails with a single undocumented
+  seed file.
+
+  **Test-only fix — no behavior change.** `verify()`, the provider
+  implementations, and the committed seed set are all untouched.
+
 - **`spec.md` §2 claimed a `Provider::BigCommerce` variant that does not
   exist** (issue #239). The `FromStr` sketch listed `"big commerce"`/
   `"big-commerce" → BigCommerce` in the parenthetical enumerating
