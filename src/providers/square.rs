@@ -27,8 +27,8 @@
 //!
 //! # Caller-supplied context
 //!
-//! This is the one shipped scheme where verification cannot proceed from
-//! headers + body + secret alone: the signed content includes the endpoint
+//! Like Twilio, Mandrill, HubSpot, and Contentful, verification cannot proceed
+//! from headers + body + secret alone: the signed content includes the endpoint
 //! URL. Callers pass it via [`VerifyOptions::request_url`] (typically the
 //! dashboard-configured constant). Omitting or emptying it fails closed with
 //! [`VerifyError::MissingContext`] rather than degrading into a body-only
