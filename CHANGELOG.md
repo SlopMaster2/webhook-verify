@@ -1572,6 +1572,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A whitespace-only secret no longer verifies a forged delivery.** #222
+  rejected the *empty* key, but a key one character over was just as
+  guessable and still verified: `Secret::new(" ")`, `Secret::new("\n")`, and
+  `Secret::new("  ")` all returned `Ok(())` from `verify()` for a signature any
+  reader of the request can compute —
+
+  ```text
+  # HMAC-SHA256(key = b"\n", msg = b"Hello, World!"), computable by anyone
+  X-Hub-Signature-256: sha256=31fb072035916891c35c0d7587a6478d7f31b6a0ccd469dc50f1896fb04ad526
+  ```
+
+  The candidate set is not "all possible strings" but the handful of shapes
+  ordinary operator mistakes produce, and the two most likely are single
+  characters: a `"\n"` from a secret file written with `echo` rather than
+  `printf`, and a `" "` from a CI/CD variable defined as a literal space (what
+  `env::var(..).unwrap_or_default()` yields for a blank-but-present variable).
+  A deployment keyed with one of them was forgeable by anyone who tried three
+  signatures, and the failure was indistinguishable from a working integration.
+
+  `verify_ref` now rejects a secret that is empty *or* entirely whitespace,
+  with `InvalidSecret { reason: "secret is only whitespace" }` for the new
+  case and the existing `reason: "secret is empty"` unchanged, so an operator
+  can tell a missing configuration from a padded one. Whitespace is tested
+  with `str::trim`'s definition (Unicode `White_Space`), matching what an
+  operator can write in their own fix, so a pasted `U+00A0` is caught too.
+
+  Both halves of the fix are deliberate, per the design question #223 raised:
+  - **Rejected, not trimmed.** Trimming before keying would fix the forgery
+    *and* keep such deployments verifying, but it silently changes the bytes
+    fed to the MAC, so every deployment currently signing with a padded secret
+    would start failing with no change on their side. Failing loudly is this
+    crate's bias, and the `InvalidSecret` points at the one-line `.trim()` the
+    operator can apply where they read the secret.
+  - **Only when the secret is *entirely* whitespace.** A secret that merely
+    contains whitespace (`"hunter2 "`, `"It's a Secret to Everybody\n"`) is
+    legitimate key material — a provider signs with whatever the operator
+    configured — and is used byte for byte, exactly as before.
+
+  Everything else is inherited from #222 and unchanged: the check still lives
+  once in the `verify_ref` dispatch (so `verify`, `verify_any`, and the
+  `tower`/`actix` adapters all inherit it) and still precedes header lookup;
+  `UnsupportedProvider` still wins for a feature-gated provider; under
+  `verify_any` an unusable element is skipped so a slice holding the live key
+  still verifies; and PayPal and SendGrid, which ignore `Secret` entirely, are
+  unaffected. Nothing that verifies with a usable secret changes, including one
+  that contains whitespace.
+
+  Specified as `spec.md` §4.7 (with the `InvalidSecret` aggregation rule in
+  §2.1 cross-referenced) and documented on `verify`, `verify_any`, the crate
+  docs, and the README security notes. Covered by
+  `whitespace_only_secret_fails_closed_instead_of_accepting_a_forgery` (the
+  issue's own repro, over a table of every unusable shape),
+  `unusable_secret_hmac_vectors_are_genuine_macs_for_those_keys` (proves each
+  table vector really is an HMAC under that key, so the test cannot pass
+  vacuously), `unusable_secret_is_rejected_for_every_provider_that_uses_one`
+  (iterates `provider_list()` and the whole table),
+  `a_secret_that_merely_contains_whitespace_still_verifies` (the boundary that
+  must *not* move),
+  `an_unusable_secret_is_not_reported_to_a_provider_that_ignores_it`, and the
+  two `verify_any` cases. No new dependency.
+
 - **An empty secret no longer verifies a forged delivery.** Passing
   `Secret::new("")` — the shape an unset environment variable, a missing
   config file entry, or `Secret::default()` collapses to — used to return

@@ -419,6 +419,12 @@ before the body is read, but verification requires those bytes.
   `verifying_material` instead). An empty HMAC key is not a weak key but no key
   at all — anyone who can read a request can compute the signature it produces
   — so it is rejected before the request is parsed rather than verified.
+- So does a secret that is *only* whitespace (spec §4.7), which is the same
+  failure one character over: the `"\n"` left by a secret file written with
+  `echo` rather than `printf`, or a CI/CD variable defined as a literal space.
+  A secret that merely *contains* whitespace is fine and is used byte for byte —
+  nothing is trimmed before the MAC, so trim it where you read it if that's what
+  you meant.
 
 ## Non-goals
 

@@ -31,6 +31,15 @@ impl Secret {
     pub(crate) fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
+
+    /// The key as a string slice. Crate-internal, and for the same reason as
+    /// [`Secret::as_bytes`]: the [`Secret`] guard in `spec.md` §4.7 has to
+    /// classify a key that consists only of whitespace, which is a
+    /// `str`-level property (`str::trim`).
+    #[must_use]
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl From<&str> for Secret {

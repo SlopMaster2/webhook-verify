@@ -285,9 +285,10 @@ returns `Ok(())` if any one of them verifies. Its error aggregation rules:
   in the slice may still be correct. `verify_any` therefore *continues*
   past an `InvalidSecret` rather than aborting, so a rotation slice with one
   garbled/truncated live key still verifies against the healthy one. An
-  **empty** key is such a case (§4.7): it is unusable for every request, and
-  it is also the one that must never be used to compute a MAC, so `verify`
-  rejects it up front with `InvalidSecret { reason: "secret is empty" }`.
+  **empty or whitespace-only** key is such a case (§4.7): it is unusable for
+  every request, and it is also the one that must never be used to compute a
+  MAC, so `verify` rejects it up front with `InvalidSecret {
+  reason: "secret is empty" }` or `reason: "secret is only whitespace"`.
 - On total failure, `verify_any` returns `SignatureMismatch` if at least one
   key was well-formed but wrong; it returns the first `InvalidSecret` only
   when *every* key was rejected for its own formatting (an all-garbled
@@ -3017,11 +3018,11 @@ ambiguity).
    perfectly (header lookups are not constant-time), but the security-
    relevant step — signature comparison — must be, and is the one that
    matters for known real-world timing attacks.
-7. **An empty secret fails closed.** Every provider whose scheme is keyed by
-   the `Secret` argument — that is, every provider except the two asymmetric
-   schemes, PayPal and SendGrid, which ignore `Secret` and verify against
-   `VerifyOptions::verifying_material` — rejects an empty secret with
-   `InvalidSecret` before any request parsing or signature work. An empty
+7. **An empty or whitespace-only secret fails closed.** Every provider whose
+   scheme is keyed by the `Secret` argument — that is, every provider except
+   the two asymmetric schemes, PayPal and SendGrid, which ignore `Secret` and
+   verify against `VerifyOptions::verifying_material` — rejects such a secret
+   with `InvalidSecret` before any request parsing or signature work. An empty
    HMAC (or plain-digest) key is not a weak key but *no* key: the resulting
    signature is reproducible by anyone who can read the request, so accepting
    one turns `verify()` into an unconditional `Ok(())` for a forged delivery.
@@ -3033,19 +3034,54 @@ ambiguity).
    - `UnsupportedProvider` still wins for a feature-gated provider, so a
      build without `paypal`/`sendgrid` keeps reporting the missing feature
      rather than blaming the secret.
-   - Under `verify_any` an empty element is skipped like any other unusable
-     key (§2.1), so a slice that also holds the live key still verifies; the
-     `InvalidSecret` surfaces only when *every* element is empty, which is
-     exactly the existing all-garbled-rotation rule.
+   - Under `verify_any` an unusable element is skipped like any other
+     unusable key (§2.1), so a slice that also holds the live key still
+     verifies; the `InvalidSecret` surfaces only when *every* element is
+     unusable, which is exactly the existing all-garbled-rotation rule.
 
-   Nine provider modules already enforced this locally before the dispatch
-   check existed (Adyen, Contentful, HubSpot, Mandrill, Ripple, Square,
-   Standard Webhooks, Twilio, and Discord for its public key); those
+   **Whitespace-only is the same failure reached one character over, and is
+   rejected for the same reason.** The candidate set is not "all possible
+   strings" but the handful of shapes ordinary operator mistakes produce, and
+   the two most likely are single characters: a `"\n"` from a secret file
+   written with `echo` rather than `printf`, and a `" "` from a CI/CD
+   variable defined as a literal space (what
+   `env::var(..).unwrap_or_default()` yields when the variable is present but
+   blank). A deployment keyed with one of them is forgeable by anyone who
+   tries three signatures, and the failure is indistinguishable from a
+   working integration. The two reasons are reported distinctly —
+   `secret is empty` and `secret is only whitespace` — so an operator can
+   tell a missing configuration from a padded one.
+
+   The rule is deliberately narrow in two directions, and both matter:
+   - **Only if the secret is *entirely* whitespace.** A secret that merely
+     contains whitespace (`"hunter2 "`, `"It's a Secret to Everybody\n"`) is
+     legitimate key material and is used exactly as configured. A provider
+     signs with whatever the operator configured, and a real key pasted with a
+     trailing newline is a different key from the unpasted one; rejecting it
+     would break a working integration.
+   - **Nothing is trimmed before keying.** Trimming would fix the forgery
+     *and* keep such deployments verifying, but it silently changes the bytes
+     fed to the MAC, so every deployment currently signing with a padded
+     secret would start failing with no change on their side — a silent break
+     rather than a loud one, which is the opposite of this crate's bias. The
+     operator-visible fix is to trim the secret where it is read (a one-line
+     `.trim()` on the `fs::read_to_string`/`env::var` result), and the loud
+     `InvalidSecret` points at exactly that. Whitespace is tested with
+     `str::trim`'s definition (Unicode `White_Space`), matching what an
+     operator can write in their own fix, so a pasted `U+00A0` is caught too.
+
+   Nine provider modules already enforced the empty case locally before the
+   dispatch check existed (Adyen, Contentful, HubSpot, Mandrill, Ripple,
+   Square, Standard Webhooks, Twilio, and Discord for its public key); those
    per-provider checks are retained as a last line of defence at the audited
    key-derivation site, and the uniform entry-point check is what makes the
    rule hold for the rest. Their `InvalidSecret` `reason` strings are
    therefore no longer reachable through `verify()` — the entry point reports
-   the single `secret is empty` reason instead.
+   the uniform `secret is empty` / `secret is only whitespace` reasons
+   instead. (Three of the nine — Adyen, Ripple, and Standard Webhooks — check
+   the *decoded* key rather than the raw secret, and Discord's checks its
+   Ed25519 key's format, so a whitespace-only secret already failed closed
+   there as a malformed key.)
 
 ---
 
