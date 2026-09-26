@@ -36,6 +36,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`spec.md` §2 claimed a `Provider::BigCommerce` variant that does not
+  exist** (issue #239). The `FromStr` sketch listed `"big commerce"`/
+  `"big-commerce" → BigCommerce` in the parenthetical enumerating
+  "the space-separated and hyphenated human-readable forms for the
+  multi-word-name variants". There is no such variant: BigCommerce is a
+  Standard Webhooks *adopter*, and all three spellings (`"bigcommerce"`,
+  `"big commerce"`, `"big-commerce"`) have always resolved to
+  `Provider::StandardWebhooks`. The normative contract therefore named a
+  variant a reader cannot construct, and filed an adopter brand under
+  "multi-word-name variants" as though it had a scheme of its own.
+
+  Spec-only fix — the parser was already correct and is unchanged. The two
+  spellings move out of the variant parenthetical and into the Standard
+  Webhooks adopter-alias list, next to the `"bigcommerce"` already there.
+
+  It survived because `spec_section_two_documents_every_accepted_alias` only
+  checks one direction — every spelling `from_str` accepts must be *named* in
+  §2 — and both spellings were present, just attached to the wrong thing. That
+  guard now also checks the other direction: every `→ Variant` claim in §2's
+  `FromStr` sketch must name a variant in `provider_list()`, so an adopter
+  brand cannot be documented as a variant again.
+
 - **Box: every delivery paid two HMAC-SHA256 computations where
   `spec.md` §4.1 requires one** (issue #237). Box signs each delivery with both
   its current keys and accepts it when *either* `BOX-SIGNATURE-PRIMARY` or
