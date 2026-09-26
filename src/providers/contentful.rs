@@ -28,6 +28,20 @@
 //!   through the same scheme→authority→path/value split as the SDK's
 //!   `getNormalizedEncodedURI`; a caller may alternatively supply the bare
 //!   path form (`/webhooks/...`), which is used verbatim.
+//! - Path/query encoding divergence: the two sources above do **not** agree
+//!   here, and no wire capture settles which one Contentful's signer follows
+//!   (`spec.md` §7). The SDK runs `querystring.escape` on the query and then a
+//!   second `encodeURI`, which re-escapes every `%` the first pass produced, so
+//!   its `requestPath` differs from the documentation's for *any* URL with a
+//!   query string (`/hook?a=b` → the SDK's `/hook?a%253Db`, the documentation's
+//!   `/hook?a%3Db`) and for any path containing `%` (`/hooks/%E2%9C%93` →
+//!   `/hooks/%25E2%259C%2593`). This crate implements the documentation's form,
+//!   the normative source. The failure direction is safe: a mismatch here
+//!   *rejects* a legitimate delivery rather than accepting a forged one. If a
+//!   delivery to a query-bearing webhook URL is ever rejected as
+//!   [`VerifyError::SignatureMismatch`], this divergence is the first suspect.
+//!   Both forms are pinned by
+//!   `path_encoding_diverges_from_the_reference_sdk_on_any_query`.
 //! - Algorithm: HMAC-SHA256, hex-encoded (lowercase). Key: the space's
 //!   64-character webhook signing secret, used as its UTF-8 bytes verbatim.
 //!
@@ -355,6 +369,11 @@ fn append_signed_headers_segment(
 /// - if a `?query` is present, only the query portion is percent-encoded
 ///   (JavaScript `encodeURIComponent` set), with the pathname passed through
 ///   as UTF-8 bytes; with no query, nothing is re-encoded.
+///
+/// The scheme/authority/fragment handling above mirrors both sources; the
+/// query encoding deliberately follows the documentation's single pass rather
+/// than the SDK's `querystring.escape` + `encodeURI` double pass (see the
+/// module docs' path/query divergence note and `spec.md` §7).
 fn normalized_request_path(url: &str) -> String {
     let path_and_query = if url.starts_with('/') {
         Cow::Borrowed(url)
@@ -530,10 +549,13 @@ mod tests {
             ),
             Err(VerifyError::SignatureMismatch)
         );
-        // ...and a caller passing an already percent-encoded query must supply
-        // the raw form instead: the query is encoded exactly once, per the
-        // docs' `urlEncode(query)` pseudo-code (this deliberately does not
-        // reproduce the reference SDK's double-encode corner).
+        // ...and passing an already percent-encoded query does not verify
+        // either: the query is encoded exactly once, per the documentation's
+        // `urlEncode(query)` pseudo-code. (The reference SDK would encode it
+        // twice; the two cited sources genuinely disagree here and this crate
+        // follows the documentation — see
+        // `path_encoding_diverges_from_the_reference_sdk_on_any_query` and
+        // `spec.md` §7.)
         assert_eq!(
             verify_with(
                 BODY,
@@ -544,6 +566,54 @@ mod tests {
             ),
             Err(VerifyError::SignatureMismatch)
         );
+    }
+
+    // --- issue #231: the two cited sources disagree on query encoding --------
+    //
+    // The documentation's pseudo-code encodes the query once, while the
+    // reference SDK's `getNormalizedEncodedURI` applies `querystring.escape`
+    // and then a second `encodeURI`, which re-escapes every `%` the first pass
+    // produced. The divergence fires on plain, unencoded input (`/hook?a=b`),
+    // so it is not a caller-side pre-encoding mistake. Contentful publishes no
+    // frozen signature for a query-bearing URL and no vector here is
+    // wire-captured, so the crate cannot tell which form its signer emits; it
+    // pins the documentation's form (implemented) against the SDK's (rejected)
+    // for every divergent shape, so neither side drifts silently. The `per_sdk`
+    // column was produced by running the SDK's function in Node.
+    #[test]
+    fn path_encoding_diverges_from_the_reference_sdk_on_any_query() {
+        for (url, per_docs, per_sdk) in [
+            ("/hook?a=b", "/hook?a%3Db", "/hook?a%253Db"),
+            (
+                "/hook?next=/x",
+                "/hook?next%3D%2Fx",
+                "/hook?next%253D%252Fx",
+            ),
+            (
+                "/hooks/%E2%9C%93",
+                "/hooks/%E2%9C%93",
+                "/hooks/%25E2%259C%2593",
+            ),
+            (
+                "/hook?a=b%23c",
+                "/hook?a%3Db%2523c",
+                "/hook?a%253Db%252523c",
+            ),
+        ] {
+            assert_eq!(
+                super::normalized_request_path(url),
+                per_docs,
+                "request_url {url:?} must normalize per the documentation's pseudo-code"
+            );
+            assert_ne!(
+                super::normalized_request_path(url),
+                per_sdk,
+                "request_url {url:?} no longer diverges from the reference SDK. If a wire \
+                 capture shows Contentful's signer emits the SDK's form, that is a behavior \
+                 change to make deliberately — with spec.md §3 and §7 updated in the same \
+                 commit — not a table to edit."
+            );
+        }
     }
 
     #[test]

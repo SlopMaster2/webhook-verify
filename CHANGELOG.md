@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Contentful: `spec.md` and the provider docs described the divergence
+  between Contentful's two published signing recipes as a caller-side "corner",
+  when it fires on any URL with a query string** (issue #231). The
+  documentation's pseudo-code encodes the query once
+  (`query = urlEncode(query)`), while `getNormalizedEncodedURI` in
+  `@contentful/node-apps-toolkit` applies `querystring.escape` and *then* a
+  second `encodeURI` — re-escaping every `%` the first pass produced. So
+  `/hook?a=b` normalizes to `/hook?a%253Db` under the SDK and `/hook?a%3Db`
+  under the documentation, and `/hooks/%E2%9C%93` diverges even with no query
+  at all. Nothing about that requires the caller to pre-encode anything.
+
+  This is a **documentation** fix, not a behavior change: the crate
+  implements the documentation's form, which §3 makes normative, and that
+  choice fails safe (it rejects a legitimate delivery rather than accepting a
+  forged one — the reverse would be the dangerous direction, since two
+  distinct URIs would collide onto one signature). What changed is that
+  `spec.md` §3 carries the side-by-side table and a new §7 entry records the
+  divergence as **unresolved**, needing one real delivery captured off the
+  wire at a query-bearing webhook URL — Contentful publishes no frozen numeric
+  signature for that shape, and none of the provider's vectors is
+  wire-captured. The provider's module docs now name the divergence, its
+  direction of failure, and the symptom to look for (`SignatureMismatch` on a
+  query-bearing URL), and a new test,
+  `contentful::tests::path_encoding_diverges_from_the_reference_sdk_on_any_query`,
+  pins the crate to the documentation's form *and* asserts it is not the SDK's
+  for all four divergent shapes, so the ambiguity cannot quietly resolve
+  itself in either direction.
+
 - **Contentful's replay caveat understated the risk of a delivery whose
   signed-headers list omits `x-contentful-timestamp`; the window is bypassable
   outright, not merely weaker** (issue #229). The provider docs described the

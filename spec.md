@@ -464,8 +464,6 @@ the SDK and reference examples disambiguate its details.
   ( )`), each other byte as `%XX` uppercase, applied exactly once. The
   scheme/`userinfo`/host of a full `request_url` never enter the signed string;
   a bare path (`/webhooks/...`) is used verbatim. `#fragment` is dropped.
-  (Deliberately *not* replicated: the reference SDK's double-encode corner
-  when the caller passes an already percent-encoded query.)
   The authority is delimited per RFC 3986 §3.2: it ends at the **first** `/`,
   `?`, or `#` after `scheme://` — never at the first `/` alone. When that
   delimiter is `?` or `#` the path is empty, so the root `/` is synthesized
@@ -473,6 +471,32 @@ the SDK and reference examples disambiguate its details.
   target, and the SDK's `new URL(...).pathname` reports `/`). A `/` *inside* a
   query or fragment therefore belongs to neither the authority nor the path and
   must not be mistaken for the path start (issue #216).
+- Path/query encoding — **unsettled divergence between the two cited sources**
+  (issue #231; §7). The docs' pseudo-code encodes the query once; the
+  reference SDK's `getNormalizedEncodedURI` applies `querystring.escape`
+  (byte-for-byte equivalent to `encodeURIComponent` here) and *then* a second
+  `encodeURI`, which re-escapes every `%` the first pass produced. The
+  divergence therefore fires on plain, unencoded input — it is **not** a
+  caller-side mistake for passing a pre-encoded query:
+
+  | `request_url` | SDK | this crate |
+  |---|---|---|
+  | `/hook?a=b` | `/hook?a%253Db` | `/hook?a%3Db` |
+  | `/hook?next=/x` | `/hook?next%253D%252Fx` | `/hook?next%3D%2Fx` |
+  | `/hooks/%E2%9C%93` (no query) | `/hooks/%25E2%259C%2593` | `/hooks/%E2%9C%93` |
+
+  The crate implements the **docs'** form, per this section's opening
+  ("The docs page's pseudo-code is the normative contract"). What is *not*
+  established is which form Contentful's server-side signer actually emits:
+  Contentful publishes no frozen numeric signature example, none of the
+  provider's vectors is wire-captured, and a real delivery at a webhook URL
+  **with a query string** is what would settle it. The direction of any
+  resulting failure is safe — the crate rejects a legitimate delivery rather
+  than accepting a forged one; the reverse (crate double-encoding, signer not)
+  would be the dangerous direction, since two distinct URIs would then collide
+  onto one signature. Both forms are pinned by
+  `contentful::tests::path_encoding_diverges_from_the_reference_sdk_on_any_query`,
+  so the choice cannot be quietly changed in either direction.
 - Algorithm: HMAC-SHA256, hex-encoded (lowercase). Key: the space's
   64-character webhook signing secret, used as its UTF-8 bytes verbatim.
   Documented secret class: `^[0-9a-zA-Z+/=_-]+$`, 64 characters.
@@ -3427,6 +3451,34 @@ A provider implementation is not mergeable until it has:
   `can't find crate std`; the wasm32 CI gate proves the core + `sendgrid`
   build is real, and is intentionally not extended to `paypal`. Issue #23
   closed as resolved-by-design.
+- **Contentful path/query encoding: the docs' pseudo-code and the reference
+  SDK's `getNormalizedEncodedURI` disagree (issue #231).** *Unresolved — needs
+  a wire capture.* Both are cited in §3 as sources for the same provider and
+  they do not agree on the signed `requestPath` for *any* URL with a query
+  string, nor for any path containing `%` (§3, Contentful row, has the
+  side-by-side table). The crate implements the docs' pseudo-code, which §3
+  makes normative; the open question is only whether Contentful's signer
+  agrees.
+
+  - What is *not* in doubt: the crate's own behavior is deterministic, matches
+    the normative source, and fails safe. If a delivery to a query-bearing
+    webhook URL is legitimately rejected, the divergence is the first suspect,
+    not a body/header/secret bug.
+  - What would settle it: one real delivery captured off the wire at a webhook
+    URL **with a query string** (`/hook?a=b` is the minimal case), comparing the
+    `x-contentful-signature` against both candidate canonical strings.
+    Contentful's docs, SDK, and reference examples publish no frozen numeric
+    signature for a query-bearing URL, so this cannot be resolved from the
+    published material.
+  - Until then: the divergence is recorded, not silently resolved.
+    `contentful::tests::path_encoding_diverges_from_the_reference_sdk_on_any_query`
+    pins the crate to the docs' form and asserts it is *not* the SDK's form for
+    all four divergent shapes, so neither side can drift without a test
+    failure. A future wire capture should update that table, §3, and the
+    provider's module docs in one change.
+  - Related but separate: issue #216 fixed a path-normalization *bug* in the
+    same function (authority delimiters, `?`/`#` before the first `/`). It did
+    not touch encoding and is not affected by this divergence.
 - **Provider promotion criteria.** A `CustomScheme` recipe gets promoted to
   a first-class `Provider` variant once it has (a) official test vectors,
   (b) at least one external user request or contribution, and (c) no open
