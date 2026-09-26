@@ -711,7 +711,7 @@ mod tests {
         assert_eq!(
             result,
             Err(VerifyError::InvalidSecret {
-                reason: "signature key is empty",
+                reason: "secret is empty",
             })
         );
     }

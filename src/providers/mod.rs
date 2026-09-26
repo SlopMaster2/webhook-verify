@@ -1321,6 +1321,13 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
 /// [`VerifyError::MissingContext`] is returned when provider-specific request
 /// context (e.g. Square's notification URL) was not supplied via
 /// [`VerifyOptions`].
+///
+/// An empty `secret` is rejected with [`VerifyError::InvalidSecret`] before
+/// any request parsing, for every provider whose scheme is keyed by it (all
+/// but PayPal and SendGrid, which verify against
+/// [`VerifyOptions::verifying_material`] instead): an empty key is not a weak
+/// key but no key at all, since anyone able to read a request could compute
+/// the signature it produces.
 pub fn verify(
     provider: Provider,
     headers: &dyn HeaderMap,
@@ -1351,6 +1358,11 @@ pub(crate) fn verify_ref(
     secret: &Secret,
     options: &VerifyOptions,
 ) -> Result<(), VerifyError> {
+    if secret.as_bytes().is_empty() && uses_secret(provider) {
+        return Err(VerifyError::InvalidSecret {
+            reason: "secret is empty",
+        });
+    }
     match provider {
         Provider::Discord => discord::verify(headers, raw_body, secret, options),
         Provider::GitHub => github::verify(headers, raw_body, secret, options),
@@ -1420,6 +1432,25 @@ pub(crate) fn verify_ref(
     }
 }
 
+/// Whether `provider`'s scheme is keyed by the [`Secret`] argument at all.
+///
+/// PayPal and SendGrid are the two asymmetric schemes: they check a signature
+/// against caller-supplied key material in
+/// [`VerifyOptions::verifying_material`] and ignore `Secret` entirely, so an
+/// empty `Secret` is neither a misconfiguration nor a security problem for
+/// them (a test in `paypal`'s module pins that "any (even pathological)
+/// secret is accepted and unused"). Every other provider keys its MAC — or,
+/// for Discord, its Ed25519 verifying key — with `Secret`, so an empty one is
+/// always operator misconfiguration.
+///
+/// **A provider added here that ignores `Secret` must be added to this
+/// `matches!`**, and a provider added here that does use `Secret` needs no
+/// change: the exclusion list is the whole maintenance burden, and it is
+/// deliberately the short side.
+fn uses_secret(provider: Provider) -> bool {
+    !matches!(provider, Provider::PayPal | Provider::SendGrid)
+}
+
 /// Tries multiple secrets during a zero-downtime rotation window.
 ///
 /// Stripe and Standard Webhooks allow multiple valid signatures during secret
@@ -1430,6 +1461,11 @@ pub(crate) fn verify_ref(
 /// (no timing leak about which key was closest); it returns
 /// `Err(VerifyError::InvalidSecret)` only when *every* key was rejected for
 /// its own formatting.
+///
+/// An empty element is one of those unusable keys rather than a forgery, so
+/// it is skipped exactly like a garbled one: a slice holding both an empty
+/// secret and the live key still verifies, and a slice of nothing but empty
+/// secrets reports `InvalidSecret { reason: "secret is empty" }`.
 ///
 /// For providers whose signing scheme itself embeds multiple signatures
 /// (Stripe's `v1=` list, Standard Webhooks' space-delimited `v1,<sig>`
@@ -1957,6 +1993,207 @@ mod tests {
                 Err(VerifyError::MissingContext { .. })
             ));
         }
+    }
+
+    /// `HMAC-SHA256(key = b"", msg = b"Hello, World!")`, hex.
+    ///
+    /// Independently computed with Python's `hmac`/`hashlib` (`hmac.new(b"",
+    /// b"Hello, World!", hashlib.sha256).hexdigest()`) — an *attacker* can
+    /// reproduce this value with no access to the deployment, which is exactly
+    /// why an empty secret may not be accepted as an HMAC key.
+    const EMPTY_KEY_HMAC_SHA256_HEX: &str =
+        "2bbcfa9524f3218c7a34b30e6936f8b1a4516cb097f1a85a1c7d98b5977ec769";
+
+    #[test]
+    fn empty_key_hmac_vector_is_a_genuine_empty_key_mac() {
+        // Non-vacuity check for the vector above: the crate's own audited
+        // helper must agree that it is a valid HMAC-SHA256 under the *empty*
+        // key. If this ever fails, the constant was mistyped and the
+        // fail-open test below would be asserting nothing.
+        let Ok(signature) = hex::decode(EMPTY_KEY_HMAC_SHA256_HEX) else {
+            panic!("the hardcoded empty-key HMAC vector must be valid hex");
+        };
+        assert!(crate::core::crypto::verify_hmac_sha256(
+            b"",
+            b"Hello, World!",
+            &signature,
+        ));
+    }
+
+    #[test]
+    fn empty_secret_fails_closed_instead_of_accepting_a_forgery() {
+        // The bug this guards: with an empty secret every HMAC key is
+        // attacker-known, so `verify` used to return `Ok(())` for the
+        // publicly computable signature below — a forged delivery accepted.
+        // It must now fail closed as operator misconfiguration, which the
+        // adapters map to 500 rather than 401 ("attacker").
+        let headers = vec![(
+            "X-Hub-Signature-256".to_string(),
+            format!("sha256={EMPTY_KEY_HMAC_SHA256_HEX}"),
+        )];
+        assert_eq!(
+            verify(
+                Provider::GitHub,
+                &headers,
+                b"Hello, World!",
+                &Secret::new(""),
+                Default::default(),
+            ),
+            Err(VerifyError::InvalidSecret {
+                reason: "secret is empty"
+            })
+        );
+    }
+
+    #[test]
+    fn empty_secret_is_rejected_for_every_provider_that_uses_one() {
+        // Drift guard: iterating `provider_list()` means a provider added
+        // later is covered by this contract the moment it is listed there.
+        // No headers are supplied on purpose — the empty secret is an operator
+        // misconfiguration regardless of the request, so it is reported
+        // before any request parsing (and therefore before `MissingHeader`).
+        let no_headers: Vec<(&str, &str)> = Vec::new();
+        for provider in provider_list() {
+            if !uses_secret(provider) {
+                continue;
+            }
+            assert_eq!(
+                verify(
+                    provider,
+                    &no_headers,
+                    b"{}",
+                    &Secret::new(""),
+                    Default::default(),
+                ),
+                Err(VerifyError::InvalidSecret {
+                    reason: "secret is empty"
+                }),
+                "{provider} must reject an empty secret"
+            );
+        }
+    }
+
+    #[test]
+    fn uses_secret_excludes_exactly_the_asymmetric_providers() {
+        // `uses_secret` is a hand-maintained exclusion list, so pin both
+        // directions: the two public-key schemes ignore `Secret` entirely,
+        // and every other named provider keys its scheme with it.
+        for provider in provider_list() {
+            let expected = !matches!(provider, Provider::PayPal | Provider::SendGrid);
+            assert_eq!(
+                uses_secret(provider),
+                expected,
+                "{provider}: update `uses_secret` if this provider's treatment \
+                 of `Secret` changed"
+            );
+        }
+    }
+
+    #[test]
+    fn verify_any_skips_an_empty_secret_and_uses_the_rest() {
+        // An empty key in a rotation slice is unusable, not a forgery: a
+        // slice that also holds the real key must still verify, exactly as
+        // `verify_any`'s documented `InvalidSecret` aggregation rule requires.
+        let headers = vec![(
+            "X-Hub-Signature-256".to_string(),
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17".to_string(),
+        )];
+        let secrets = [Secret::new(""), Secret::new("It's a Secret to Everybody")];
+        assert_eq!(
+            verify_any(
+                Provider::GitHub,
+                &headers,
+                b"Hello, World!",
+                &secrets,
+                Default::default(),
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn verify_any_reports_invalid_secret_when_every_secret_is_empty() {
+        // No usable key remains, so the result is the operator-configuration
+        // error — never a `SignatureMismatch`, which would read as a forgery
+        // and log every rotated-out delivery as an attack.
+        let headers = vec![(
+            "X-Hub-Signature-256".to_string(),
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17".to_string(),
+        )];
+        assert_eq!(
+            verify_any(
+                Provider::GitHub,
+                &headers,
+                b"Hello, World!",
+                &[Secret::new(""), Secret::new("")],
+                Default::default(),
+            ),
+            Err(VerifyError::InvalidSecret {
+                reason: "secret is empty"
+            })
+        );
+    }
+
+    #[test]
+    fn empty_secret_does_not_mask_a_disabled_feature() {
+        // `UnsupportedProvider` (a 4xx-class "this crate cannot verify that
+        // provider" signal) must win over the empty-secret configuration
+        // error, so a build without the feature keeps reporting the missing
+        // feature rather than blaming the operator's secret.
+        #[cfg(not(feature = "paypal"))]
+        assert_eq!(
+            verify(
+                Provider::PayPal,
+                &Vec::<(&str, &str)>::new(),
+                b"{}",
+                &Secret::new(""),
+                Default::default(),
+            ),
+            Err(VerifyError::UnsupportedProvider)
+        );
+        #[cfg(not(feature = "sendgrid"))]
+        assert_eq!(
+            verify(
+                Provider::SendGrid,
+                &Vec::<(&str, &str)>::new(),
+                b"{}",
+                &Secret::new(""),
+                Default::default(),
+            ),
+            Err(VerifyError::UnsupportedProvider)
+        );
+
+        // The other direction, for the builds where the feature *is* on: the
+        // empty-secret guard must not fire for a provider that ignores the
+        // secret, or it would invent a configuration error out of an argument
+        // the scheme never reads. The error has to be the real, missing key
+        // material instead.
+        #[cfg(feature = "paypal")]
+        assert_eq!(
+            verify(
+                Provider::PayPal,
+                &Vec::<(&str, &str)>::new(),
+                b"{}",
+                &Secret::new(""),
+                Default::default(),
+            ),
+            Err(VerifyError::MissingHeader {
+                header: "PayPal-Transmission-Id"
+            })
+        );
+        #[cfg(feature = "sendgrid")]
+        assert_eq!(
+            verify(
+                Provider::SendGrid,
+                &Vec::<(&str, &str)>::new(),
+                b"{}",
+                &Secret::new(""),
+                Default::default(),
+            ),
+            Err(VerifyError::MissingHeader {
+                header: "X-Twilio-Email-Event-Webhook-Signature"
+            })
+        );
     }
 
     #[test]

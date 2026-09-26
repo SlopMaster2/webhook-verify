@@ -1572,6 +1572,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An empty secret no longer verifies a forged delivery.** Passing
+  `Secret::new("")` — the shape an unset environment variable, a missing
+  config file entry, or `Secret::default()` collapses to — used to return
+  `Ok(())` from `verify()` for most providers, because an empty HMAC key is
+  not a weak key but *no* key: the resulting signature is reproducible by
+  anyone who can read the request. Concretely, for GitHub:
+
+  ```text
+  # HMAC-SHA256(key = b"", msg = b"Hello, World!"), computable by anyone
+  X-Hub-Signature-256: sha256=2bbcfa9524f3218c7a34b30e6936f8b1a4516cb097f1a85a1c7d98b5977ec769
+  ```
+
+  verified as a genuine delivery. Nine provider modules already rejected an
+  empty key locally — Adyen, Contentful, HubSpot, Mandrill, Ripple, Square,
+  Standard Webhooks, Twilio, and Discord (whose `Secret` is an Ed25519 public
+  key) — each with a comment saying an empty key must not be used because
+  "anyone could reproduce" it, and `spec.md` §3 records the same rule for those
+  rows. The rule was simply unenforced for the other 47 named providers and for
+  `Provider::Custom`, where the secret goes straight into the MAC.
+
+  `verify_ref` — the single dispatch every provider is reached through, so
+  `verify`, `verify_any`, and the `tower`/`actix` adapters all inherit it —
+  now rejects an empty secret with `InvalidSecret { reason: "secret is empty" }`
+  before any header lookup or signature work. Reporting it as
+  `InvalidSecret` rather than letting it surface as `SignatureMismatch` is
+  deliberate: it is operator misconfiguration, which the adapters map to 500
+  instead of 401 "attacker", so an unset secret is diagnosable as the config
+  bug it is. The per-provider checks are retained as a last line of defence at
+  the audited key-derivation site; their `reason` strings are no longer
+  reachable through `verify()`, which reports the single uniform reason.
+
+  Behavior changes to be aware of:
+  - A request verified with an empty secret now returns
+    `Err(InvalidSecret { reason: "secret is empty" })` instead of `Ok(())` for
+    a correctly-computed empty-key signature or `SignatureMismatch` otherwise.
+    Nothing that verified with a *non-empty* secret changes.
+  - The check precedes header parsing, so an empty secret is reported even
+    when the request is also malformed (`MissingHeader` and friends are
+    reported once the secret is usable).
+  - `UnsupportedProvider` still wins for a feature-gated PayPal/SendGrid, so a
+    build without that feature keeps reporting the missing feature.
+  - Under `verify_any`, an empty element is skipped like any other unusable
+    key, so a slice that also holds the live key still verifies; a slice of
+    nothing but empty secrets reports `InvalidSecret`.
+  - PayPal and SendGrid are unaffected: they ignore `Secret` entirely and
+    verify against `VerifyOptions::verifying_material` (pinned by
+    `paypal::tests::secret_argument_is_ignored`).
+
+  Specified as `spec.md` §4.7 and cross-referenced from the `InvalidSecret`
+  aggregation rule in §2.1; documented on `verify`, `verify_any`, the crate
+  docs, and the README security notes. Covered by
+  `empty_secret_fails_closed_instead_of_accepting_a_forgery` (with
+  `empty_key_hmac_vector_is_a_genuine_empty_key_mac` proving the vector really
+  is an empty-key MAC, so the test cannot pass vacuously),
+  `empty_secret_is_rejected_for_every_provider_that_uses_one` (iterates
+  `provider_list()`, so a provider added later is covered automatically),
+  `uses_secret_excludes_exactly_the_asymmetric_providers` (pins the
+  hand-maintained exclusion list in both directions),
+  `empty_secret_does_not_mask_a_disabled_feature`, and the two `verify_any`
+  cases. No new dependency.
+
 - **Adapters: Contentful's dynamically named signed headers are now
   ambiguity-scanned.** `spec.md` §4.4 requires rejecting any header present
   more than once with different values, and the `tower`/`actix` adapters

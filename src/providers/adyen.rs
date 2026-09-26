@@ -390,7 +390,7 @@ mod tests {
         assert_eq!(
             result,
             Err(VerifyError::InvalidSecret {
-                reason: "HMAC key is empty"
+                reason: "secret is empty"
             })
         );
     }

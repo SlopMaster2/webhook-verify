@@ -611,7 +611,7 @@ mod tests {
         assert_eq!(
             result,
             Err(VerifyError::InvalidSecret {
-                reason: "verification key is empty"
+                reason: "secret is empty"
             })
         );
     }

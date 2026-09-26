@@ -143,6 +143,10 @@
 //! - All signature comparisons are constant-time ([`subtle::ConstantTimeEq`]).
 //! - Bodies are hashed exactly as received; never re-encoded.
 //! - No secret material ever appears in errors, `Debug`, or `Display` output.
+//! - An empty secret fails closed: it is not a weak key but no key at all, so
+//!   every provider keyed by it rejects it with [`VerifyError::InvalidSecret`]
+//!   before touching the request (PayPal and SendGrid ignore the secret and
+//!   verify against [`VerifyOptions::verifying_material`] instead).
 //! - Parsing paths return [`VerifyError`] instead of panicking on
 //!   attacker-controlled input.
 //!
