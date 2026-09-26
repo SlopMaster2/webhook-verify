@@ -153,8 +153,9 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
         .or_else(|| dynamically_named_ambiguity(headers, provider))
 }
 
-/// The `spec.md` §4.4 ambiguity check for callers driving [`verify()`](crate::verify()) against
-/// an [`http::HeaderMap`](::http::HeaderMap) themselves.
+/// The `spec.md` §4.4 ambiguity check for callers driving
+/// [`verify()`](crate::verify()) against an
+/// [`http::HeaderMap`](::http::HeaderMap) themselves.
 ///
 /// Returns `Some(header)` when `provider`'s signature headers — or, for
 /// [`Provider::Contentful`], any header its self-describing
@@ -162,19 +163,21 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
 /// *differing* values, and `None` otherwise. Identical repeats are not
 /// ambiguous and return `None`.
 ///
-/// [`HeaderMap`](crate::HeaderMap)'s lookup is first-match-only, so it structurally cannot see a
-/// duplicate: a proxy that sees a different value for the signature header than
-/// the verifier does is exactly the case `spec.md` §4.4 requires rejecting, and
-/// a caller calling [`verify()`](crate::verify()) directly has to perform that check itself.
+/// [`HeaderMap`](crate::HeaderMap)'s lookup is first-match-only, so it
+/// structurally cannot see a duplicate: a proxy that sees a different value
+/// for the signature header than the verifier does is exactly the case
+/// `spec.md` §4.4 requires rejecting, and a caller calling
+/// [`verify()`](crate::verify()) directly has to perform that check itself.
 /// The `tower` and `actix` adapters do it for you; this function is the same
 /// code path, exported so a manual-extraction caller (the ordinary axum handler
 /// shape, with no adapter in the path) can honor the same contract instead of
 /// silently accepting an ambiguous request.
 ///
-/// Reject with [`VerifyError::MalformedHeader`](crate::VerifyError::MalformedHeader)
-/// carrying the returned `header`
-/// and a `reason` of your choosing — the adapters use "header present multiple
-/// times with different values". Call it *before* [`verify()`](crate::verify()):
+/// Reject with
+/// [`VerifyError::MalformedHeader`](crate::VerifyError::MalformedHeader)
+/// carrying the returned `header` and a `reason` of your choosing — the
+/// adapters use "header present multiple times with different values". Call it
+/// *before* [`verify()`](crate::verify()):
 ///
 /// ```
 /// # #[cfg(feature = "http")] {
@@ -230,10 +233,11 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
 /// # }
 /// ```
 ///
-/// The `Custom` carve-out documented on [`CustomScheme`](crate::CustomScheme) is unchanged: for
+/// The `Custom` carve-out documented on
+/// [`CustomScheme`](crate::CustomScheme) is unchanged: for
 /// [`Provider::Custom`] the scan covers only `signature_header` and
-/// `timestamp_header`, and duplicates in any additional header a `signed_string`
-/// closure reads are not detected.
+/// `timestamp_header`, and duplicates in any additional header a
+/// `signed_string` closure reads are not detected.
 #[cfg(feature = "http")]
 #[must_use]
 pub fn ambiguous_signature_header(
