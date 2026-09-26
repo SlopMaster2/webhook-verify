@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A secret that is not all-NUL but *decodes* to an all-NUL key was the empty
+  HMAC key, and `verify()` accepted a forged signature with it** (issue #227).
+  The unusable-key rule (spec.md §4.7) rejects a secret that is empty,
+  whitespace-only, or all-NUL, because RFC 2104 zero-pads a short key and an
+  all-NUL key therefore produces *literally* the empty key's publicly
+  computable MAC. But that check reads the **raw** `Secret` string, and three
+  providers hex- or base64-decode the secret before keying — so the bytes
+  RFC 2104 pads are not the bytes it inspected. Adyen's `decode_key`
+  (`hex::decode`), Ripple's `decode_key`, and Standard Webhooks'
+  `decode_secret` all already rejected a *decoded-empty* key, but the sibling
+  case one step further was unguarded: `"0000"` (hex) and `"AAAA"` /
+  `"whsec_AAAA"` (base64) are not all-NUL text, decode to keys made of nothing
+  but zero bytes, and were accepted as the empty key. Standard Webhooks' own
+  vectors make the shape look innocuous — the reference `webhooks.py` treats a
+  `whsec_`-prefixed secret as opaque, so `"whsec_AAAA"` is simply a
+  syntactically valid secret that happens to be zero-filled.
+
+  The fix re-applies the predicate to the **decoded** bytes at exactly those
+  three key-derivation sites, via a shared `core::crypto::is_all_nul_key`
+  helper so the audited sites cannot drift apart. Each reports a
+  `decoded … is only NUL bytes` reason next to the decoded-empty reason it
+  already had, keeping the two shapes distinguishable. The helper treats
+  empty as *not* all-NUL on purpose: `[].iter().all(..)` is vacuously true,
+  which would make every call site's decoded-empty branch unreachable and lose
+  the distinct `reason` strings operators rely on.
+
+  Scope was checked rather than assumed. The five providers that use the raw
+  secret bytes as key material verbatim (Contentful, HubSpot, Square,
+  Mandrill, Twilio) need no second check — raw and decoded are the same bytes
+  there — and Discord's zero key is not a valid Ed25519 compressed point, so it
+  already fails closed as a malformed key. PayPal and SendGrid verify against
+  caller-supplied `verifying_material` and ignore `Secret` entirely. All three
+  affected schemes are symmetric HMAC, so the RFC 2104 zero-padding equivalence
+  applies to them directly; Ed25519 and ECDSA/RSA have no such equivalence.
+
+  Behaviour change worth flagging for anyone relying on the old outcome: an
+  all-NUL *decoded* key now returns `InvalidSecret` (which the adapters report
+  as operator misconfiguration, 500) instead of `SignatureMismatch` (401).
+  That is the intended direction — it is the same loud failure the raw-secret
+  case already produced — but a deployment that had been silently accepting the
+  empty-key forgery will now see 500s until the key is fixed. One existing test
+  (`adyen::tests::wrong_secret_fails`) used a 32-zero-byte hex key as its
+  "different but well-formed" key; that key is no longer well-formed by
+  definition, so the test now flips a byte to keep exercising the mismatch
+  path, and the all-NUL shape is covered by its own test.
+
+  The "entirely" boundary is unchanged and now tested in both directions for
+  each decoded key: a key that merely *contains* a NUL is legitimate material,
+  used byte for byte, and nothing is trimmed before the MAC.
+
 ### Added
 
 - **New test guard: `spec.md` §3 must name every header its provider's

@@ -216,6 +216,37 @@ pub(crate) fn verify_ed25519(public_key: &[u8], message: &[u8], signature: &[u8]
     }
 }
 
+/// Whether `key` is a non-empty slice in which **every** byte is NUL.
+///
+/// This is the decoded-key half of the `spec.md` §4.7 unusable-key rule. RFC
+/// 2104 zero-pads any key shorter than the block size before keying, so a key
+/// of nothing but NUL bytes is not merely weak — it *is* the empty key, and
+/// produces the empty key's publicly computable MAC. Nothing has to be
+/// guessed: the forgery is the one such a deployment accepts.
+///
+/// The entry-point guard (`providers::unusable_secret_reason`) applies the same
+/// rule to the **raw** `Secret` string, which is the same thing only for the
+/// providers that use the secret's bytes as key material verbatim. A provider
+/// that hex- or base64-decodes the secret first (Adyen, Ripple, Standard
+/// Webhooks) has to re-apply it to the **decoded** bytes, because those are
+/// what gets padded — a secret of `"0000"` is not all-NUL text but decodes to
+/// an all-NUL key. This helper is the shared form of that second check, so the
+/// audited key-derivation sites all use one definition.
+///
+/// Empty is deliberately **not** all-NUL: `[].iter().all(..)` is vacuously
+/// true, which would collapse the two shapes into one and lose the distinct
+/// `reason` operators rely on. Every call site already rejects a decoded-empty
+/// key with its own wording first, so returning `false` here leaves that
+/// classification untouched.
+///
+/// "Entirely" is load-bearing, for the same reason it is in §4.7: a key that
+/// merely *contains* a NUL (`"hunter2\0"`) is legitimate material and is used
+/// exactly as configured, and nothing is trimmed before keying.
+#[must_use]
+pub(crate) fn is_all_nul_key(key: &[u8]) -> bool {
+    !key.is_empty() && key.iter().all(|&byte| byte == 0)
+}
+
 #[cfg(feature = "sendgrid")]
 #[must_use]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -487,8 +518,8 @@ pub(crate) fn check_rsa_pkcs1v15_sha256(
 #[cfg(test)]
 mod tests {
     use super::{
-        verify_ed25519, verify_hmac_sha1, verify_hmac_sha256, verify_hmac_sha256_any,
-        verify_hmac_sha512,
+        is_all_nul_key, verify_ed25519, verify_hmac_sha1, verify_hmac_sha256,
+        verify_hmac_sha256_any, verify_hmac_sha512,
     };
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
@@ -499,6 +530,35 @@ mod tests {
         match hex::decode(vector) {
             Ok(bytes) => bytes,
             Err(_) => panic!("hardcoded test vectors must be valid hex"),
+        }
+    }
+
+    #[test]
+    fn all_nul_key_predicate_is_exclusive_to_all_nul() {
+        // The positive side: any non-empty run of zero bytes, at and past the
+        // SHA-256 block size (the entry point already pins the "longer than
+        // the block still gets rejected" choice, so both must be `true` here).
+        for len in [1_usize, 2, 32, 64, 65] {
+            assert!(is_all_nul_key(&vec![0_u8; len]), "length {len}");
+        }
+
+        // Empty is *not* all-NUL: `[].iter().all(..)` is vacuously true, so
+        // without the `!is_empty()` guard this would report `true` and every
+        // call site's decoded-empty branch would become unreachable, losing
+        // the distinct `reason` operators rely on. Each call site rejects
+        // empty first, so this only has to not *claim* the all-NUL shape.
+        assert!(!is_all_nul_key(&[]));
+
+        // The permissive direction: one non-NUL byte anywhere makes the key
+        // legitimate material, which must be used exactly as configured.
+        for key in [
+            &[1_u8][..],
+            &[0_u8, 1][..],
+            &[1, 0][..],
+            &[0, 0, 1, 0][..],
+            b"\0\0hunter2\0",
+        ] {
+            assert!(!is_all_nul_key(key), "key: {key:?}");
         }
     }
 
