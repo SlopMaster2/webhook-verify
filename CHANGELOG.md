@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Contentful's replay caveat understated the risk of a delivery whose
+  signed-headers list omits `x-contentful-timestamp`; the window is bypassable
+  outright, not merely weaker** (issue #229). The provider docs described the
+  shape as "an attacker who can forge a fresh signature could extend the
+  window — the same documented caveat as `CustomScheme`", which implies the
+  attacker needs the signing secret. They do not.
+  `x-contentful-signed-headers` is itself *not* part of Contentful's canonical
+  string — only the headers it *lists* are — so with the timestamp unlisted the
+  header falls entirely outside the HMAC. An attacker holding a single captured
+  delivery of that shape replays it indefinitely by rewriting that one header
+  to the current millisecond value: the signature, method, path, and body are
+  replayed byte for byte, and both `parse_millis` and `check_replay` then pass.
+  So for that shape the recency check provides *no* protection at all, where
+  `CustomScheme`'s uncovered-timestamp caveat at least bounds the damage to
+  the tolerance of a signature the attacker already holds.
+
+  This is a **documentation** fix, not a behavior change: the code choice is
+  unchanged and still correct, since the signed-header list is
+  self-describing and Contentful could legitimately deliver a subset of
+  headers, so hard-failing the shape would reject deliveries the provider may
+  legitimately send. What changed is that spec.md §3 and the provider's module
+  docs now state the true residual risk, and a new test,
+  `contentful::tests::an_uncovered_timestamp_lets_a_captured_delivery_be_replayed_forever`,
+  pins the behavior in **both** directions: a captured unlisted-timestamp
+  delivery replays successfully after its timestamp header is rewritten, and
+  the same rewrite against a list that *does* name the timestamp yields
+  `SignatureMismatch` (the shape Contentful's own signer emits). The caveat
+  therefore cannot drift back into an understatement, and the existing
+  `timestamp_not_in_signed_list_still_replay_checked` test — which only
+  demonstrated that an *unmodified* stale replay fails — no longer reads as
+  stronger evidence than it is.
+
+- **Square's docs claimed it was "the one shipped scheme" that cannot verify
+  from headers + body + secret alone.** Twilio, Mandrill, HubSpot, and
+  Contentful all share the property (their schemes sign the endpoint URL), as
+  `VerifyOptions::request_url`'s own docs and `spec.md` already listed. Stale
+  superlative only; no behavior change.
+
 - **A secret that is not all-NUL but *decodes* to an all-NUL key was the empty
   HMAC key, and `verify()` accepted a forged signature with it** (issue #227).
   The unusable-key rule (spec.md §4.7) rejects a secret that is empty,

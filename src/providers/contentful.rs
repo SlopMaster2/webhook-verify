@@ -83,14 +83,29 @@
 //!
 //! Note that Contentful's signer always includes `x-contentful-timestamp` in
 //! the signed-headers list (matching its published SDK), in which case the
-//! timestamp is HMAC-covered and the replay window is cryptographic. If a
-//! delivery ever arrives whose list does **not** include the timestamp
-//! header, the timestamp is still recency-checked but is not itself
-//! HMAC-covered, so an attacker who can forge a fresh signature could extend
-//! the window — the same documented caveat as [`crate::CustomScheme`]. This
-//! crate does not hard-fail that shape (Contentful could list a subset of
-//! headers on a delivery); it preserves the best-effort replay check and
-//! documents the residual risk.
+//! timestamp is HMAC-covered and the replay window is cryptographic: editing
+//! the header to "now" breaks the signature instead of extending the window.
+//!
+//! If a delivery ever arrives whose list does **not** name the timestamp
+//! header, the window provides **no protection at all** for that shape, and
+//! the reason is worth stating precisely. `x-contentful-signed-headers` is
+//! itself *not* part of the canonical string — only the headers it *lists*
+//! are — so with the timestamp unlisted the header falls entirely outside the
+//! HMAC. An attacker holding one captured delivery of that shape replays it
+//! forever by rewriting that single header to the current millisecond value;
+//! the signature, method, path, and body are replayed byte for byte. No
+//! signature forgery and no knowledge of the signing secret is involved, so
+//! unlike the `CustomScheme` caveat — where an uncovered timestamp can at
+//! least only be moved within the tolerance of a signature the attacker
+//! already holds — the recency check here is bypassable outright rather than
+//! merely weak.
+//!
+//! This crate does not hard-fail that shape (the list is self-describing, so
+//! Contentful could legitimately deliver a subset of headers): it preserves
+//! the best-effort recency check and documents the residual risk, which
+//! `an_uncovered_timestamp_lets_a_captured_delivery_be_replayed_forever`
+//! pins in both directions. Deployments that cannot rule the shape out should
+//! not rely on `max_age` alone for Contentful.
 //!
 //! # Test-vector provenance
 //!
@@ -202,9 +217,11 @@ pub(crate) fn verify(
     // The timestamp arrives in epoch milliseconds; drop the sub-second
     // remainder (mirroring HubSpot's ms → s division) before the shared
     // recency check. Contentful's signer includes the timestamp in the
-    // signed-headers list (making the window cryptographic); when a delivery
-    // does not, the check is best-effort rather than HMAC-covered — see the
-    // module docs' replay caveat.
+    // signed-headers list, which is what makes the window cryptographic. When
+    // a delivery's list does not, the timestamp header is outside the HMAC
+    // entirely and this check is bypassable by editing that one header — see
+    // the module docs' replay caveat, which pins the behavior in both
+    // directions.
     check_replay(timestamp / 1000, options)
 }
 
@@ -894,16 +911,14 @@ mod tests {
         assert_eq!(result, Ok(()));
     }
 
-    #[test]
-    fn timestamp_not_in_signed_list_still_replay_checked() {
-        // A delivery whose signed-headers list omits the timestamp header: the
-        // canonical string covers only `content-type` and `x-contentful-topic`
-        // (see module docs' replay caveat). Within the window it verifies...
-        let headers = vec![
-            (
-                SIGNATURE_HEADER.to_string(),
-                "0c58947137df900004500129c3707868a9ebfd35ccd7288e8097a8a0fe04d0e2".to_string(),
-            ),
+    /// The headers of a delivery whose signed-headers list **omits** the
+    /// timestamp header, so the canonical string covers only `content-type`
+    /// and `x-contentful-topic`. Signature is over that reduced canonical
+    /// string; see the module docs' replay caveat for what that shape does and
+    /// does not protect.
+    fn timestamp_uncovered_headers(signature: &str) -> Vec<(String, String)> {
+        vec![
+            (SIGNATURE_HEADER.to_string(), signature.to_string()),
             (
                 SIGNED_HEADERS_HEADER.to_string(),
                 "content-type,x-contentful-topic".to_string(),
@@ -917,7 +932,26 @@ mod tests {
                 "Content-Type".to_string(),
                 "application/vnd.contentful.management.v1+json".to_string(),
             ),
-        ];
+        ]
+    }
+
+    /// Replaces the value of `target` in `headers`, matched case-insensitively.
+    fn set_header(headers: &mut [(String, String)], target: &str, value: &str) {
+        for (name, existing) in headers.iter_mut() {
+            if name.eq_ignore_ascii_case(target) {
+                *existing = value.to_string();
+            }
+        }
+    }
+
+    #[test]
+    fn timestamp_not_in_signed_list_still_replay_checked() {
+        // A delivery whose signed-headers list omits the timestamp header: the
+        // canonical string covers only `content-type` and `x-contentful-topic`
+        // (see module docs' replay caveat). Within the window it verifies...
+        let headers = timestamp_uncovered_headers(
+            "0c58947137df900004500129c3707868a9ebfd35ccd7288e8097a8a0fe04d0e2",
+        );
         let within = verify(
             crate::Provider::Contentful,
             &headers,
@@ -929,8 +963,9 @@ mod tests {
         );
         assert_eq!(within, Ok(()));
 
-        // ...but the timestamp is still recency-checked, so a replay of the
-        // same signature outside the window fails closed.
+        // ...but an *unmodified* replay of it outside the window fails closed.
+        // This is weaker evidence than it looks: the next test shows the same
+        // shape replays indefinitely once one header is rewritten.
         let stale = verify(
             crate::Provider::Contentful,
             &headers,
@@ -946,6 +981,80 @@ mod tests {
                 skew: Duration::from_secs(301),
                 max_age: Duration::from_secs(300),
             })
+        );
+    }
+
+    #[test]
+    fn an_uncovered_timestamp_lets_a_captured_delivery_be_replayed_forever() {
+        // The residual risk the module docs' replay caveat describes, pinned
+        // so the caveat cannot drift back into an understatement.
+        //
+        // `x-contentful-signed-headers` is itself *not* part of the canonical
+        // string — only the headers it *lists* are. So for a delivery whose
+        // list omits `x-contentful-timestamp`, the timestamp header is
+        // entirely outside the HMAC, and rewriting that one header to the
+        // current instant is enough to defeat the window. No signature forgery
+        // and no knowledge of the signing secret is involved: the signature,
+        // method, path, and body are all replayed byte-for-byte.
+        let mut replayed = timestamp_uncovered_headers(
+            "0c58947137df900004500129c3707868a9ebfd35ccd7288e8097a8a0fe04d0e2",
+        );
+
+        // A week later, the attacker rewrites only the uncovered timestamp
+        // header to "now" and replays the capture verbatim otherwise.
+        let replay_secs = TIMESTAMP_SECS + 7 * 24 * 60 * 60;
+        set_header(
+            &mut replayed,
+            TIMESTAMP_HEADER,
+            &(replay_secs * 1000).to_string(),
+        );
+
+        // The signature is untouched, so it still matches — and the recency
+        // check passes too. This is the whole point: for this shape the replay
+        // window is not merely "weaker", it provides no protection at all.
+        //
+        // The `Ok(())` here *documents the current residual risk*, it does not
+        // endorse it. If a future change hard-fails a list that omits the
+        // timestamp (strictly better, and a legitimate call to make — see
+        // AGENTS.md §5), invert this assertion deliberately rather than
+        // deleting the test, so the tradeoff stays visible.
+        assert_eq!(
+            verify(
+                crate::Provider::Contentful,
+                &replayed,
+                BODY,
+                &Secret::new(SECRET),
+                clocked_at(replay_secs, Some(Duration::from_secs(300)))
+                    .with_request_method(METHOD)
+                    .with_request_url(URL),
+            ),
+            Ok(())
+        );
+
+        // Contrast: when the list *does* name the timestamp, the same rewrite
+        // breaks the signature, because the header is inside the HMAC. This is
+        // the shape Contentful's own signer emits, and the reason the caveat
+        // above is scoped to the self-describing list rather than to the
+        // provider as a whole.
+        let mut covered =
+            delivery_headers("1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129");
+        set_header(
+            &mut covered,
+            TIMESTAMP_HEADER,
+            &(replay_secs * 1000).to_string(),
+        );
+        assert_eq!(
+            verify(
+                crate::Provider::Contentful,
+                &covered,
+                BODY,
+                &Secret::new(SECRET),
+                clocked_at(replay_secs, Some(Duration::from_secs(300)))
+                    .with_request_method(METHOD)
+                    .with_request_url(URL),
+            ),
+            Err(VerifyError::SignatureMismatch),
+            "with the timestamp inside the HMAC, rewriting it breaks the signature"
         );
     }
 

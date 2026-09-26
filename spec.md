@@ -485,9 +485,18 @@ the SDK and reference examples disambiguate its details.
   does). Contentful's own `verifyRequest` SDK defaults to a 30s TTL; the crate
   applies the shared default 300s window unless `max_age` is tightened.
   Contentful's signer includes the timestamp among the signed headers, making
-  that window HMAC-covered; if a delivery's list omits the timestamp header
-  the window is best-effort rather than cryptographic (same documented caveat
-  as `CustomScheme`), and the timestamp is still recency-checked.
+  that window HMAC-covered. If a delivery's list omits the timestamp header
+  the window provides **no** protection for that shape: the list header is
+  itself not part of the canonical string (only the headers it *lists* are), so
+  the timestamp falls entirely outside the HMAC and a captured delivery of that
+  shape replays indefinitely by rewriting that one header to the current
+  millisecond value — no signature forgery and no knowledge of the signing
+  secret required. The timestamp is still recency-checked (so an *unmodified*
+  stale replay fails), but the check is bypassable outright rather than merely
+  weak. The crate does not hard-fail the shape — the list is self-describing,
+  so Contentful could legitimately deliver a subset of headers — and the
+  residual risk is pinned in both directions by
+  `contentful::tests::an_uncovered_timestamp_lets_a_captured_delivery_be_replayed_forever`.
 - Test-vector provenance: Contentful publishes no frozen numeric signature
   example. The vectors in the provider tests are locally constructed over the
   documented recipe above, produced by an independent implementation (Python
