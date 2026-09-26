@@ -285,10 +285,11 @@ returns `Ok(())` if any one of them verifies. Its error aggregation rules:
   in the slice may still be correct. `verify_any` therefore *continues*
   past an `InvalidSecret` rather than aborting, so a rotation slice with one
   garbled/truncated live key still verifies against the healthy one. An
-  **empty or whitespace-only** key is such a case (§4.7): it is unusable for
-  every request, and it is also the one that must never be used to compute a
-  MAC, so `verify` rejects it up front with `InvalidSecret {
-  reason: "secret is empty" }` or `reason: "secret is only whitespace"`.
+  **empty, whitespace-only, or NUL-only** key is such a case (§4.7): it is
+  unusable for every request, and it is also the one that must never be used
+  to compute a MAC, so `verify` rejects it up front with `InvalidSecret {
+  reason: "secret is empty" }`, `reason: "secret is only whitespace"`, or
+  `reason: "secret is only NUL bytes"`.
 - On total failure, `verify_any` returns `SignatureMismatch` if at least one
   key was well-formed but wrong; it returns the first `InvalidSecret` only
   when *every* key was rejected for its own formatting (an all-garbled
@@ -3018,19 +3019,20 @@ ambiguity).
    perfectly (header lookups are not constant-time), but the security-
    relevant step — signature comparison — must be, and is the one that
    matters for known real-world timing attacks.
-7. **An empty or whitespace-only secret fails closed.** Every provider whose
-   scheme is keyed by the `Secret` argument — that is, every provider except
-   the two asymmetric schemes, PayPal and SendGrid, which ignore `Secret` and
-   verify against `VerifyOptions::verifying_material` — rejects such a secret
-   with `InvalidSecret` before any request parsing or signature work. An empty
-   HMAC (or plain-digest) key is not a weak key but *no* key: the resulting
-   signature is reproducible by anyone who can read the request, so accepting
-   one turns `verify()` into an unconditional `Ok(())` for a forged delivery.
-   The check lives once, in the `verify_ref` dispatch every provider is
-   reached through (so `verify`, `verify_any`, and the `tower`/`actix`
-   adapters all inherit it), and it precedes header lookup because the fault
-   is the operator's configuration rather than anything about the request.
-   Two consequences worth stating because they are easy to get wrong:
+7. **An empty, whitespace-only, or NUL-only secret fails closed.** Every
+   provider whose scheme is keyed by the `Secret` argument — that is, every
+   provider except the two asymmetric schemes, PayPal and SendGrid, which
+   ignore `Secret` and verify against `VerifyOptions::verifying_material` —
+   rejects such a secret with `InvalidSecret` before any request parsing or
+   signature work. An empty HMAC (or plain-digest) key is not a weak key but
+   *no* key: the resulting signature is reproducible by anyone who can read
+   the request, so accepting one turns `verify()` into an unconditional `Ok(())`
+   for a forged delivery. The check lives once, in the `verify_ref` dispatch
+   every provider is reached through (so `verify`, `verify_any`, and the
+   `tower`/`actix` adapters all inherit it), and it precedes header lookup
+   because the fault is the operator's configuration rather than anything about
+   the request. Two consequences worth stating because they are easy to get
+   wrong:
    - `UnsupportedProvider` still wins for a feature-gated provider, so a
      build without `paypal`/`sendgrid` keeps reporting the missing feature
      rather than blaming the secret.
@@ -3048,17 +3050,36 @@ ambiguity).
    `env::var(..).unwrap_or_default()` yields when the variable is present but
    blank). A deployment keyed with one of them is forgeable by anyone who
    tries three signatures, and the failure is indistinguishable from a
-   working integration. The two reasons are reported distinctly —
-   `secret is empty` and `secret is only whitespace` — so an operator can
-   tell a missing configuration from a padded one.
+   working integration.
+
+   **NUL-only is not a third guessable key but the *same* key as the empty
+   one, which is why it needs its own predicate.** RFC 2104 zero-pads any key
+   shorter than the block size before keying, so every key made only of NUL
+   bytes up to the block size (`"\0"`, `"\0\0"`, … 64 bytes for SHA-256)
+   produces *literally* the empty key's MAC. Nothing has to be guessed: the
+   publicly computable empty-key signature is the one such a deployment
+   accepts. The reachable shapes are an operator who never noticed a trailing
+   NUL — a secret read out of a fixed-size or zero-padded record, a config
+   value decoded from a fixed-width field — and a whitespace predicate cannot
+   catch them, because NUL is not whitespace. They are reported distinctly as
+   `secret is empty`, `secret is only whitespace`, and
+   `secret is only NUL bytes`, so an operator can tell a missing configuration
+   from a padded one from a zero-padded one.
 
    The rule is deliberately narrow in two directions, and both matter:
-   - **Only if the secret is *entirely* whitespace.** A secret that merely
-     contains whitespace (`"hunter2 "`, `"It's a Secret to Everybody\n"`) is
-     legitimate key material and is used exactly as configured. A provider
-     signs with whatever the operator configured, and a real key pasted with a
-     trailing newline is a different key from the unpasted one; rejecting it
-     would break a working integration.
+   - **Only if the secret is *entirely* whitespace, or *entirely* NUL.** A
+     secret that merely contains either (`"hunter2 "`,
+     `"It's a Secret to Everybody\n"`, `"hunter2\0"`) is legitimate key
+     material and is used exactly as configured. A provider signs with
+     whatever the operator configured, and a real key pasted with a trailing
+     newline — or read from a record with a trailing NUL — is a different key
+     from the unpadded one; rejecting it would break a working integration.
+     The NUL predicate is therefore "every byte is zero" rather than "contains
+     a NUL", and the "entirely" boundary is tested in both directions.
+     An all-NUL key *longer* than the block size is rejected too, even though
+     it no longer collapses to the empty key (it gets hashed): it is not a key
+     an operator configured on purpose, and this crate's bias is toward the
+     loud failure.
    - **Nothing is trimmed before keying.** Trimming would fix the forgery
      *and* keep such deployments verifying, but it silently changes the bytes
      fed to the MAC, so every deployment currently signing with a padded
@@ -3077,11 +3098,11 @@ ambiguity).
    key-derivation site, and the uniform entry-point check is what makes the
    rule hold for the rest. Their `InvalidSecret` `reason` strings are
    therefore no longer reachable through `verify()` — the entry point reports
-   the uniform `secret is empty` / `secret is only whitespace` reasons
-   instead. (Three of the nine — Adyen, Ripple, and Standard Webhooks — check
-   the *decoded* key rather than the raw secret, and Discord's checks its
-   Ed25519 key's format, so a whitespace-only secret already failed closed
-   there as a malformed key.)
+   the uniform `secret is empty` / `secret is only whitespace` /
+   `secret is only NUL bytes` reasons instead. (Three of the nine — Adyen,
+   Ripple, and Standard Webhooks — check the *decoded* key rather than the raw
+   secret, and Discord's checks its Ed25519 key's format, so a whitespace-only
+   secret already failed closed there as a malformed key.)
 
 ---
 

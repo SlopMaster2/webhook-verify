@@ -147,9 +147,10 @@
 //!   every provider keyed by it rejects it with [`VerifyError::InvalidSecret`]
 //!   before touching the request (PayPal and SendGrid ignore the secret and
 //!   verify against [`VerifyOptions::verifying_material`] instead). So does a
-//!   secret that is only whitespace — the same failure one character over — but
-//!   a secret that merely *contains* whitespace is used exactly as configured:
-//!   nothing is trimmed before the MAC.
+//!   secret that is only whitespace — the same failure one character over — or
+//!   one that is only NUL bytes, which HMAC zero-padding makes the *same key*
+//!   as the empty one; but a secret that merely *contains* whitespace or a NUL
+//!   is used exactly as configured: nothing is trimmed before the MAC.
 //! - Parsing paths return [`VerifyError`] instead of panicking on
 //!   attacker-controlled input.
 //!

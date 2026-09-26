@@ -1572,6 +1572,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A NUL-only secret no longer verifies a forged delivery.** #225. #222
+  rejected the *empty* key and #223 the *whitespace-only* ones, but a key of NUL
+  bytes is not a third guessable shape — it is the **same** key as the empty
+  one. RFC 2104 zero-pads any key shorter than the block size before keying, so
+  `Secret::new("\0")`, `Secret::new("\0\0")`, and every all-NUL key up to
+  SHA-256's 64-byte block produce *literally* the empty key's MAC:
+
+  ```text
+  # HMAC-SHA256(key = b"\0", msg = b"Hello, World!"), computable by anyone —
+  # byte-identical to the HMAC-SHA256(key = b"") of #222
+  X-Hub-Signature-256: sha256=2bbcfa9524f3218c7a34b30e6936f8b1a4516cb097f1a85a1c7d98b5977ec769
+  ```
+
+  So nothing has to be guessed — the published empty-key forgery *is* the
+  accepted signature — and no whitespace predicate can catch it, because NUL is
+  not whitespace. The reachable shapes are an operator who never noticed a
+  trailing NUL: a secret read out of a fixed-size or zero-padded record, a
+  `Secret` built from a `Vec<u8>` that was resized rather than cleared, or a
+  config value decoded from a fixed-width field. A deployment keyed with one was
+  forgeable, and the failure was indistinguishable from a working integration.
+
+  `verify_ref` now rejects a secret that is empty, entirely whitespace, **or**
+  entirely NUL, adding `InvalidSecret { reason: "secret is only NUL bytes" }`
+  alongside the existing `secret is empty` / `secret is only whitespace` reasons
+  rather than folding NUL into the empty one: cryptographically they are the
+  same key, but the operator's fix is different (read the secret from a
+  zero-padded record vs. unset configuration), and the reasons are `&'static str`
+  constants rather than an enum, so a third is free.
+
+  The predicate is "every byte is zero", and that is load-bearing in both
+  directions:
+  - **Rejected, not trimmed or stripped.** As with padded secrets, changing the
+    bytes fed to the MAC would silently break any deployment that signs with the
+    key as configured. Failing loudly is this crate's bias.
+  - **Only when the secret is *entirely* NUL.** One real byte anywhere makes an
+    ordinary key whose MAC is a different value, so `"hunter2\0"`, `"\0hunter2"`,
+    and `"hunter2\0\0"` are used byte for byte exactly as before. An all-NUL key
+    *longer* than the block size is rejected too, even though it no longer
+    collapses to the empty key (it gets hashed) — it is not a key an operator
+    configured on purpose.
+
+  Everything else is inherited from #222/#224 and unchanged: the check still
+  lives once in the `verify_ref` dispatch (so `verify`, `verify_any`, and the
+  `tower`/`actix` adapters all inherit it) and still precedes header lookup;
+  `UnsupportedProvider` still wins for a feature-gated provider; under
+  `verify_any` an unusable element is skipped so a slice holding the live key
+  still verifies; and PayPal and SendGrid, which ignore `Secret` entirely, are
+  unaffected. Nothing that verifies with a usable secret changes, including one
+  that contains a NUL.
+
+  Specified as `spec.md` §4.7 (with the `InvalidSecret` aggregation rule in
+  §2.1 cross-referenced) and documented on `verify`, `verify_any`, the crate
+  docs, and the README security notes. Covered by
+  `nul_only_secret_fails_closed_instead_of_accepting_a_forgery` (the issue's own
+  repro, over the table of every unusable shape),
+  `nul_only_secret_is_the_same_key_as_the_empty_one` (checks the RFC 2104
+  zero-padding claim for every NUL length up to the block size against the
+  crate's own audited helper, so the test cannot pass vacuously),
+  `unusable_secret_hmac_vectors_are_genuine_macs_for_those_keys`,
+  `unusable_secret_is_rejected_for_every_provider_that_uses_one` (iterates
+  `provider_list()` and the whole table),
+  `nul_only_secret_is_rejected_past_the_block_size_too`,
+  `a_secret_that_merely_contains_a_nul_still_verifies` (the boundary that must
+  *not* move), `an_unusable_secret_is_not_reported_to_a_provider_that_ignores_it`,
+  and the two `verify_any` cases. Verified by mutation — disabling the new
+  branch fails four tests. No new dependency.
+
 - **A whitespace-only secret no longer verifies a forged delivery.** #222
   rejected the *empty* key, but a key one character over was just as
   guessable and still verified: `Secret::new(" ")`, `Secret::new("\n")`, and
