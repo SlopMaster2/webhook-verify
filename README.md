@@ -414,6 +414,11 @@ before the body is read, but verification requires those bytes.
 - This crate does not log secrets, request bodies, or computed signatures
   under any log level.
 - Secrets are wrapped in a `Secret` type that redacts `Debug`/`Display` output.
+- An empty secret fails closed with `InvalidSecret` for every provider keyed by
+  it (all but PayPal and SendGrid, which verify against caller-supplied
+  `verifying_material` instead). An empty HMAC key is not a weak key but no key
+  at all — anyone who can read a request can compute the signature it produces
+  — so it is rejected before the request is parsed rather than verified.
 
 ## Non-goals
 

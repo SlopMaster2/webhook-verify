@@ -577,8 +577,11 @@ mod tests {
             ),
             // Valid hex but wrong length (truncated paste).
             ("abcd".to_string(), "public key does not decode to 32 bytes"),
-            // Empty configuration.
-            (String::new(), "public key does not decode to 32 bytes"),
+            // Empty configuration. Reported by the uniform entry-point guard
+            // in `providers::verify_ref` before `decode_public_key` runs, so
+            // the reason names the empty secret rather than the zero-length
+            // decode it would otherwise produce.
+            (String::new(), "secret is empty"),
             // Valid hex, 32 bytes, but not a valid Ed25519 compressed point
             // (fails point decompression): must be InvalidSecret per the
             // module docs, not SignatureMismatch.

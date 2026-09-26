@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(
             result,
             Err(VerifyError::InvalidSecret {
-                reason: "auth token is empty"
+                reason: "secret is empty"
             })
         );
     }

@@ -284,7 +284,10 @@ returns `Ok(())` if any one of them verifies. Its error aggregation rules:
   for its own formatting is unusable for the current request, but a later key
   in the slice may still be correct. `verify_any` therefore *continues*
   past an `InvalidSecret` rather than aborting, so a rotation slice with one
-  garbled/truncated live key still verifies against the healthy one.
+  garbled/truncated live key still verifies against the healthy one. An
+  **empty** key is such a case (§4.7): it is unusable for every request, and
+  it is also the one that must never be used to compute a MAC, so `verify`
+  rejects it up front with `InvalidSecret { reason: "secret is empty" }`.
 - On total failure, `verify_any` returns `SignatureMismatch` if at least one
   key was well-formed but wrong; it returns the first `InvalidSecret` only
   when *every* key was rejected for its own formatting (an all-garbled
@@ -3014,6 +3017,35 @@ ambiguity).
    perfectly (header lookups are not constant-time), but the security-
    relevant step — signature comparison — must be, and is the one that
    matters for known real-world timing attacks.
+7. **An empty secret fails closed.** Every provider whose scheme is keyed by
+   the `Secret` argument — that is, every provider except the two asymmetric
+   schemes, PayPal and SendGrid, which ignore `Secret` and verify against
+   `VerifyOptions::verifying_material` — rejects an empty secret with
+   `InvalidSecret` before any request parsing or signature work. An empty
+   HMAC (or plain-digest) key is not a weak key but *no* key: the resulting
+   signature is reproducible by anyone who can read the request, so accepting
+   one turns `verify()` into an unconditional `Ok(())` for a forged delivery.
+   The check lives once, in the `verify_ref` dispatch every provider is
+   reached through (so `verify`, `verify_any`, and the `tower`/`actix`
+   adapters all inherit it), and it precedes header lookup because the fault
+   is the operator's configuration rather than anything about the request.
+   Two consequences worth stating because they are easy to get wrong:
+   - `UnsupportedProvider` still wins for a feature-gated provider, so a
+     build without `paypal`/`sendgrid` keeps reporting the missing feature
+     rather than blaming the secret.
+   - Under `verify_any` an empty element is skipped like any other unusable
+     key (§2.1), so a slice that also holds the live key still verifies; the
+     `InvalidSecret` surfaces only when *every* element is empty, which is
+     exactly the existing all-garbled-rotation rule.
+
+   Nine provider modules already enforced this locally before the dispatch
+   check existed (Adyen, Contentful, HubSpot, Mandrill, Ripple, Square,
+   Standard Webhooks, Twilio, and Discord for its public key); those
+   per-provider checks are retained as a last line of defence at the audited
+   key-derivation site, and the uniform entry-point check is what makes the
+   rule hold for the rest. Their `InvalidSecret` `reason` strings are
+   therefore no longer reachable through `verify()` — the entry point reports
+   the single `secret is empty` reason instead.
 
 ---
 
