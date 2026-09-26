@@ -83,6 +83,17 @@ use alloc::vec;
 #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 use alloc::vec::Vec;
 
+// Contentful's self-describing signed-header list: the header whose *value*
+// names the other headers folded into the canonical string (`spec.md` §3,
+// Contentful row). `core::adapter_utils`'s `spec.md` §4.4 dynamic ambiguity
+// half has to read this exact header to enumerate those names, so it is
+// re-exported here instead of being re-spelled as a second literal in
+// `adapter_utils` — otherwise renaming `SIGNED_HEADERS_HEADER` would leave the
+// ambiguity scan following a name no request carries any more, silently
+// disabling Contentful's dynamic ambiguity protection with a green test suite.
+#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
+pub(crate) use contentful::SIGNED_HEADERS_HEADER as CONTENTFUL_SIGNED_HEADERS_HEADER;
+
 use crate::core::VerifyOptions;
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;

@@ -14,15 +14,7 @@
 
 #[cfg(any(feature = "tower", feature = "actix"))]
 use super::VerifyError;
-use crate::providers::{Provider, signature_header_names};
-
-/// Contentful's self-describing signed-header list: the header whose *value*
-/// names the other headers folded into the canonical string
-/// (`spec.md` §3, Contentful row).
-///
-/// Unlike every other provider's header set, these cannot live in
-/// `signature_header_names`: they are only known once the request is in hand.
-const CONTENTFUL_SIGNED_HEADERS_HEADER: &str = "x-contentful-signed-headers";
+use crate::providers::{CONTENTFUL_SIGNED_HEADERS_HEADER, Provider, signature_header_names};
 
 /// Raw, multi-value header access for the framework adapters.
 ///
@@ -408,8 +400,11 @@ mod tests {
     mod contentful_dynamic_scan {
         use super::super::find_ambiguous_signature_header;
         use crate::Provider;
-
-        const LIST: &str = "x-contentful-signed-headers";
+        // The provider's own constant, not a re-spelling of it: these fixtures
+        // exercise the scan against the header `contentful::verify` actually
+        // reads, so they cannot quietly keep testing a name the provider no
+        // longer uses.
+        use crate::providers::CONTENTFUL_SIGNED_HEADERS_HEADER as LIST;
 
         fn headers_with(pairs: &[(&str, &str)]) -> ::http::HeaderMap {
             let mut headers = ::http::HeaderMap::new();
@@ -501,6 +496,24 @@ mod tests {
             assert_eq!(
                 find_ambiguous_signature_header(&headers, &Provider::Contentful),
                 None
+            );
+        }
+
+        #[test]
+        fn a_conflicting_duplicate_of_the_list_header_itself_is_rejected() {
+            // The one ambiguity the dynamic half structurally *cannot* see: it
+            // reads the list header's first value only, so a differing second
+            // copy names headers this scan never learns about. Only the static
+            // half catches it, which is why the list header has to stay in
+            // `signature_header_names(Contentful)` — pinned here so dropping it
+            // cannot silently reopen this from the other direction.
+            let mut headers = clean();
+            headers.append(LIST, ::http::HeaderValue::from_static("content-type"));
+            assert_eq!(
+                find_ambiguous_signature_header(&headers, &Provider::Contentful),
+                Some(LIST),
+                "a differing second copy of the signed-headers list is ambiguous \
+                 and only the static half can see it"
             );
         }
 
