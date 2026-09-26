@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ambiguous_signature_header(provider, &headers)`, behind the `http`
+  feature** (issue #233). `spec.md` §4.4 requires rejecting a request whose
+  signature header arrives more than once with differing values, and says the
+  check belongs to the caller/adapter layer above `verify()` because
+  `HeaderMap` exposes only a first-match lookup. The machinery was reachable
+  only through the `tower` and `actix` adapters — `core::adapter_utils` and
+  `signature_header_names` were not even compiled under `http` alone — so a
+  caller enabling just `http` and driving `verify()` itself (the ordinary axum
+  handler shape, with no adapter in the path) had no way to honor the contract,
+  and an ambiguous duplicate was silently accepted.
+
+  The new function is the adapters' existing check, re-exported: same static
+  per-provider scan over `signature_header_names`, same `Provider::Contentful`
+  dynamic scan that follows the self-describing
+  `x-contentful-signed-headers` list, same unparseable-name fail-closed
+  behavior, and the same "identical repeats are not ambiguous" rule. It
+  returns the provider-spelled `&'static str` header name for use as
+  `VerifyError::MalformedHeader { header, .. }`, which is exactly what the
+  adapters already return. The `Custom` carve-out is unchanged (only
+  `signature_header` and `timestamp_header` are scanned).
+
+  Additive only — no existing item changes shape. The `tower`/`actix` adapters
+  keep calling the internal trait-generic version, so there is one
+  implementation and it cannot drift from the public one.
+
 ### Fixed
 
 - **Contentful: `spec.md` and the provider docs described the divergence

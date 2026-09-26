@@ -128,7 +128,7 @@ use ::tower_layer::Layer;
 use ::tower_service::Service;
 
 use crate::core::adapter_utils::{
-    ambiguous_signature_header, declared_content_length, rejection_status,
+    declared_content_length, find_ambiguous_signature_header, rejection_status,
 };
 use crate::{Provider, Secret, VerifyError, VerifyOptions};
 
@@ -310,7 +310,8 @@ where
         // the provider's static signature headers plus any header the request
         // itself enumerates as signing material (Contentful's
         // `x-contentful-signed-headers`) — see `spec.md` §4.4.
-        if let Some(header) = ambiguous_signature_header(req.headers(), &self.config.provider) {
+        if let Some(header) = find_ambiguous_signature_header(req.headers(), &self.config.provider)
+        {
             let response = rejection_response::<ResB>(&VerifyError::MalformedHeader {
                 header,
                 reason: "header present multiple times with different values",

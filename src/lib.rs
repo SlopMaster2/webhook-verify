@@ -123,7 +123,12 @@
 //!   for timestamped providers.
 //! - `sendgrid` — enables the SendGrid provider (ECDSA P-256).
 //! - `paypal` — enables the PayPal provider (RSA, X.509, CRC-32).
-//! - `http` — `HeaderMap` impl for `http::HeaderMap` (axum, tower, hyper).
+//! - `http` — `HeaderMap` impl for `http::HeaderMap` (axum, tower, hyper),
+//!   plus `ambiguous_signature_header`, the §4.4 duplicate-header check
+//!   that `HeaderMap`'s first-match-only lookup structurally cannot perform —
+//!   call it before [`verify`] when you extract headers yourself instead of
+//!   going through an adapter. (Plain text rather than an intra-doc link: this
+//!   list is always compiled, the item it names is not.)
 //!   The impl's own code is `no_std`-clean and the full test suite runs with
 //!   the crate's `std` feature off in this configuration (spec §6), catching a
 //!   `std` leak in the impl. The feature is nonetheless **std-bounded in
@@ -185,6 +190,8 @@ pub mod tower;
 
 #[cfg(feature = "std")]
 pub use crate::core::SystemClock;
+#[cfg(feature = "http")]
+pub use crate::core::adapter_utils::ambiguous_signature_header;
 pub use crate::core::{Clock, HeaderMap, Secret, VerifyError, VerifyOptions, VerifyingKeyMaterial};
 pub use crate::providers::{
     CustomScheme, Encoding, HashAlg, Provider, ProviderParseError, verify, verify_any,
