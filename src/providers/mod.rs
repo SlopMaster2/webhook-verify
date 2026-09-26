@@ -3670,7 +3670,9 @@ mod tests {
         assert!(is_fuzzer_discovered_input(
             "003ab18a2744aa4c3440c597ac82163be5ac2106"
         ));
-        assert!(is_fuzzer_discovered_input("d95c6b7477fbd7e9f90b1b0ef5f9c7ac"));
+        assert!(is_fuzzer_discovered_input(
+            "d95c6b7477fbd7e9f90b1b0ef5f9c7ac"
+        ));
 
         // The negative side: every committed seed is descriptive, so a real
         // seed must never be classified as fuzzer state — that would silently
