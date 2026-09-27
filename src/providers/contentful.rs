@@ -152,6 +152,19 @@ pub(crate) const SIGNATURE_HEADER: &str = "x-contentful-signature";
 /// The header listing (comma-separated) which headers the signature covers.
 pub(crate) const SIGNED_HEADERS_HEADER: &str = "x-contentful-signed-headers";
 
+/// The delimiter [`SIGNED_HEADERS_HEADER`]'s list separates names with.
+///
+/// Shared with `core::adapter_utils`'s `spec.md` §4.4 dynamic ambiguity half
+/// for the same reason [`SIGNED_HEADERS_HEADER`] is (see
+/// `providers::CONTENTFUL_SIGNED_HEADERS_HEADER`): that scan has to enumerate
+/// *exactly* the header names this provider folds into the signed string, so
+/// both sides must read one definition of how the list is split. A second
+/// literal here would let a separator change reach only one side and silently
+/// turn the dynamic half into a no-op — every split would yield a name no
+/// request carries, so no duplicate would ever be found and every test would
+/// stay green.
+pub(crate) const SIGNED_HEADERS_SEPARATOR: char = ',';
+
 /// The header carrying the signing timestamp (unix epoch **milliseconds**).
 pub(crate) const TIMESTAMP_HEADER: &str = "x-contentful-timestamp";
 
@@ -287,7 +300,9 @@ fn parse_signature(value: &str) -> Result<Vec<u8>, VerifyError> {
 /// (Contentful lowercases the names it emits; HTTP header names are
 /// case-insensitive). The names themselves are trimmed of surrounding
 /// whitespace, matching the reference implementations; a list containing an
-/// empty name is malformed.
+/// empty name is malformed. The delimiter is [`SIGNED_HEADERS_SEPARATOR`],
+/// which the `spec.md` §4.4 dynamic ambiguity scan shares so the two cannot
+/// disagree about which headers the signature covers.
 fn parse_signed_header_names(
     headers: &dyn HeaderMap,
     value: &str,
@@ -305,7 +320,7 @@ fn parse_signed_header_names(
     }
 
     let mut names = Vec::new();
-    for name in value.split(',') {
+    for name in value.split(SIGNED_HEADERS_SEPARATOR) {
         let name = name.trim();
         if name.is_empty() {
             return Err(VerifyError::MalformedHeader {
