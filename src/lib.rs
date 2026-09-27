@@ -160,6 +160,11 @@
 //!   same empty key one encoding layer deeper, so the three providers that
 //!   hex- or base64-decode it (Adyen, Ripple, Standard Webhooks) re-apply the
 //!   rule to the decoded bytes.
+//! - Ed25519 verification (Discord) uses dalek's **strict** equation, so a
+//!   low-order ("weak") public key is rejected rather than used — a weak key
+//!   forges signatures outright, and one is a valid compressed point, so the
+//!   key-format check cannot see it. It is reported as
+//!   [`VerifyError::InvalidSecret`], i.e. as operator misconfiguration.
 //! - Parsing paths return [`VerifyError`] instead of panicking on
 //!   attacker-controlled input.
 //!

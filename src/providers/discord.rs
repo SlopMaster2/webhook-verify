@@ -19,7 +19,11 @@
 //! proof that the sender holds a secret you also possess — it is proof the
 //! payload was signed by the corresponding private key held by Discord. An
 //! invalid or malformed public key fails closed with
-//! [`VerifyError::InvalidSecret`].
+//! [`VerifyError::InvalidSecret`], as does a key that is a valid point but of
+//! *low order* (see [`decode_public_key`]): those forge signatures outright, so
+//! accepting one would hand any caller an "authenticated" webhook. Signature
+//! verification is dalek's **strict** variant, which additionally refuses a
+//! small-order `R`.
 //!
 //! # Test-vector provenance
 //!
@@ -107,6 +111,17 @@ pub(crate) fn verify(
 /// valid compressed Edwards point, means the operator pasted something other
 /// than the Developer Portal value, so fail closed with
 /// [`VerifyError::InvalidSecret`] instead of attempting verification.
+///
+/// A key that decompresses but is *low-order* (a "weak" key) is rejected here
+/// for the same reason. `VerifyingKey::from_bytes` accepts the all-zero key —
+/// `y = 0` decompresses to a point of order 4 — and such a key is not merely
+/// weak but forgeable: dalek's non-strict equation `[-k]A + [s]B == R` then
+/// reduces to `[k]A == O`, which holds whenever the challenge `k` is divisible
+/// by 4, so one fixed 64-byte signature verifies for a quarter of all
+/// messages. [`verify_ed25519`] rejects it via dalek's strict path regardless;
+/// catching it here as well is what keeps it an *operator* error
+/// (`InvalidSecret`, reported as 500) instead of a forgery
+/// (`SignatureMismatch`, reported as 401 "attacker").
 fn decode_public_key(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
     let secret_str = core::str::from_utf8(secret).map_err(|_| VerifyError::InvalidSecret {
         reason: "public key must be a hex-encoded string",
@@ -119,15 +134,22 @@ fn decode_public_key(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
             reason: "public key does not decode to 32 bytes",
         });
     }
-    // A 32-byte value that fails point decompression is configuration
-    // damage, not a forged request: classify it as InvalidSecret like every
-    // other malformed key instead of letting `verify_ed25519` surface it as
-    // a SignatureMismatch (which adapters report as 401 "attacker").
+    // A 32-byte value that fails point decompression — or that decompresses to
+    // a point of small order — is configuration damage, not a forged request:
+    // classify it as InvalidSecret like every other malformed key instead of
+    // letting `verify_ed25519` surface it as a SignatureMismatch (which
+    // adapters report as 401 "attacker").
     let mut key_bytes = [0u8; PUBLIC_KEY_LEN_BYTES];
     key_bytes.copy_from_slice(&decoded);
-    VerifyingKey::from_bytes(&key_bytes).map_err(|_| VerifyError::InvalidSecret {
-        reason: "public key is not a valid Ed25519 compressed point",
-    })?;
+    let verifying_key =
+        VerifyingKey::from_bytes(&key_bytes).map_err(|_| VerifyError::InvalidSecret {
+            reason: "public key is not a valid Ed25519 compressed point",
+        })?;
+    if verifying_key.is_weak() {
+        return Err(VerifyError::InvalidSecret {
+            reason: "public key is a low-order point and cannot verify safely",
+        });
+    }
     Ok(decoded)
 }
 
@@ -186,6 +208,18 @@ mod tests {
             hex::encode(signing_key.verifying_key().as_bytes()),
             hex::encode(signature.to_bytes()),
         )
+    }
+
+    /// A genuine, well-formed hex public key for tests that need the
+    /// configured key to be *usable* — i.e. that are about some other header
+    /// and must get past `decode_public_key` first. Derived from
+    /// [`VECTOR_SEED`], so it is a real prime-order point and is not
+    /// interchangeable with a degenerate one: the all-zero and identity keys
+    /// are low-order and are now rejected outright (see
+    /// `low_order_public_keys_are_invalid_secret`).
+    fn vector_key_hex() -> String {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&VECTOR_SEED);
+        hex::encode(signing_key.verifying_key().as_bytes())
     }
 
     fn verify_with(
@@ -430,7 +464,7 @@ mod tests {
             crate::Provider::Discord,
             &[("X-Signature-Timestamp", "1758600000")],
             b"{}",
-            &Secret::new("00".repeat(PUBLIC_KEY_LEN_BYTES)),
+            &Secret::new(vector_key_hex()),
             Default::default(),
         );
         assert_eq!(
@@ -447,7 +481,7 @@ mod tests {
                 "ab".repeat(SIGNATURE_LEN_BYTES).as_str(),
             )],
             b"{}",
-            &Secret::new("00".repeat(PUBLIC_KEY_LEN_BYTES)),
+            &Secret::new(vector_key_hex()),
             Default::default(),
         );
         assert_eq!(
@@ -461,7 +495,7 @@ mod tests {
             crate::Provider::Discord,
             &Vec::<(String, String)>::new(),
             b"{}",
-            &Secret::new("00".repeat(PUBLIC_KEY_LEN_BYTES)),
+            &Secret::new(vector_key_hex()),
             Default::default(),
         );
         assert_eq!(
@@ -507,7 +541,7 @@ mod tests {
         for (value, expected) in cases {
             let result = verify_with(
                 b"{}",
-                &"00".repeat(PUBLIC_KEY_LEN_BYTES),
+                &vector_key_hex(),
                 &value,
                 "1758600000",
                 Default::default(),
@@ -554,7 +588,7 @@ mod tests {
         for (value, expected) in cases {
             let result = verify_with(
                 b"{}",
-                &"00".repeat(PUBLIC_KEY_LEN_BYTES),
+                &vector_key_hex(),
                 &"ab".repeat(SIGNATURE_LEN_BYTES),
                 &value,
                 Default::default(),
@@ -604,5 +638,97 @@ mod tests {
                 "input: {secret_value:?}"
             );
         }
+    }
+
+    /// A key that is a valid compressed point but of *low order* is an
+    /// operator misconfiguration, not an attack, so it must be
+    /// `InvalidSecret` — the classification adapters report as 500 — and not
+    /// `SignatureMismatch` (401 "attacker").
+    ///
+    /// Both shapes here are the plausible paste: a zero-filled config buffer
+    /// and a blank paste that zero-pads to a 32-byte field. The all-zero key
+    /// decompresses (so the `from_bytes` check does not catch it) to a point
+    /// of order 4, and the identity point `0100…00` is the other low-order
+    /// encoding. `ed".repeat(31) + "7f"` in
+    /// `invalid_secret_errors_distinctly` covers the *other* failure class —
+    /// a key that does not decompress at all — which is why the dangerous
+    /// shapes needed their own test.
+    #[test]
+    fn low_order_public_keys_are_invalid_secret() {
+        let body = br#"{"type":1}"#;
+        let timestamp = "1758600000";
+        let signature = "ab".repeat(SIGNATURE_LEN_BYTES);
+        let reason = "public key is a low-order point and cannot verify safely";
+
+        let cases = vec![
+            // All-zero: y = 0, order 4.
+            "00".repeat(PUBLIC_KEY_LEN_BYTES),
+            // Identity point: order 1.
+            format!("01{}", "00".repeat(PUBLIC_KEY_LEN_BYTES - 1)),
+        ];
+        for public_key_hex in cases {
+            let result = verify_with(
+                body,
+                &public_key_hex,
+                &signature,
+                timestamp,
+                Default::default(),
+            );
+            assert_eq!(
+                result,
+                Err(VerifyError::InvalidSecret { reason }),
+                "public key: {public_key_hex}"
+            );
+        }
+    }
+
+    /// The forgery that made the low-order key exploitable: a fixed, publicly
+    /// known 64-byte signature (`R` = the Ed25519 basepoint, `S` = 1) that
+    /// satisfies the non-strict verification equation under the all-zero key
+    /// for any message whose challenge is divisible by 4. Replayed here
+    /// through the public `verify()` entry point as a real delivery, so the
+    /// test pins the end-to-end outcome, not just the helper.
+    ///
+    /// The timestamp is the attacker's, and this body/timestamp pair is one
+    /// where the challenge lands on a multiple of 4 — found by trying inputs
+    /// until the non-strict equation accepted them, so the vector is
+    /// deterministic rather than a 1-in-4 coin flip.
+    #[test]
+    fn low_order_key_forgery_is_rejected() {
+        const TIMESTAMP: &str = "1758600023";
+        // `attacker-chosen-0` is the message the non-strict path accepts; the
+        // signed message is `{timestamp}{body}`.
+        const FORGED_BODY: &[u8] = b"attacker-chosen-0";
+        const FORGED_SIGNATURE: &str = "586666666666666666666666666666666666666666666666666666666666666601\
+00000000000000000000000000000000000000000000000000000000000000";
+
+        let result = verify_with(
+            FORGED_BODY,
+            &"00".repeat(PUBLIC_KEY_LEN_BYTES),
+            FORGED_SIGNATURE,
+            TIMESTAMP,
+            clocked_at(1_758_600_023, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(
+            result,
+            Err(VerifyError::InvalidSecret {
+                reason: "public key is a low-order point and cannot verify safely",
+            })
+        );
+
+        // The same signature under a genuine key is an ordinary forgery and
+        // still a SignatureMismatch, so the low-order path is not the only
+        // thing standing between this signature and acceptance.
+        let (key_hex, _) = sign_locally(&VECTOR_SEED, TIMESTAMP, FORGED_BODY);
+        assert_eq!(
+            verify_with(
+                FORGED_BODY,
+                &key_hex,
+                FORGED_SIGNATURE,
+                TIMESTAMP,
+                clocked_at(1_758_600_023, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
     }
 }
