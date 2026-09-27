@@ -84,10 +84,14 @@ pub(crate) fn verify_hmac_sha256(
 ///
 /// This exists for the multi-candidate schemes (`spec.md` §4.1): Stripe,
 /// Paddle, PagerDuty, Mux, Tailscale, and Standard Webhooks accept a delivery
-/// when any comma-separated signature in one header matches, and Box accepts one
-/// when either of its two signature headers matches. Those candidates all cover
-/// the *same* key over the *same* signed string, so the HMAC is computed once
-/// and every candidate is compared against that one digest — never one HMAC per
+/// when any one of several candidates packed into a single header value
+/// matches, and Box accepts one when either of its two signature headers
+/// matches. The rotation list's separator is each provider's own — Stripe,
+/// PagerDuty, Mux, and Tailscale split on `,`, Paddle on `;`, Standard Webhooks
+/// on ` ` — and the helper deliberately does not care which, because the caller
+/// splits and this only compares. Those candidates all cover the *same* key
+/// over the *same* signed string, so the HMAC is computed once and every
+/// candidate is compared against that one digest — never one HMAC per
 /// candidate. Calling [`verify_hmac_sha256`] in a loop instead would multiply
 /// the per-delivery HMAC work by the candidate count, all of it attacker-
 /// reachable.

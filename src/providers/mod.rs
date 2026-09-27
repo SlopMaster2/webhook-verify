@@ -1329,9 +1329,10 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
 /// provider's signing headers would silently stop exempting anything).
 ///
 /// Empty for every provider whose scheme keeps all its candidates out of the
-/// scan's reach — a comma-delimited list inside a single header value (Stripe,
-/// Paddle, PagerDuty, Mux, Tailscale, Standard Webhooks) or two *distinctly
-/// named* headers with one value each (Box's `BOX-SIGNATURE-PRIMARY` /
+/// scan's reach — a multi-candidate list packed inside a single header value
+/// (Stripe, Paddle, PagerDuty, Mux, Tailscale, Standard Webhooks; the separator
+/// is the provider's own, not the scan's concern) or two *distinctly named*
+/// headers with one value each (Box's `BOX-SIGNATURE-PRIMARY` /
 /// `BOX-SIGNATURE-SECONDARY`), neither of which is a duplicate at all.
 #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 pub(crate) fn provider_sent_duplicate_headers(provider: &Provider) -> &'static [&'static str] {
@@ -4313,6 +4314,127 @@ mod tests {
             "the HMAC-per-candidate scan found no provider modules to check under {}",
             dir.display()
         );
+    }
+
+    /// The rotation lists are not uniform in separator, and the prose that
+    /// describes them must say so.
+    ///
+    /// `verify_hmac_sha256_any`'s doc comment used to introduce all six
+    /// rotation-list providers as "any comma-separated signature in one header
+    /// matches", and `provider_sent_duplicate_headers` above repeated it as the
+    /// *reason* six providers are exempt from the ambiguity scan. Two of the six
+    /// never split on a comma: Paddle's list is `;`-separated and Standard
+    /// Webhooks' is space-separated. A reader auditing the exemption list was
+    /// handed a wrong reason for those two — the conclusion survives (all six
+    /// pack their candidates into one header value, so none is a duplicate), but
+    /// the stated mechanism did not.
+    ///
+    /// The guard closes the class of drift rather than the one sentence: for
+    /// every provider module that routes its candidates through
+    /// `verify_hmac_sha256_any`, read the separator it actually splits on, and
+    /// require the helper's doc comment to name that separator in backticks. A
+    /// future rotation list on a new delimiter (say `|`) therefore fails CI
+    /// until the prose is updated, instead of being quietly described as
+    /// comma-separated. An unknown separator is reported as a hard failure
+    /// rather than skipped so the map below cannot rot either.
+    #[test]
+    fn rotation_lists_prose_names_every_separator_the_code_actually_splits_on() {
+        use std::collections::BTreeSet;
+        use std::fs;
+        use std::path::Path;
+
+        // Only these characters are known separators. An unmapped one means a
+        // provider introduced a new delimiter, which needs a human to decide
+        // how to render it in the doc comment.
+        fn renders_in_prose(separator: char) -> Option<&'static str> {
+            match separator {
+                ',' => Some(","),
+                ';' => Some(";"),
+                ' ' => Some(" "),
+                _ => None,
+            }
+        }
+
+        let providers_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/providers");
+        let entries = match fs::read_dir(&providers_dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+
+        let mut found = BTreeSet::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            if path.file_stem().is_some_and(|stem| stem == "mod") {
+                continue;
+            }
+            let source = match fs::read_to_string(&path) {
+                Ok(source) => source,
+                Err(_) => continue,
+            };
+            // Box's two candidates are two distinct header names, not a list, so
+            // it is deliberately not a rotation list and has no separator.
+            if !source.contains("verify_hmac_sha256_any")
+                || path.file_stem().is_some_and(|stem| stem == "box_webhooks")
+            {
+                continue;
+            }
+            // Only the implementation counts: a test that re-derives a vector
+            // through the `_any` helper may split its own fixture header value,
+            // and that is not the scheme's separator.
+            let implementation = match source.find("#[cfg(test)]") {
+                Some(at) => &source[..at],
+                None => source.as_str(),
+            };
+            // The candidate loop is the only `split` in these modules that takes
+            // a bare char; `split_once` / `splitn` are field parsing, not the
+            // rotation list.
+            let separator = implementation
+                .lines()
+                .find_map(|line| line.split("value.split(").nth(1))
+                .and_then(|rest| rest.trim_start().strip_prefix('\''))
+                .and_then(|rest| rest.chars().next());
+            let (Some(separator), Some(rendered)) =
+                (separator, separator.and_then(renders_in_prose))
+            else {
+                panic!(
+                    "{} routes candidates through `verify_hmac_sha256_any` but no \
+                     single-character `value.split(..)` separator could be read from it; \
+                     add it to `renders_in_prose` so the prose can name it",
+                    path.display(),
+                );
+            };
+            found.insert((separator, rendered));
+        }
+
+        assert!(
+            found.len() > 1,
+            "expected the rotation lists to disagree on their separator, but every \
+             `_any` provider resolved to one: {found:?} — if the schemes really did \
+             converge, delete this guard instead of loosening it"
+        );
+
+        let crypto = match fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/core/crypto.rs"),
+        ) {
+            Ok(source) => source,
+            Err(_) => return,
+        };
+        let doc = match crypto.find("/// Verifies `provided_signatures`") {
+            Some(at) => &crypto[at..],
+            None => &crypto[..],
+        };
+        for (separator, rendered) in &found {
+            let named = format!("`{rendered}`");
+            assert!(
+                doc.contains(&named),
+                "verify_hmac_sha256_any's doc comment does not name the `{separator}` \
+                 separator that a rotation-list provider actually splits on (expected it to \
+                 contain {named}); the rotation lists are not comma-uniform — see spec.md §4.1"
+            );
+        }
     }
 
     /// Every name-constructible [`Provider`] variant, in declaration order.

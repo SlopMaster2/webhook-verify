@@ -36,6 +36,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The six rotation-list providers are no longer described as
+  comma-separated; Paddle's list is `;`-separated and Standard Webhooks' is
+  space-separated** (issue #252). `verify_hmac_sha256_any`'s doc comment
+  introduced all of Stripe, Paddle, PagerDuty, Mux, Tailscale, and Standard
+  Webhooks as schemes where "any comma-separated signature in one header
+  matches", and `provider_sent_duplicate_headers` repeated that as the *reason*
+  six providers are exempt from the §4.4 ambiguity scan. Two of the six never
+  split on a comma:
+
+  ```
+  $ grep -n "value.split(" src/providers/{stripe,paddle,pagerduty,mux,tailscale,standard_webhooks}.rs
+  stripe.rs:114:            for element in value.split(',') {
+  paddle.rs:117:            for element in value.split(';') {
+  pagerduty.rs:92:          for element in value.split(',') {
+  mux.rs:130:               for element in value.split(',') {
+  tailscale.rs:138:         for element in value.split(',') {
+  standard_webhooks.rs:234: for element in value.split(' ') {
+  ```
+
+  A reviewer auditing the exemption list — the one place where the reason for
+  each exemption is security-relevant — was handed a mechanism that does not
+  exist for Paddle and Standard Webhooks. The load-bearing conclusion is
+  unaffected and now states the real one: all six pack every candidate into a
+  single header value, which is why none of them is a duplicate at all. The
+  separator being each provider's own is also why the helper takes an
+  already-split iterator and never splits anything itself. `spec.md` §4.1 and
+  §4.4 carried the same gloss and are aligned; the crate's own §4.1 text had
+  only ever said "the rotation-list providers", so the wrong gloss originated in
+  the code comments.
+
+  Documentation only: no verification behavior changes. A new guard test,
+  `rotation_lists_prose_names_every_separator_the_code_actually_splits_on`,
+  reads the separator each `_any` provider actually splits on and requires the
+  helper's doc comment to name it, so a future rotation list on a new delimiter
+  fails CI until the prose catches up instead of being described as
+  comma-separated by default.
+
 - **`spec.md` §4.4 no longer claims Mollie's second rotation signature is
   reachable** (issue #247). The §4.4 rationale for the crate's only
   provider-sent-duplicate exemption ended with "Mollie's second signature
