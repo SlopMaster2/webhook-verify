@@ -287,24 +287,35 @@ fn dynamically_named_ambiguity<H: MultiValueHeaders + ?Sized>(
 
 /// The request's declared `Content-Length`, when present and decodable.
 ///
-/// Parse failure — a non-visible-ASCII value, a value that is not the
-/// canonical `1*DIGIT` spelling HTTP requires (a leading `+`/`-`, a radix
-/// prefix, empty), or an unparseable header name — is treated as "no declared
-/// length": the request then falls through to the post-buffer size check,
-/// which still bounds the verification work, and the framing layer
-/// (`hyper`/`axum` on tower, actix-http on actix) has already rejected
-/// inconsistent `Content-Length` fields. Shared between the adapters so the
-/// pre-buffer 413 guard cannot drift.
+/// Surrounding optional whitespace is stripped first, so an OWS-padded value
+/// is the same declared length as its bare form. That is deliberate and is the
+/// one respect in which this parse differs from `parse_unsigned_decimal` in
+/// `replay.rs`, which rejects whitespace outright: RFC 9110 §5.5 defines a
+/// field value as running from its first to its last non-OWS octet, and OWS is
+/// `SP`/`HTAB` only, so a padded `Content-Length` is a correctly-spelled
+/// header rather than a malformed one.
+///
+/// After that, the digits must be exactly the canonical `1*DIGIT` grammar HTTP
+/// requires — no leading `+`/`-`, no radix prefix, no separator. Any other
+/// value is treated as "no declared length": the request then falls through to
+/// the post-buffer size check, which still bounds the verification work, and
+/// the framing layer (`hyper`/`axum` on tower, actix-http on actix) has
+/// already rejected inconsistent `Content-Length` fields. A non-visible-ASCII
+/// value cannot reach here at all — [`MultiValueHeaders::get_first_str`] only
+/// decodes visible ASCII, so it reads as "no declared length" one step
+/// earlier. Shared between the adapters so the pre-buffer 413 guard cannot
+/// drift.
 #[cfg(any(feature = "tower", feature = "actix"))]
 #[must_use]
 pub(crate) fn declared_content_length<H: MultiValueHeaders + ?Sized>(headers: &H) -> Option<usize> {
     let value = headers.get_first_str("content-length")?.trim();
     // HTTP's Content-Length grammar is `1*DIGIT` (RFC 9110 §8.6) — no sign, no
-    // radix prefix, no separator. Parse strictly, mirroring `parse_unsigned_decimal`
-    // in `replay.rs`: Rust's `usize::from_str` would otherwise silently accept a
-    // leading `+` (e.g. `+100`), which is not a valid Content-Length. Any
-    // non-canonical value is treated as "no declared length" and falls through to
-    // the post-buffer size check, which still bounds the signature-verification work.
+    // radix prefix, no separator. Parse strictly, which is the same digit rule
+    // `parse_unsigned_decimal` in `replay.rs` applies (Rust's `usize::from_str`
+    // would otherwise silently accept a leading `+`, e.g. `+100`, which is not
+    // a valid Content-Length). Any non-canonical value is treated as "no
+    // declared length" and falls through to the post-buffer size check, which
+    // still bounds the signature-verification work.
     if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
@@ -1153,12 +1164,67 @@ mod tests {
                 "non-canonical Content-Length {value:?} must be treated as undeclared"
             );
         }
-        // Legacy tolerance: surrounding whitespace was historically trimmed
-        // before parsing, so keep accepting the padded spelling.
-        headers.insert(
-            ::http::header::CONTENT_LENGTH,
-            ::http::HeaderValue::from_static(" 131072 "),
-        );
-        assert_eq!(declared_content_length(&headers), Some(131072));
+        // Surrounding OWS is stripped, so the padded spelling is the same
+        // declared length (RFC 9110 §5.5: a field value runs from its first to
+        // its last non-OWS octet, and OWS is `SP`/`HTAB`). This is the one
+        // respect in which this parse is *not* identical to
+        // `parse_unsigned_decimal`, which rejects whitespace outright.
+        for padded in [" 131072 ", "\t131072\t", " \t131072\t "] {
+            headers.insert(
+                ::http::header::CONTENT_LENGTH,
+                ::http::HeaderValue::from_static(padded),
+            );
+            assert_eq!(
+                declared_content_length(&headers),
+                Some(131072),
+                "OWS-padded Content-Length {padded:?} is the same declared length"
+            );
+        }
+        // Whitespace-only is still undeclared rather than a length of 0.
+        for value in [" ", "\t", " \t "] {
+            headers.insert(
+                ::http::header::CONTENT_LENGTH,
+                ::http::HeaderValue::from_static(value),
+            );
+            assert_eq!(
+                declared_content_length(&headers),
+                None,
+                "whitespace-only Content-Length {value:?} must be treated as undeclared"
+            );
+        }
+    }
+
+    /// Pins the "non-visible-ASCII value" half of `declared_content_length`'s
+    /// contract, which `from_str`/`from_static` cannot express: those two
+    /// constructors reject such a value outright, so the only way to build one
+    /// is `from_bytes` (obs-text). The `MultiValueHeaders::get_first_str`
+    /// decode then fails and the length reads as undeclared, so the pre-buffer
+    /// guard falls through to the post-buffer size check.
+    #[cfg(feature = "http")]
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[test]
+    fn declared_content_length_rejects_non_visible_ascii_values() {
+        let mut headers = ::http::HeaderMap::new();
+        // `from_bytes` permits obs-text (128-255) but rejects DEL and the
+        // control bytes, so those are the only shapes constructible here — and
+        // exactly the ones `to_str` then refuses to decode.
+        for bytes in [
+            &b"\xa0131072"[..], // leading NBSP (U+00A0)
+            &b"131072\xa0"[..], // trailing NBSP
+            &b"\xc2\xa0131072"[..],
+            &b"131072\xe3\x80\x80"[..], // trailing IDEOGRAPHIC SPACE (U+3000)
+            &b"\xff"[..],               // bare non-ASCII
+        ] {
+            headers.insert(
+                ::http::header::CONTENT_LENGTH,
+                ::http::HeaderValue::from_bytes(bytes)
+                    .unwrap_or_else(|_| unreachable!("obs-text is valid for from_bytes")),
+            );
+            assert_eq!(
+                declared_content_length(&headers),
+                None,
+                "non-visible-ASCII Content-Length {bytes:?} must be treated as undeclared"
+            );
+        }
     }
 }

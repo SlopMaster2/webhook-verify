@@ -3185,10 +3185,12 @@ ambiguity).
    already sat there. Standard Webhooks' optional `whsec_` prefix widens the
    gap rather than closing it: `"whsec_"` alone is caught by the existing
    `encoded.is_empty()` check, but `"whsec_AAAA"` is not all-NUL text and
-   decodes to three zero bytes. The five providers that use the raw secret
-   bytes as key material verbatim (Contentful, HubSpot, Square, Mandrill,
-   Twilio) need no second check — raw and decoded are the same bytes there —
-   and Discord's zero key is not a valid Ed25519 compressed point, so it
+   decodes to three zero bytes. Every provider other than those three
+   decoders keys off the raw secret bytes verbatim — so raw and decoded are the
+   same bytes and there is nothing to re-check — including the five that
+   additionally require caller-supplied request context (Contentful, HubSpot,
+   Square, Mandrill, Twilio), which are no more of a special case here than
+   Discord is: its zero key is not a valid Ed25519 compressed point, so it
    already fails closed as a malformed key.
 
    The rule is deliberately narrow in two directions, and both matter:

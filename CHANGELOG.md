@@ -2593,6 +2593,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and honest about the §5.1 recipe provenance the doc comments already state.
   Test-name-only change; no verification behavior, fixture values, or vector
   signatures are touched.
+- **`declared_content_length`'s doc comment overclaimed how strict its parse
+  is.** The shared pre-buffer 413 guard used by the `tower` and `actix`
+  adapters documented that "a value that is not the canonical `1*DIGIT`
+  spelling ... is treated as *no declared length*", and its inline comment
+  claimed it parsed "strictly, mirroring `parse_unsigned_decimal` in
+  `replay.rs`". Both were false: the function trims first, so an OWS-padded
+  `Content-Length` is accepted as a number, and `parse_unsigned_decimal`
+  rejects whitespace outright (`replay.rs` states it "rejects leading `+`/`-`,
+  whitespace, and non-numeric text"). A reader auditing the guard was told a
+  padded value falls through to the post-buffer check when it does not.
+
+  The code was right and the prose was wrong, so this corrects the doc rather
+  than the parse: RFC 9110 §5.5 defines a field value as running from its
+  first to its last non-OWS octet, so a padded `Content-Length` is a
+  correctly-spelled header, not a malformed one. The comment now says the OWS
+  strip is deliberate and is the one respect in which this parse differs from
+  `parse_unsigned_decimal`, and attributes the shared digit rule to that
+  function without claiming it as a mirror. It also records that a
+  non-visible-ASCII value cannot reach the parse at all —
+  `MultiValueHeaders::get_first_str` decodes visible ASCII only, so it reads as
+  "no declared length" one step earlier — which is what the old comment
+  described as a parse outcome.
+
+  The contract is now pinned by tests rather than by a comment: the existing
+  OWS case is extended to tab-padded and mixed `SP`/`HTAB` forms, a new case
+  covers whitespace-only values staying undeclared rather than parsing as
+  length 0, and `declared_content_length_rejects_non_visible_ascii_values`
+  covers the obs-text arm via `HeaderValue::from_bytes` (the only constructor
+  that admits such a value — `from_str`/`from_static` reject it). The actix
+  mirror test is extended to match. Documentation and tests only; no
+  verification behavior, status code, or accepted request changes.
+- **`parse_rfc3339_timestamp`'s doc comment omitted Box.** It listed PayPal,
+  Twitch, and Zendesk as the RFC 3339 timestamp headers that reach the shared
+  parser, but `box_webhooks.rs` also calls it (on `BOX-DELIVERY-TIMESTAMP`),
+  so a reader debugging a rejected Box delivery was told the provider did not
+  use it. Doc-comment-only change.
+- **`spec.md` §4.7 no longer miscounts the providers that key off the raw
+  secret bytes.** The all-NUL-key rationale ended with "The **five**
+  providers that use the raw secret bytes as key material verbatim
+  (Contentful, HubSpot, Square, Mandrill, Twilio) need no second check". Those
+  five are the ones that additionally require caller-supplied request context,
+  not the ones that key off raw secret bytes — every other non-decoding
+  provider does that too, GitHub, Slack, Stripe, and Shopify included — so
+  the count and the parenthetical contradicted the claim. The passage now
+  states the rule by its actual scope
+  (every provider other than the three hex/base64 decoders keys off the raw
+  bytes verbatim, so there is nothing to re-check) and keeps the context-
+  requiring five as an explicitly non-special subcase. The correctly-scoped
+  statement of the same rule in `core::crypto::is_all_nul_key` is unchanged.
+  Documentation only.
 
 ## [0.1.0] - Unreleased
 
