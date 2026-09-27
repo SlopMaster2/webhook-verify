@@ -91,8 +91,16 @@ use alloc::vec::Vec;
 // `adapter_utils` — otherwise renaming `SIGNED_HEADERS_HEADER` would leave the
 // ambiguity scan following a name no request carries any more, silently
 // disabling Contentful's dynamic ambiguity protection with a green test suite.
+//
+// The *delimiter* is shared for the identical reason, and the two are
+// re-exported together on purpose: a scan that reads the right header but
+// splits its value on the wrong character enumerates names no request carries,
+// so a separator change reaching only `contentful::verify` degrades the dynamic
+// half to a silent no-op just as thoroughly as a header rename would.
 #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 pub(crate) use contentful::SIGNED_HEADERS_HEADER as CONTENTFUL_SIGNED_HEADERS_HEADER;
+#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
+pub(crate) use contentful::SIGNED_HEADERS_SEPARATOR as CONTENTFUL_SIGNED_HEADERS_SEPARATOR;
 
 use crate::core::VerifyOptions;
 use crate::core::error::VerifyError;

@@ -21,8 +21,8 @@ use core::fmt;
 #[cfg(any(feature = "tower", feature = "actix"))]
 use super::VerifyError;
 use crate::providers::{
-    CONTENTFUL_SIGNED_HEADERS_HEADER, Provider, provider_sent_duplicate_headers,
-    signature_header_names,
+    CONTENTFUL_SIGNED_HEADERS_HEADER, CONTENTFUL_SIGNED_HEADERS_SEPARATOR, Provider,
+    provider_sent_duplicate_headers, signature_header_names,
 };
 #[cfg(any(feature = "tower", feature = "actix"))]
 use crate::{Secret, VerifyOptions};
@@ -274,6 +274,14 @@ pub fn ambiguous_signature_header(
 /// not decodable as visible ASCII contributes nothing here: `verify()` then
 /// reports it missing or malformed on its own, so this scan never has to guess
 /// at a shape it cannot read.
+///
+/// The list is split on [`CONTENTFUL_SIGNED_HEADERS_SEPARATOR`], the same
+/// delimiter `contentful::verify` signs over, so the names enumerated here are
+/// exactly the names that go into the canonical string. A second literal here
+/// would degrade the whole half to a silent no-op: every element it looked up
+/// would be a whole-element string no request carries, every duplicate check
+/// would come back clean, and Contentful's dynamic ambiguity protection would
+/// be gone with the test suite still green.
 fn dynamically_named_ambiguity<H: MultiValueHeaders + ?Sized>(
     headers: &H,
     provider: &Provider,
@@ -286,7 +294,7 @@ fn dynamically_named_ambiguity<H: MultiValueHeaders + ?Sized>(
     // list containing one as `MalformedHeader` on the list header itself, and
     // an empty name can never match a real header anyway.
     let ambiguous = list
-        .split(',')
+        .split(CONTENTFUL_SIGNED_HEADERS_SEPARATOR)
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .any(|name| has_conflicting_duplicates(headers, name));
@@ -1440,6 +1448,82 @@ mod tests {
                 None => panic!("the two signature values differ, so the header is ambiguous"),
             }
         }
+    }
+
+    /// The dynamic scan must not carry its own copy of Contentful's list
+    /// separator (issue #267).
+    ///
+    /// #235 stopped this scan from re-spelling Contentful's list *header name*
+    /// as a second literal. The delimiter was still spelled twice: once in
+    /// `contentful::parse_signed_header_names` and once here, both as a bare
+    /// `','`. Nothing tied the two together, and the failure mode is worse than
+    /// a duplicate-name bug, because it is invisible:
+    ///
+    /// * every existing fixture uses a comma list, so both spellings agree on
+    ///   all of them and the suite stays green;
+    /// * a separator change that reached only `contentful::verify` (a provider
+    ///   switch, a new delimiter) would leave this scan splitting the old way,
+    ///   so every element it looked up would be a *whole* element such as
+    ///   `"content-type;x-contentful-topic"`, which no request carries;
+    /// * `has_conflicting_duplicates` on a name no request has finds no values
+    ///   and returns `false`, so `contentful_dynamic_scan`'s duplicate tests
+    ///   would still pass while the production path stopped rejecting ambiguous
+    ///   Contentful deliveries entirely — a silent loss of `spec.md` §4.4
+    ///   coverage for the one provider whose signed-header set is
+    ///   request-declared.
+    ///
+    /// The fix is to read the provider's own constant
+    /// (`CONTENTFUL_SIGNED_HEADERS_SEPARATOR`); this pins that it stays read,
+    /// so the re-spelling cannot come back. Structural rather than behavioral
+    /// because both spellings are behaviorally identical today — only a
+    /// *disagreement* would be observable, and by then the coverage is already
+    /// gone. Same idiom as the sibling guard in `providers::tests` that keeps
+    /// one candidate comparison per signed string.
+    #[test]
+    fn the_dynamic_scan_splits_contentfuls_list_on_the_providers_separator() {
+        use std::fs;
+        use std::path::Path;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/core/adapter_utils.rs");
+        // This module is shipped in the crates.io tarball, so a read failure is
+        // only a guard against a packaging surprise, not a test failure.
+        let Ok(source) = fs::read_to_string(&path) else {
+            return;
+        };
+        // Only the implementation is scanned. Without this bound the slice runs
+        // to end-of-file and picks up the literals in *this* test's own
+        // assertion messages, which is exactly what the second assertion looks
+        // for.
+        let implementation = match source.find("#[cfg(test)]") {
+            Some(at) => &source[..at],
+            None => source.as_str(),
+        };
+        let body = implementation
+            .split_once("fn dynamically_named_ambiguity")
+            .map(|(_, rest)| rest)
+            .and_then(|rest| rest.split_once('{').map(|(_, body)| body))
+            .unwrap_or_else(|| panic!("{} must still define the dynamic scan", path.display()));
+
+        assert!(
+            body.contains("CONTENTFUL_SIGNED_HEADERS_SEPARATOR"),
+            "{} splits Contentful's signed-header list on something other than the \
+             provider's own `SIGNED_HEADERS_SEPARATOR`. Re-spelling the delimiter here \
+             silently disables `spec.md` §4.4's dynamic half for Contentful: a mismatch \
+             yields element strings no request carries, so no duplicate is ever found \
+             and the test suite stays green. Import and use \
+             `CONTENTFUL_SIGNED_HEADERS_SEPARATOR` instead.",
+            path.display(),
+        );
+        // Belt and braces: name the literal shape explicitly, so a `split(',')`
+        // regression is reported as itself rather than only as the missing
+        // reference above.
+        assert!(
+            !body.contains(".split(',')") && !body.contains(".split(\",\")"),
+            "{} splits Contentful's signed-header list on a literal delimiter; it must use \
+             the provider's `SIGNED_HEADERS_SEPARATOR` (see \
+             `CONTENTFUL_SIGNED_HEADERS_SEPARATOR`)",
+            path.display(),
+        );
     }
 
     #[cfg(feature = "http")]
