@@ -36,6 +36,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The README and crate-doc provider tables now state replay protection for
+  the seven providers whose rows omitted it** (issue #254). Both tables are
+  where a caller goes to learn which providers reject stale deliveries, and
+  nothing re-checked that claim against the code. Ten rows across the two
+  hand-maintained tables understated it:
+
+  | Table | Rows that omitted a replay/tolerance window |
+  | --- | --- |
+  | `README.md` | Discord, PayPal, SendGrid |
+  | crate docs | Discord, PayPal, SendGrid, Slack, Zoom, Cloudflare (Stream), Custom |
+
+  The three asymmetric (public-key) providers are the sharpest case, and the
+  three rows are the same three in both tables. Discord, PayPal, and SendGrid
+  all sign a timestamp header like every other timestamped provider and
+  recency-check it through the shared `max_age` window, but their rows were
+  written around the key material and never mentioned it — the `README.md`
+  Discord row read only "Ed25519 (public-key), no shared secret". The
+  crate-doc `Custom` row had the same gap: it omitted the window that
+  `Provider::Custom(..)` applies whenever a `timestamp_header` is configured.
+  The last three crate-doc rows (Slack, Zoom, and Cloudflare) named the
+  timestamp but stopped short of saying it was recency checked, so a reader
+  could not tell a merely-timestamped scheme from an enforced one.
+
+  `spec.md` §3 states replay protection correctly in all ten cases and §5.4
+  requires a tolerance for timestamped schemes, so the drift was confined to
+  the two summary tables and no normative text needed to change. Verification
+  behavior is unchanged: every one of these providers already rejected
+  out-of-tolerance deliveries, so nothing is newly enforced or newly relaxed —
+  the tables simply stopped contradicting the code. Note the reverse matters
+  too: the crate never checked a timestamp more loosely than a
+  non-timestamped provider, so a reader underestimating the protection was
+  the only failure mode available.
+
+  A new guard test,
+  `provider_tables_state_replay_protection_where_the_code_enforces_it`, reads
+  each provider module and requires the table row to claim a replay or
+  tolerance window exactly when that module calls `check_replay`. Both
+  directions are enforced: a provider that recency-checks must say so, and a
+  row that says so must belong to a provider that does. The reverse direction
+  is the load-bearing half — without it the first could be silenced by
+  appending "replay window" to all 59 rows and overstating the protection for
+  the 35 rows that enforce no window.
+
 - **The six rotation-list providers are no longer described as
   comma-separated; Paddle's list is `;`-separated and Standard Webhooks' is
   space-separated** (issue #252). `verify_hmac_sha256_any`'s doc comment
