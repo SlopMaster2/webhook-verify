@@ -36,6 +36,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Discord verification used dalek's non-strict equation, so a low-order
+  public key verified signatures that were trivially forgeable** (issue #257).
+  `core::crypto::verify_ed25519` called `VerifyingKey::verify`, which in
+  `ed25519-dalek` 3.0 resolves to the non-strict path (`raw_verify`): it
+  checks only `expected_R == R`, with no cofactor clearing, and it never
+  rejects a *low-order* (weak) public key. `VerifyingKey::from_bytes` only
+  validates point decompression, so the all-zero 32-byte key is **accepted** —
+  `y = 0` decompresses to a point of order 4 — as is the identity point
+  `0100…00`.
+
+  That is not a theoretical weakening. With `A` of order 4, `RCompute::finish`
+  computes `expected_R = [-k]A + [s]B` with no cofactor clearing, so for
+  `R = [s]B` the equation reduces to `[k]A == O`, which holds whenever the
+  challenge `k` is divisible by 4. A single fixed, publicly known 64-byte
+  signature — `R` = the Ed25519 basepoint, `S` = 1 — therefore verifies under
+  `A = [0u8; 32]` for a quarter of all messages, with nothing to guess.
+  Reproduced through the public `verify()` entry point on the unpatched code: a
+  forged delivery returned `Ok(())`. This is dalek's own documented threat
+  model — *"A weak public key can be used to generate a signature that's valid
+  for almost every message. `verify_strict` denies weak keys."*
+
+  Two changes, and both are needed:
+
+  - `verify_ed25519` now calls **`verify_strict`**, which rejects a low-order
+    `A` and a low-order `R`. This is the load-bearing check. It cannot reject a
+    genuine Discord delivery: a real keypair's `A` is prime-order and its `R`
+    is not small-order, except with negligible probability. (The small-order-`R`
+    half is unreachable by forgery on its own — for a prime-order `A`,
+    `[-k]A + [s]B` is small-order only if it is the identity, which needs
+    `k ≡ 0 (mod l)` — and is kept because it costs one decompress.)
+  - Discord's `decode_public_key` additionally tests `VerifyingKey::is_weak` and
+    returns `InvalidSecret`, so a misconfigured key stays an *operator* error,
+    which the adapters report as 500, rather than a `SignatureMismatch` that
+    reads as an attacker and is reported as 401. The strict path already fails
+    such a delivery closed; this half only classifies it.
+
+  Discord's `decode_public_key` was already rejecting a key that fails
+  decompression, but the *low-order* keys are exactly the ones that pass it,
+  and the existing negative test used `[0xffu8; 32]` — which is not a valid
+  point at all — so the dangerous shapes were never exercised. The rule is now
+  `spec.md` §4.8, and §4.7 no longer claims the all-zero key "already fails
+  closed as a malformed key", which was the sentence that hid this.
+
+  Behaviour change worth flagging: a configured key that is a valid but
+  low-order point now returns `InvalidSecret` (500) instead of
+  `SignatureMismatch` (401), and no delivery verifies under it at all. Such a
+  deployment was accepting the forgery above, so this is the intended
+  direction. One existing fixture changed as a consequence: five Discord tests
+  used `"00".repeat(32)` as a placeholder "any old key" for cases about other
+  headers; that value is now an invalid secret, so those tests use a real
+  prime-order key derived from the module's own vector seed instead.
+
 - **The README and crate-doc provider tables now state replay protection for
   the seven providers whose rows omitted it** (issue #254). Both tables are
   where a caller goes to learn which providers reject stale deliveries, and
@@ -385,11 +437,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Scope was checked rather than assumed. The five providers that use the raw
   secret bytes as key material verbatim (Contentful, HubSpot, Square,
   Mandrill, Twilio) need no second check — raw and decoded are the same bytes
-  there — and Discord's zero key is not a valid Ed25519 compressed point, so it
-  already fails closed as a malformed key. PayPal and SendGrid verify against
-  caller-supplied `verifying_material` and ignore `Secret` entirely. All three
-  affected schemes are symmetric HMAC, so the RFC 2104 zero-padding equivalence
-  applies to them directly; Ed25519 and ECDSA/RSA have no such equivalence.
+  there. PayPal and SendGrid verify against caller-supplied `verifying_material`
+  and ignore `Secret` entirely. All three affected schemes are symmetric HMAC,
+  so the RFC 2104 zero-padding equivalence applies to them directly; Ed25519
+  and ECDSA/RSA have no such equivalence, so Discord is not a fourth instance
+  of this rule — its unusable key is a *low-order point*, not a padded MAC
+  key. (This entry originally claimed Discord's zero key "is not a valid
+  Ed25519 compressed point, so it already fails closed as a malformed key";
+  that was wrong — the all-zero key decompresses to a point of order 4 — and
+  the resulting gap was fixed in issue #257.)
 
   Behaviour change worth flagging for anyone relying on the old outcome: an
   all-NUL *decoded* key now returns `InvalidSecret` (which the adapters report

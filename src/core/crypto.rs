@@ -4,7 +4,7 @@
 //! security guarantees are implemented once (`spec.md` §4). Providers must not
 //! call `hmac`/`sha2`/`sha1`/`subtle` directly; they call these helpers.
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha512};
@@ -214,6 +214,18 @@ pub(crate) fn verify_sha256_prepended_key(
 /// (bad configured key) from forged input decode/length-check their inputs
 /// before calling this.
 ///
+/// Verification is **strict**: a low-order (weak) public key and a low-order
+/// `R` are both rejected, because dalek's default `verify` accepts either and
+/// a weak key makes the scheme forgeable outright. `VerifyingKey::from_bytes`
+/// only checks that the bytes decompress to a point (ZIP-215), and the
+/// all-zero key does decompress — to a point of order 4 — so without the
+/// strict path a single fixed, publicly known 64-byte signature verifies
+/// under an attacker-chosen key for any message. A real keypair is neither
+/// weak nor has a small-order `R` with overwhelming probability, so nothing a
+/// genuine sender produces is rejected; see `spec.md` §4.8 for why the
+/// weak-key case is also an *operator* error and is classified as such
+/// before it reaches this function.
+///
 /// Curve arithmetic inside `ed25519-dalek` is constant-time with respect to
 /// secret-dependent data; signature bytes and messages are public inputs by
 /// construction of the scheme.
@@ -234,7 +246,12 @@ pub(crate) fn verify_ed25519(public_key: &[u8], message: &[u8], signature: &[u8]
         return false;
     }
     match Signature::from_slice(signature) {
-        Ok(sig) => verifying_key.verify(message, &sig).is_ok(),
+        // `verify_strict`, not `verify`: dalek's `verify` is the non-strict
+        // equation `[-k]A + [s]B == R` with no cofactor clearing, so it
+        // accepts a low-order `A` outright. Strict additionally rejects a
+        // low-order `R` — unreachable-by-forgery for a prime-order `A` (see
+        // the doc block), kept because it costs one decompress.
+        Ok(sig) => verifying_key.verify_strict(message, &sig).is_ok(),
         Err(_) => false,
     }
 }
@@ -541,8 +558,8 @@ pub(crate) fn check_rsa_pkcs1v15_sha256(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_all_nul_key, verify_ed25519, verify_hmac_sha1, verify_hmac_sha256,
-        verify_hmac_sha256_any, verify_hmac_sha512,
+        ED25519_KEY_LEN, ED25519_SIG_LEN, is_all_nul_key, verify_ed25519, verify_hmac_sha1,
+        verify_hmac_sha256, verify_hmac_sha256_any, verify_hmac_sha512,
     };
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
@@ -805,6 +822,75 @@ mod tests {
         // Empty inputs fail closed instead of panicking.
         assert!(!verify_ed25519(b"", b"hello", &signature));
         assert!(!verify_ed25519(&public_key, b"", &[]));
+    }
+
+    /// The compressed all-zero point (`y = 0`, order 4) and the identity
+    /// point (`0100…00`, order 1) are the two low-order keys reachable from a
+    /// plausible operator mistake — a zero-filled config buffer and a
+    /// zero-length/blank paste. Both decompress, so `from_bytes` accepts them,
+    /// and either one makes the scheme forgeable (next test), so both must
+    /// verify as `false`.
+    #[test]
+    fn ed25519_rejects_low_order_public_keys() {
+        let (_, signature, message) = low_order_key_forgery();
+
+        let mut identity = [0u8; ED25519_KEY_LEN];
+        identity[0] = 1;
+
+        for (label, key) in [("all-zero", [0u8; ED25519_KEY_LEN]), ("identity", identity)] {
+            assert!(!verify_ed25519(&key, message, &signature), "{label} key");
+            // A genuine signature must not verify under a low-order key
+            // either: the strict path rejects the *key*, so no signature at
+            // all can pass.
+            let (real_key, real_signature) = sign_with_seed([7u8; 32], message);
+            assert!(verify_ed25519(&real_key, message, &real_signature));
+            assert!(
+                !verify_ed25519(&key, message, &real_signature),
+                "{label} key"
+            );
+        }
+    }
+
+    /// A fixed, publicly known 64-byte forgery under the all-zero key.
+    ///
+    /// `R` is the Ed25519 basepoint and `S = 1`, so `expected_R = [-k]A +
+    /// [s]B = [-k]A + B` equals `R = B` exactly when `[k]A == O` — which for
+    /// an order-4 `A` holds whenever the challenge `k` is divisible by 4, i.e.
+    /// for a quarter of all messages. The message below is one such (found by
+    /// trying inputs until the non-strict equation accepted it), which is what
+    /// makes this a deterministic demonstration rather than a probabilistic
+    /// one: nothing about the signature is secret, and no search happens at
+    /// verification time.
+    ///
+    /// dalek's own `is_weak` docs describe the property this pins: *"A weak
+    /// public key can be used to generate a signature that's valid for almost
+    /// every message. `verify_strict` denies weak keys."*
+    #[test]
+    fn ed25519_rejects_the_low_order_key_forgery() {
+        let (key, signature, message) = low_order_key_forgery();
+        assert!(!verify_ed25519(&key, message, &signature));
+
+        // The same fixed signature is also just a signature, and must not
+        // start verifying for a well-formed key — the forgery is a property of
+        // the key, not of a lucky message.
+        let (real_key, _) = sign_with_seed([7u8; 32], message);
+        assert!(!verify_ed25519(&real_key, message, &signature));
+    }
+
+    /// `(all-zero public key, fixed forgery signature, message the forgery
+    /// verifies under dalek's non-strict equation)`.
+    ///
+    /// Frozen rather than computed so the test asserts one exact triple; see
+    /// the doc block on the test that consumes it.
+    fn low_order_key_forgery() -> ([u8; 32], [u8; 64], &'static [u8]) {
+        let vector = decode(
+            "5866666666666666666666666666666666666666666666666666666666666666\
+             0100000000000000000000000000000000000000000000000000000000000000",
+        );
+        assert_eq!(vector.len(), ED25519_SIG_LEN);
+        let mut signature = [0u8; ED25519_SIG_LEN];
+        signature.copy_from_slice(&vector);
+        ([0u8; ED25519_KEY_LEN], signature, b"attacker-chosen-0")
     }
 
     #[cfg(feature = "paypal")]

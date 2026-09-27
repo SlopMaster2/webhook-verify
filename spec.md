@@ -1227,8 +1227,12 @@ Discord's official SDKs (`discord-interactions-js`,
 - Algorithm: Ed25519 signature verification against Discord's provided
   **public key** (not a shared secret — `Secret` here holds the hex-encoded
   public key, not an HMAC key; document this distinction prominently since
-  it changes the security model). Malformed keys (non-hex, wrong length)
-  fail closed with `InvalidSecret`.
+  it changes the security model). Verification is dalek's **strict** variant.
+  Malformed keys (non-hex, wrong length) and low-order/"weak" keys — valid
+  compressed points of order 4 or 1, such as the all-zero key — fail closed
+  with `InvalidSecret` (§4.8): a weak key does not merely fail to verify, it
+  forges signatures outright, so it must never reach the non-strict
+  verification equation.
 - Replay protection: enforced with the shared default tolerance
   (symmetric `|now - t| <= max_age`). Discord's docs define no recommended
   window; the timestamp exists so receivers *can* reject stale deliveries,
@@ -3194,9 +3198,14 @@ ambiguity).
    decoders keys off the raw secret bytes verbatim — so raw and decoded are the
    same bytes and there is nothing to re-check — including the five that
    additionally require caller-supplied request context (Contentful, HubSpot,
-   Square, Mandrill, Twilio), which are no more of a special case here than
-   Discord is: its zero key is not a valid Ed25519 compressed point, so it
-   already fails closed as a malformed key.
+   Square, Mandrill, Twilio). Discord is a fourth kind of case again, and it
+   is not covered by `is_all_nul_key` at all: RFC 2104 padding has no
+   meaning for an Ed25519 public key, and its zero key **is** a valid
+   compressed point (`y = 0` decompresses to a point of order 4), so it is
+   not a malformed key that fails closed on its own — under a
+   non-strict verification equation it is a key that forges signatures
+   outright. Discord therefore checks `VerifyingKey::is_weak` at
+   `decode_public_key` and reports it as `InvalidSecret`; see item 8 below.
 
    The rule is deliberately narrow in two directions, and both matter:
    - **Only if the secret is *entirely* whitespace, or *entirely* NUL.** A
@@ -3244,6 +3253,34 @@ ambiguity).
    secret already failed closed there as a malformed key. Those same three are
    the ones the all-NUL predicate has to be re-applied to, since the raw secret
    and the decoded key are different byte strings there.)
+8. **A low-order (weak) Ed25519 public key fails closed, and is an operator
+   error.** Discord is the only asymmetric-scheme provider, and the shape that
+   matters for it is not a degenerate MAC key but a *point of small order*:
+   `VerifyingKey::from_bytes` only checks that the 32 bytes decompress (ZIP-215),
+   and `ed25519-dalek`'s default `verify` is the non-strict equation
+   `[-k]A + [s]B == R` with no cofactor clearing. A low-order `A` therefore
+   passes, and the equation then reduces to `[k]A == O`, which holds whenever
+   the challenge `k` is divisible by the key's order — so a single *fixed,
+   publicly known* 64-byte signature (`R` = the basepoint, `S` = 1) verifies
+   under the all-zero key for a quarter of all messages, with nothing to guess.
+   Both halves are required:
+   - `core::crypto::verify_ed25519` calls **`verify_strict`**, never `verify`.
+     This is the load-bearing check: it rejects a low-order `A` (and a low-order
+     `R`, which is unreachable by forgery for a prime-order `A` — it can only
+     arise alongside a weak key — and is kept because it costs one decompress).
+   - Discord's `decode_public_key` additionally tests `VerifyingKey::is_weak`
+     and reports `InvalidSecret`, so a misconfigured key stays an operator
+     error (adapters report it as 500) rather than a `SignatureMismatch` (401
+     "attacker"). The strict path would still fail the delivery closed; this
+     half only classifies it.
+   Nothing a genuine sender produces is rejected: a real keypair's `A` is
+   prime-order, and its `R` is not small-order, except with negligible
+   probability. The reachable low-order keys are exactly the plausible
+   misconfigurations — a zero-filled config buffer (`"00"…`, order 4) and a
+   blank paste that zero-pads to the field width (`"01" + "00"…`, the identity)
+   — and both are *not* all-NUL-secret or whitespace cases that item 7's
+   entry-point guard can see, because Discord's key is hex text, so this is a
+   separate check with a separate `reason`.
 
 ---
 
