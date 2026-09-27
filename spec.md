@@ -3037,15 +3037,18 @@ ambiguity).
    a match against **more than one candidate signature** — the rotation-list
    providers (Stripe, Paddle, PagerDuty, Mux, Tailscale, and Standard Webhooks)
    and Box, whose two candidates arrive in `BOX-SIGNATURE-PRIMARY` and
-   `BOX-SIGNATURE-SECONDARY` rather than in one comma-delimited header —
-   compute the HMAC digest once per signed string and compare every candidate
-   against that digest; do not recompute the HMAC for each candidate. The shape
-   is what matters, not the header layout: the candidates share one key and one
-   signed string, so a second HMAC over them is a needless multiplier on
-   attacker-reachable work. All of these route through
-   `core::crypto::verify_hmac_sha256_any`, which accumulates the per-candidate
-   matches without an early exit, so which candidate matched — and whether any
-   did — is not observable in the comparison's timing.
+   `BOX-SIGNATURE-SECONDARY` rather than packed together in the one header
+   value the rotation lists use — compute the HMAC digest once per signed
+   string and compare every candidate against that digest; do not recompute the
+   HMAC for each candidate. The shape is what matters, not the header layout:
+   the candidates share one key and one signed string, so a second HMAC over
+   them is a needless multiplier on attacker-reachable work. (The rotation
+   lists are *not* uniform in separator — `,` for Stripe, PagerDuty, Mux, and
+   Tailscale, `;` for Paddle, a space for Standard Webhooks.) All of these route
+   through `core::crypto::verify_hmac_sha256_any`, which takes the caller's
+   already-split candidates and accumulates the per-candidate matches without an
+   early exit, so which candidate matched — and whether any did — is not
+   observable in the comparison's timing.
 2. **Verify against raw bytes only.** No implementation may re-serialize,
    re-encode, or normalize the body before hashing. The `raw_body: &[u8]`
    passed in is hashed exactly as received.
@@ -3108,7 +3111,9 @@ ambiguity).
      secrets and trying each (§3 Mollie row) — not the second signature becoming
      readable, which it never does;
    - every other provider keeps its candidates out of the scan's reach — a
-     comma-delimited list inside one value, or two *distinctly named* headers
+     multi-candidate list packed inside one header value (the separator is each
+     provider's own: `,` for Stripe, PagerDuty, Mux, and Tailscale, `;` for
+     Paddle, a space for Standard Webhooks), or two *distinctly named* headers
      (Box) — and adding a provider to the exemption list is a security
      decision that requires a linked provider source in the code and a spec
      update here.
