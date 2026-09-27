@@ -1132,13 +1132,29 @@ mod tests {
                 "non-canonical Content-Length {value:?} must be treated as undeclared"
             );
         }
-        // Legacy tolerance: surrounding whitespace is trimmed before parsing.
-        headers.insert(
-            HeaderName::from_static("content-length"),
-            http::header::HeaderValue::from_str(" 131072 ")
-                .unwrap_or_else(|_| unreachable!("visible ASCII")),
-        );
-        assert_eq!(declared_content_length(&headers), Some(131072));
+        // Surrounding OWS is stripped, so the padded spelling is the same
+        // declared length (RFC 9110 §5.5). The whitespace-only case stays
+        // undeclared rather than parsing as a length of 0.
+        for value in [" 131072 ", "\t131072"] {
+            headers.insert(
+                HeaderName::from_static("content-length"),
+                http::header::HeaderValue::from_str(value)
+                    .unwrap_or_else(|_| unreachable!("visible ASCII")),
+            );
+            assert_eq!(declared_content_length(&headers), Some(131072));
+        }
+        for value in [" ", "\t"] {
+            headers.insert(
+                HeaderName::from_static("content-length"),
+                http::header::HeaderValue::from_str(value)
+                    .unwrap_or_else(|_| unreachable!("visible ASCII")),
+            );
+            assert_eq!(
+                declared_content_length(&headers),
+                None,
+                "whitespace-only Content-Length {value:?} must be treated as undeclared"
+            );
+        }
     }
 
     #[actix_web::test]

@@ -81,8 +81,9 @@ fn parse_unsigned_decimal(
 ///
 /// Accepts the exact shapes the RFC 3339 timestamp headers use (`spec.md`
 /// §3): PayPal's `PayPal-Transmission-Time`, Twitch's
-/// `Twitch-Eventsub-Message-Timestamp`, and Zendesk's
-/// `X-Zendesk-Webhook-Signature-Timestamp` — `YYYY-MM-DDTHH:MM:SS`, an
+/// `Twitch-Eventsub-Message-Timestamp`, Zendesk's
+/// `X-Zendesk-Webhook-Signature-Timestamp`, and Box's
+/// `BOX-DELIVERY-TIMESTAMP` — `YYYY-MM-DDTHH:MM:SS`, an
 /// optional fractional-seconds component, and either a `Z` suffix or a
 /// numeric `±HH:MM` UTC offset. The `T` and `Z` characters are
 /// case-insensitive, per RFC 3339 §5.6 note (a lowercase `t`/`z` is the ISO
