@@ -4699,6 +4699,169 @@ mod tests {
         }
     }
 
+    /// Every provider that reads a `VerifyOptions` context option is named in
+    /// that option's own field docs.
+    ///
+    /// The five context options (`request_url`, `request_method`, `form_params`,
+    /// `verifying_material`, `webhook_id`) are the only place a caller learns
+    /// *which* providers need them. A provider that requires one and is not
+    /// named there fails every delivery with `MissingContext` — a 500 from the
+    /// tower/actix adapters, and nothing in the error points at the option that
+    /// was never set. Nothing else in the crate cross-checks that prose against
+    /// the code: the other guards cover the README table, the crate docs and
+    /// `spec.md` §3, all of which describe the scheme but not the context
+    /// option the scheme needs.
+    ///
+    /// The risk is not hypothetical: seven of the 58 providers sign
+    /// caller-supplied context, and each one added a sentence to the relevant
+    /// field doc by hand. Nothing in the build, the tests, or review forces
+    /// that edit, and a reviewer has no way to notice it was skipped — unlike
+    /// a signing-scheme change, which shows up as a diff in the provider's own
+    /// `spec.md` row and README table line. This guard reads the readers out
+    /// of the provider sources themselves, so a new provider that touches
+    /// `options.request_url` fails CI until the field doc names it.
+    ///
+    /// Only the forward direction is checked (readers must be named). The
+    /// reverse is deliberately not asserted: these fields also cite *other*
+    /// providers when explaining a failure mode — `webhook_id` says "mirroring
+    /// Square/Twilio's URL context" — so "names a provider that does not read
+    /// this field" is not a defect, only "fails to name one that does" is.
+    #[test]
+    fn context_option_field_docs_name_every_provider_that_reads_the_option() {
+        use std::collections::BTreeSet;
+        use std::fs;
+        use std::path::Path;
+
+        // `options` followed by the field, ignoring the whitespace rustfmt may
+        // insert inside the chain. The `options` must be a whole token, so an
+        // intra-doc link (`[`VerifyOptions::request_url`]`) is not mistaken
+        // for a read, and the chain may be split across two lines: every
+        // reader in the tree today binds it as a `let x = options` / `.field`
+        // pair. A module that renamed its `options` parameter would need the
+        // scan taught its new name, which the per-field assertion below turns
+        // into a loud failure rather than a silently skipped provider.
+        fn reads_field(implementation: &str, field: &str) -> bool {
+            let needle = format!(".{field}");
+            let mut chain_continued = false;
+            for line in implementation.lines() {
+                let line = line.trim();
+                if chain_continued && line.starts_with(&needle) {
+                    return true;
+                }
+                for (at, _) in line.match_indices("options") {
+                    let whole_token = !line[..at]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|previous| previous.is_alphanumeric() || previous == '_');
+                    if whole_token && line[at + "options".len()..].starts_with(&needle) {
+                        return true;
+                    }
+                }
+                chain_continued = line.ends_with("options");
+            }
+            false
+        }
+
+        /// The `///` block immediately above `field`'s declaration, joined back
+        /// into one string.
+        fn field_doc(options: &str, field: &str) -> String {
+            let lines: Vec<&str> = options.lines().collect();
+            let declaration = lines
+                .iter()
+                .position(|line| line.starts_with(&format!("    pub {field}:")))
+                .unwrap_or_else(|| panic!("no `pub {field}:` declaration found in options.rs"));
+            let start = lines[..declaration]
+                .iter()
+                .rposition(|line| !line.trim_start().starts_with("///"))
+                .map_or(0, |last_non_doc| last_non_doc + 1);
+            lines[start..declaration].join(" ")
+        }
+
+        // Both the dispatch table and the option docs are compile-time inputs,
+        // so a failure to read them cannot be confused with "nothing to check".
+        let this = include_str!("mod.rs");
+        let options = include_str!("../core/options.rs");
+        let providers_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/providers");
+
+        // Each provider's `Display` brand (what the field docs must name) and
+        // module file stem (what the failure message must point at), paired
+        // with its implementation region. Read once for all five options:
+        // re-walking 58 files per option would dominate the suite's wall time.
+        let mut implementations = Vec::with_capacity(provider_list().len());
+        for provider in provider_list() {
+            // The dispatch arm is the crate's own provider-to-module map, so
+            // the test needs no second copy of it to drift.
+            let arm = this
+                .lines()
+                .find(|line| {
+                    // `::verify(` distinguishes the dispatch arm from the
+                    // identically shaped `Display` arm above it.
+                    line.trim_start()
+                        .starts_with(&format!("Provider::{provider:?} =>"))
+                        && line.contains("::verify(")
+                })
+                .unwrap_or_else(|| panic!("{provider} has no dispatch arm in providers/mod.rs"));
+            let callee = arm
+                .split_once("::verify(")
+                .map(|(callee, _)| callee)
+                .and_then(|callee| callee.rsplit_once("=>").map(|(_, callee)| callee))
+                .map(str::trim)
+                .unwrap_or_else(|| panic!("could not read {provider}'s dispatch arm: {arm:?}"));
+            // The callee is a module path; its last segment is the file.
+            let module = callee.rsplit("::").next().unwrap_or(callee);
+            let source = fs::read_to_string(providers_dir.join(format!("{module}.rs")))
+                .unwrap_or_else(|error| {
+                    panic!("{provider}'s module {module}.rs could not be read: {error}")
+                });
+            // Only the implementation counts: a test that builds
+            // `VerifyOptions::default().with_request_url(..)` is not the scheme
+            // requiring the option.
+            let implementation = match source.find("#[cfg(test)]") {
+                Some(at) => &source[..at],
+                None => source.as_str(),
+            };
+            implementations.push((
+                provider.to_string(),
+                module.to_string(),
+                implementation.to_string(),
+            ));
+        }
+
+        for field in [
+            "request_url",
+            "request_method",
+            "form_params",
+            "verifying_material",
+            "webhook_id",
+        ] {
+            let doc = field_doc(options, field);
+            let readers: BTreeSet<(&str, &str)> = implementations
+                .iter()
+                .filter(|(_, _, implementation)| reads_field(implementation, field))
+                .map(|(brand, module, _)| (brand.as_str(), module.as_str()))
+                .collect();
+
+            // Guards against a silent vacuous pass: if the read scan ever
+            // stopped matching, the reader set would be empty and every
+            // assertion below would pass vacuously.
+            assert!(
+                !readers.is_empty(),
+                "no provider reads `options.{field}`, so the guard has nothing to check — \
+                 either the dispatch-parse in this test broke, or `VerifyOptions::{field}` \
+                 became dead configuration that should be removed"
+            );
+            for (brand, module) in &readers {
+                assert!(
+                    doc.contains(brand),
+                    "providers/{module}.rs reads `options.{field}`, but the \
+                     `VerifyOptions::{field}` field docs do not name {brand}; a caller reading \
+                     them would not know to set the option, and every {brand} delivery would \
+                     fail closed with `VerifyError::MissingContext`"
+                );
+            }
+        }
+    }
+
     /// Every name-constructible [`Provider`] variant, in declaration order.
     ///
     /// The single source of truth for the provider-bookkeeping tests: both the
