@@ -36,6 +36,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Mollie's documented 24-hour secret-rotation window is no longer rejected as
+  an ambiguous duplicate signature header** (issue #245). During a secret roll
+  Mollie attaches **two** `X-Mollie-Signature` headers to the same delivery, one
+  per active secret
+  ([official docs](https://docs.mollie.com/reference/webhooks-new), "Updating a
+  live signing secret"). `spec.md` §4.4 requires rejecting a request whose
+  signature header arrives more than once with *differing* values, and a
+  first-match `HeaderMap` cannot tell Mollie's own rotation mechanism from a
+  smuggled duplicate — so both adapters answered a body-less `400`, and a
+  `http`-feature caller running `ambiguous_signature_header` was told to reject.
+  Every event for 24 hours after a secret roll was unverifiable through the
+  adapters, which made the rotation workflow `mollie::verify`'s docs recommend
+  unreachable through them.
+
+  Mollie's `X-Mollie-Signature` is now exempt from the ambiguity scan. The
+  exemption is keyed on the provider and intersected with that provider's
+  `signature_header_names`, so it applies to Mollie alone and cannot silently
+  disable a check a renamed header constant still needs — every other provider
+  is scanned in full, and a new exemption is a security decision requiring a
+  linked provider source. It exempts the *scan* only: `verify()` still reads the
+  first header value, so nothing is newly accepted, a prepended forgery is a
+  denial rather than a bypass, and the second signature stays reachable through
+  the documented per-secret `verify()` workflow.
+
 - **`TimestampOutOfTolerance`'s `skew` field doc contradicted its own variant
   doc and the value `check_replay` stores** (issue #243). The variant doc
   defines `skew` as the timestamp's total distance from "now"

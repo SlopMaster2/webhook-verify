@@ -257,6 +257,16 @@ header the delivery itself declares as signed is scanned too. See
 [`spec.md` §4.4](https://github.com/SlopMaster2/webhook-verify/blob/master/spec.md)
 for the full contract and the `Custom` carve-out.
 
+One provider is exempt, for a reason in its own signing scheme: during its
+documented 24-hour secret-rotation window
+[Mollie](https://docs.mollie.com/reference/webhooks-new) sends **two**
+`X-Mollie-Signature` headers on the same delivery, one per active secret, so a
+literal duplicate check would reject every event for a day after each secret
+roll. `X-Mollie-Signature` is therefore not scanned for ambiguity — this only
+affects the duplicate check, not what `verify()` accepts. `verify()` still reads
+the first header value, so the rotation workflow is to call it once per secret
+and keep the previous one until the window closes (at least one call succeeds).
+
 ### `no_std` support
 
 The core verification path is `no_std + alloc` compatible. The `std` feature (on by default) provides the wall
@@ -313,7 +323,8 @@ library — with no features (pure core) and with `--features sendgrid`:
 
 `webhook-verify::tower::VerifyLayer` is a generic `tower::Layer`. It buffers
 the request body as raw bytes, rejects requests whose signature headers arrive
-duplicated with conflicting values (`400`, see spec §4.4), verifies with
+duplicated with conflicting values (`400`, see spec §4.4 — with the one
+provider-sent exception noted above), verifies with
 `verify()`, and forwards the exact buffered bytes downstream — handlers can
 then deserialize freely. Verification failures never reach your handler:
 
@@ -415,7 +426,8 @@ captures it *before* anything else can touch it — do **not** also take
 `web::Json<T>` in the same handler (extractors run left-to-right and `Json`
 would consume the body first); deserialize from `body`'s exact bytes instead.
 Requests whose scheme headers arrive duplicated with conflicting values are
-rejected with `400` before verification (spec §4.4). Failure statuses match
+rejected with `400` before verification (spec §4.4, with the one provider-sent
+exception noted above). Failure statuses match
 the tower table above, including `413 Payload Too Large` for bodies that
 exceed `WebhookConfig::with_max_body_size(bytes)` (DoS hardening; unlimited
 by default). A guard is intentionally not provided: guards run
