@@ -890,4 +890,45 @@ mod tests {
         };
         assert!(check_replay(ts, &opts).is_ok());
     }
+
+    #[test]
+    fn reported_skew_is_the_total_distance_from_now_not_the_excess() {
+        // The `skew` payload is the timestamp's total distance from "now"
+        // (`|now - timestamp|`), not how far it overshot the window. Every
+        // other `check_replay` test here matches on `..` and never inspects the
+        // payload, so without this the field's value is unverified at its
+        // source and its doc comment can drift back to the "excess" reading
+        // (issue #243). A caller trusting that reading would double-subtract
+        // `max_age` to recover the overshoot.
+        let ts = 1_700_000_000u64;
+        let max_age = Duration::from_secs(300);
+        let assert_skew = |now_unix: u64, expected: Duration| {
+            let opts = VerifyOptions {
+                max_age: Some(max_age),
+                clock: Some(Arc::new(FixedClock(epoch(now_unix)))),
+                ..VerifyOptions::default()
+            };
+            match check_replay(ts, &opts) {
+                Err(VerifyError::TimestampOutOfTolerance { skew, max_age: got }) => {
+                    assert_eq!(skew, expected, "skew must be |now - timestamp|");
+                    assert_eq!(got, max_age);
+                }
+                other => panic!("expected TimestampOutOfTolerance, got {other:?}"),
+            }
+        };
+
+        // 400s in the past: total distance 400s, only 100s of overshoot. The
+        // excess reading would have stored 100s here.
+        assert_skew(ts - 400, Duration::from_secs(400));
+        // 600s in the past: total distance 600s, 300s of overshoot.
+        assert_skew(ts - 600, Duration::from_secs(600));
+        // One second past the boundary is the smallest rejecting skew, and it
+        // must be 301s (the total), matching the per-provider assertions that
+        // pin `skew: 301` against a 300s window.
+        assert_skew(ts - 301, Duration::from_secs(301));
+        // A future timestamp is symmetric: `abs_diff`, so the same distance
+        // and the same positive value, never a negative one.
+        assert_skew(ts + 301, Duration::from_secs(301));
+        assert_skew(ts + 400, Duration::from_secs(400));
+    }
 }
