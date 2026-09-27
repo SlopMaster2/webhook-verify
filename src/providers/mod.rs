@@ -3197,6 +3197,84 @@ mod tests {
     }
 
     #[test]
+    fn provider_parse_error_display_lists_every_brand_alias_from_str_accepts() {
+        // The alias half of the guard above runs in one direction only: it
+        // asserts that a hardcoded list of brand aliases appears in the
+        // `Display` string, but nothing asserted the reverse — that every
+        // brand alias `from_str` actually accepts reaches that list. Roughly two
+        // dozen Standard Webhooks adopter aliases (`svix`, `resend`, `helcim`,
+        // `lexe`, …) were appended to `from_str` one at a time across a long
+        // series of PRs, each also added to `spec.md` §2 and to the
+        // README/crate-doc tables, so the parser and the spec could not drift
+        // from each other — but the `Display` string is hand-written prose and
+        // nothing tied it to the parser, so an alias that reached `from_str`
+        // without a matching line in the message would have shipped silently.
+        // The message is the one surface an operator sees when the name in
+        // their config is rejected, so it is the wrong place for that to go
+        // unnoticed: the whole point of echoing the accepted spellings back is
+        // that a typo'd name is recoverable from the error alone.
+        //
+        // The alias set is read out of this module's own `from_str` source
+        // rather than a second test table, so the guard cannot drift from the
+        // parser it guards — the same technique
+        // `spec_section_two_documents_every_accepted_alias` uses. Two kinds of
+        // name are deliberately not required to be named here: the canonical
+        // `Display`/`Debug` spellings (owned by the test above, and named in
+        // the message's leading list), and the multi-word spellings (`hub
+        // spot`, `pager-duty`, `big-commerce`, …), which the message covers
+        // once generically by saying that "hyphenated/space-separated
+        // multi-word spellings … are also accepted". Requiring each of those
+        // individually would only restate that clause.
+        let this = include_str!("mod.rs");
+        let Some(fn_start) = this.find("fn from_str(name: &str) -> Result<Self, Self::Err>") else {
+            panic!("`Provider::from_str` must keep its documented signature");
+        };
+        let Some(fn_end) = this[fn_start..].find("\n    }\n") else {
+            panic!("`Provider::from_str` must close with a `}}` at four-space indent");
+        };
+        let body = &this[fn_start..fn_start + fn_end];
+
+        let canonical: Vec<String> = provider_list()
+            .into_iter()
+            .flat_map(|provider| {
+                [
+                    provider.to_string().to_lowercase(),
+                    format!("{provider:?}").to_lowercase(),
+                ]
+            })
+            .collect();
+
+        let message = ProviderParseError.to_string();
+        let mut unnamed: Vec<&str> = Vec::new();
+        let mut rest = body;
+        while let Some(at) = rest.find("eq_ignore_ascii_case(\"") {
+            let after = &rest[at + "eq_ignore_ascii_case(\"".len()..];
+            let Some(quote) = after.find('"') else {
+                panic!("`from_str` match arm must close its quoted name");
+            };
+            let name = &after[..quote];
+            rest = &after[quote + 1..];
+            if name.contains(' ') || name.contains('-') {
+                continue;
+            }
+            if canonical.iter().any(|canonical| canonical == name) {
+                continue;
+            }
+            if !message.contains(&format!("`{name}`")) {
+                unnamed.push(name);
+            }
+        }
+        unnamed.sort_unstable();
+        unnamed.dedup();
+        assert!(
+            unnamed.is_empty(),
+            "`ProviderParseError`'s message must name every brand alias \
+             `Provider::from_str` accepts, so an operator who typed one sees it \
+             echoed back; accepted but unnamed: {unnamed:?}"
+        );
+    }
+
+    #[test]
     fn readme_and_crate_docs_provider_tables_cover_every_provider() {
         // The README and crate-doc provider tables (spec.md §3's prose rows,
         // mirrored into `README.md`'s "Supported providers" table and the
