@@ -3252,6 +3252,90 @@ mod tests {
         }
     }
 
+    /// Phrases the provider tables use to say "this provider recency-checks
+    /// the timestamp it signs". Matched case-insensitively against the whole
+    /// row so a row need not use one canonical wording — `replay window`,
+    /// `tolerance window`, and a row that names the timestamp header and calls
+    /// the following term a tolerance window all count.
+    const REPLAY_WINDOW_PHRASES: &[&str] = &["replay", "tolerance"];
+
+    #[test]
+    fn provider_tables_state_replay_protection_where_the_code_enforces_it() {
+        // The README and crate-doc provider tables are where a caller goes to
+        // learn which providers reject stale deliveries, and both tables are
+        // hand-maintained with nothing re-checking that claim against the
+        // code. They shipped rows that understate it for exactly the providers
+        // whose replay protection is least visible: the three asymmetric
+        // (public-key) providers sign a timestamp header like every other
+        // timestamped provider and recency-check it through the shared
+        // `max_age` window, but their rows were written around the key
+        // material and never mentioned the window. Three rows in `README.md`
+        // (Discord, PayPal, SendGrid) and six in the crate docs (those three
+        // plus Slack, Zoom, and Cloudflare, whose rows named the timestamp
+        // but not the tolerance) therefore told a reader that no replay
+        // protection applied where one does. `spec.md` §3 states it correctly
+        // in every one of those cases, so the drift was confined to the two
+        // summary tables — and spec.md §5.4 already requires a tolerance for
+        // timestamped schemes, so this is a claim the crate's own normative
+        // contract contradicts.
+        //
+        // Both directions are checked, and the reverse one is the load-bearing
+        // half: a provider that calls `check_replay` must have its row say so
+        // (the shipped bug), *and* a row that says so must belong to a
+        // provider that calls it. Without the second check the first could be
+        // silenced by appending "replay window" to all 59 rows.
+        for (label, markdown) in [
+            ("README.md", include_str!("../../README.md")),
+            ("crate docs", include_str!("../lib.rs")),
+        ] {
+            let rows = provider_table_rows(markdown);
+            assert_eq!(
+                rows.len(),
+                provider_list().len() + 1,
+                "`{label}` provider table must list every provider plus `Custom`"
+            );
+            for (cell, row) in &rows {
+                let lowered = row.to_lowercase();
+                let claims = REPLAY_WINDOW_PHRASES
+                    .iter()
+                    .any(|phrase| lowered.contains(phrase));
+                if cell == "Custom" {
+                    assert!(
+                        claims,
+                        "`{label}` row for `Custom` must state that replay protection \
+                         applies when a `timestamp_header` is configured, which is \
+                         what `Provider::Custom`'s implementation does"
+                    );
+                    continue;
+                }
+                let provider = provider_list()
+                    .into_iter()
+                    .find(|provider| brand_cell_matches(cell, &provider.to_string()))
+                    .unwrap_or_else(|| {
+                        panic!("`{label}` table row `{cell}` matches no known provider")
+                    });
+                let enforces = provider_replay_protected(&provider);
+                assert_eq!(
+                    claims,
+                    enforces,
+                    "`{label}` table row `{cell}` and the code disagree about replay \
+                     protection: the row {}, and the implementation of `{provider}` {}",
+                    if claims {
+                        "claims a replay window"
+                    } else {
+                        "does not claim a replay window"
+                    },
+                    if enforces {
+                        "recency-checks the signed timestamp through the shared \
+                         `max_age` window (`check_replay`)"
+                    } else {
+                        "signs the timestamp without recency-checking it"
+                    }
+                );
+            }
+        }
+    }
+
     #[test]
     fn spec_two_provider_enum_sketch_matches_declaration_order() {
         // The `spec.md` §2 `pub enum Provider { ... }` sketch is a hand-written
@@ -3772,12 +3856,13 @@ mod tests {
         listed
     }
 
-    /// The first-column brand-name cells of the "Supported providers" table
-    /// in `markdown` (the crate-doc tables live in `//!` doc comments), with
-    /// the header and separator rows excluded. Test helper over compile-time
-    /// `include_str!` data, so the `.unwrap_or` fall back is unreachable.
-    fn provider_table_cells(markdown: &str) -> Vec<String> {
-        let mut cells = Vec::new();
+    /// The "Supported providers" table in `markdown` as
+    /// `(brand cell, full row)` pairs, with the header and separator rows
+    /// excluded (the crate-doc tables live in `//!` doc comments). Test
+    /// helper over compile-time `include_str!` data, so the `.unwrap_or` fall
+    /// back is unreachable.
+    fn provider_table_rows(markdown: &str) -> Vec<(String, String)> {
+        let mut rows = Vec::new();
         let mut in_section = false;
         let mut collecting = false;
         for line in markdown.lines() {
@@ -3798,13 +3883,21 @@ mod tests {
             if let Some(rest) = line.strip_prefix('|') {
                 let cell = rest.split('|').next().unwrap_or("").trim();
                 if !cell.is_empty() && cell != "Provider" && !cell.starts_with('-') {
-                    cells.push(String::from(cell));
+                    rows.push((String::from(cell), String::from(line)));
                 }
             } else {
                 break;
             }
         }
-        cells
+        rows
+    }
+
+    /// The first-column brand-name cells of [`provider_table_rows`].
+    fn provider_table_cells(markdown: &str) -> Vec<String> {
+        provider_table_rows(markdown)
+            .into_iter()
+            .map(|(cell, _)| cell)
+            .collect()
     }
 
     /// Whether a table cell's brand-name entry refers to `brand`. The cell is
@@ -3827,6 +3920,50 @@ mod tests {
             search_from = hit + brand.len();
         }
         false
+    }
+
+    /// Whether `provider`'s *implementation* recency-checks the timestamp it
+    /// signs, i.e. whether it calls the shared [`check_replay`] helper against
+    /// `options.max_age` (spec.md §3's "Replay protection" claim).
+    ///
+    /// Read from the module's own source rather than from a duplicated test
+    /// table so the guard cannot drift from the code it guards. Only the
+    /// pre-`#[cfg(test)]` text counts: several providers exercise
+    /// `check_replay` directly in their tests, which is not a claim about
+    /// `verify()`. The brand/module stem mismatches are spelled out; every
+    /// other module is named after its `Display` brand lowercased.
+    /// `Custom` is included — it recency-checks only when a `timestamp_header`
+    /// is configured, which is what its table row says.
+    fn provider_replay_protected(provider: &Provider) -> bool {
+        let stem = match provider {
+            Provider::Box => "box_webhooks",
+            Provider::LemonSqueezy => "lemonsqueezy",
+            Provider::PayPal => "paypal",
+            Provider::SendGrid => "sendgrid",
+            Provider::StandardWebhooks => "standard_webhooks",
+            Provider::X => "x_twitter",
+            other => return module_calls_check_replay(&other.to_string().to_lowercase()),
+        };
+        module_calls_check_replay(stem)
+    }
+
+    /// Whether `src/providers/{stem}.rs`'s implementation calls [`check_replay`].
+    fn module_calls_check_replay(stem: &str) -> bool {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/providers")
+            .join(format!("{stem}.rs"));
+        let source = std::fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!(
+                "reading {} to determine its replay protection failed: {err} — \
+                 every provider in `provider_list()` must have a module",
+                path.display()
+            )
+        });
+        let implementation = match source.find("#[cfg(test)]") {
+            Some(at) => &source[..at],
+            None => source.as_str(),
+        };
+        implementation.contains("check_replay(")
     }
 
     #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
