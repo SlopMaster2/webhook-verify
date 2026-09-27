@@ -29,18 +29,28 @@
 //! # Key rotation
 //!
 //! During the documented 24-hour rotation window Mollie attaches **two**
-//! `X-Mollie-Signature` headers per event (one per secret). `verify()` reads
-//! the first header value, so callers rotating secrets must keep the previous
-//! secret until the window closes and verify against each — at least one of
-//! those `verify()` calls will pass (`spec.md` §3).
+//! `X-Mollie-Signature` headers per event, one per active secret
+//! (<https://docs.mollie.com/reference/webhooks-new>, "Updating a live signing
+//! secret"). [`HeaderMap`](crate::HeaderMap) is first-match-only by contract,
+//! so this provider reads the **first** of those two values and the second is
+//! inert — it is never parsed and never compared.
+//!
+//! What still verifies the window is keeping **both** secrets configured and
+//! trying each: Mollie signs the first line with one of the two active
+//! secrets, so [`verify_any`](crate::verify_any) over
+//! `&[live, previous]` accepts the delivery whichever order the two lines
+//! arrive in. A deployment that keeps only *one* of the two secrets does not —
+//! it rejects every event for the 24 hours after a roll whenever the line it
+//! holds is not the first one, and `SignatureMismatch` is indistinguishable
+//! from a broken integration.
 //!
 //! Those two differing header lines are also why Mollie is the one provider
 //! exempt from the `spec.md` §4.4 duplicate-header check: the shape is the
 //! provider's own rotation mechanism, not a smuggled duplicate. The exemption
-//! covers the ambiguity *scan* only — it does not make `verify()` try the
-//! second value, and every other provider's header is still scanned in full
-//! (the exemptions are listed by `provider_sent_duplicate_headers` in
-//! `src/providers/mod.rs`).
+//! covers the ambiguity *scan* only — it grants no second chance to verify the
+//! second value, which stays unread, and every other provider's header is still
+//! scanned in full (the exemptions are listed by
+//! `provider_sent_duplicate_headers` in `src/providers/mod.rs`).
 //!
 //! # Scope
 //!
@@ -141,7 +151,7 @@ mod tests {
     use crate::core::secret::Secret;
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
-    use crate::verify;
+    use crate::{verify, verify_any};
     use std::time::Duration;
 
     // Test-vector provenance (spec.md §3): Mollie's docs publish the header
@@ -371,5 +381,188 @@ mod tests {
                 other => panic!("expected BadEncoding for {value:?}, got {other:?}"),
             }
         }
+    }
+
+    // --- 24-hour signing-secret rotation window ------------------------------
+
+    /// The secret whose signature sits on the *second* of Mollie's two rotation
+    /// header lines. Distinct from [`TEST_SECRET`] so a test cannot pass by
+    /// accidentally reusing one key.
+    const PREVIOUS_SECRET: &str = "previous-signing-secret";
+
+    /// Mollie's documented `X-Mollie-Signature` for `secret` over `body`:
+    /// `sha256=` + hex HMAC-SHA256 of the raw body (`spec.md` §3). Computed
+    /// rather than hardcoded so the two rotation lines stay genuine signatures
+    /// of two genuinely different keys, and so the assertion about *which* one
+    /// is checked cannot drift away from the construction.
+    fn signature_for(secret: &str, body: &[u8]) -> String {
+        use hmac::{Hmac, KeyInit, Mac};
+        use sha2::Sha256;
+
+        let mut mac = match Hmac::<Sha256>::new_from_slice(secret.as_bytes()) {
+            Ok(mac) => mac,
+            // Unreachable for a constant test secret (HMAC accepts
+            // arbitrary-length keys); kept panic-free to honor the crate-wide
+            // clippy deny on unwrap/expect.
+            Err(_) => panic!("HMAC-SHA256 with a constant test secret cannot fail"),
+        };
+        mac.update(body);
+        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+    }
+
+    /// The two `X-Mollie-Signature` lines Mollie attaches during its rotation
+    /// window, `first` ahead of `second`, exactly as the docs describe
+    /// (<https://docs.mollie.com/reference/webhooks-new>, "Updating a live
+    /// signing secret").
+    fn rotation_headers(first: &str, second: &str) -> Vec<(String, String)> {
+        vec![
+            (SIGNATURE_HEADER.to_string(), first.to_string()),
+            (SIGNATURE_HEADER.to_string(), second.to_string()),
+        ]
+    }
+
+    /// The two secrets the documented rotation workflow requires: the live one
+    /// and the one being retired.
+    fn rotation_secrets() -> [Secret; 2] {
+        [Secret::new(TEST_SECRET), Secret::new(PREVIOUS_SECRET)]
+    }
+
+    #[test]
+    fn the_rotation_window_verifies_with_both_secrets_configured() {
+        // The documented workflow (module docs, `spec.md` §3): keep the
+        // previous secret until the window closes and try each. Mollie signs
+        // the *first* line with one of the two active secrets, so
+        // `verify_any` over both accepts the delivery whichever order the two
+        // lines arrive in — which is the operator's call and not something the
+        // docs promise to fix.
+        let orders = [
+            (
+                "live",
+                rotation_headers(
+                    &signature_for(TEST_SECRET, PRIMARY_BODY),
+                    &signature_for(PREVIOUS_SECRET, PRIMARY_BODY),
+                ),
+            ),
+            (
+                "previous",
+                rotation_headers(
+                    &signature_for(PREVIOUS_SECRET, PRIMARY_BODY),
+                    &signature_for(TEST_SECRET, PRIMARY_BODY),
+                ),
+            ),
+        ];
+        for (first_line_is, headers) in orders {
+            assert_eq!(
+                verify_any(
+                    crate::Provider::Mollie,
+                    &headers,
+                    PRIMARY_BODY,
+                    &rotation_secrets(),
+                    Default::default(),
+                ),
+                Ok(()),
+                "first line is signed by the {first_line_is} secret, so trying both must verify",
+            );
+        }
+    }
+
+    #[test]
+    fn only_one_of_the_two_secrets_alone_cannot_cover_the_whole_window() {
+        // The consequence of `HeaderMap` being first-match-only, and the reason
+        // the module docs insist on configuring *both* secrets: whichever secret
+        // does not sign the first line is rejected for the whole window. A
+        // deployment that keeps only one of the two sees `SignatureMismatch` on
+        // every event after a roll — indistinguishable from a broken
+        // integration — and no rotation window is "unverifiable", just
+        // single-secret deployments.
+        let previous_first = rotation_headers(
+            &signature_for(PREVIOUS_SECRET, PRIMARY_BODY),
+            &signature_for(TEST_SECRET, PRIMARY_BODY),
+        );
+        assert_eq!(
+            verify(
+                crate::Provider::Mollie,
+                &previous_first,
+                PRIMARY_BODY,
+                &Secret::new(TEST_SECRET),
+                Default::default(),
+            ),
+            Err(VerifyError::SignatureMismatch),
+            "the live secret alone cannot verify while the previous line comes first",
+        );
+        assert_eq!(
+            verify(
+                crate::Provider::Mollie,
+                &previous_first,
+                PRIMARY_BODY,
+                &Secret::new(PREVIOUS_SECRET),
+                Default::default(),
+            ),
+            Ok(()),
+        );
+    }
+
+    #[test]
+    fn the_second_rotation_line_is_never_read() {
+        // The crisp form of "only the first value is read", and the claim
+        // `spec.md` §4.4's exemption rationale must not get wrong: the second
+        // `X-Mollie-Signature` line is inert. Corrupting it, replacing it with
+        // an outright forgery, or dropping it entirely changes nothing about
+        // the outcome — no crate API enumerates a second value of one header
+        // name, because `HeaderMap` is first-match-only by contract.
+        let genuine_first = signature_for(TEST_SECRET, PRIMARY_BODY);
+        let second = signature_for(PREVIOUS_SECRET, PRIMARY_BODY);
+        // A well-formed 32-byte signature for a key nobody holds: it decodes,
+        // it is the right length, and it is simply not this body's MAC.
+        let forged = format!("sha256={}", "0".repeat(64));
+
+        // Only the first line matters, so the second can be anything at all.
+        for second_value in [second.as_str(), forged.as_str(), "not-even-a-signature", ""] {
+            assert_eq!(
+                verify(
+                    crate::Provider::Mollie,
+                    &rotation_headers(&genuine_first, second_value),
+                    PRIMARY_BODY,
+                    &Secret::new(TEST_SECRET),
+                    Default::default(),
+                ),
+                Ok(()),
+                "second line {second_value:?} must not affect a genuine first line",
+            );
+        }
+
+        // Dropping the second line is likewise indistinguishable, which is why
+        // an adapter's duplicate-header scan exempting this header grants no
+        // extra reach: nothing downstream ever sees the second value.
+        assert_eq!(
+            verify(
+                crate::Provider::Mollie,
+                &rotation_headers(&genuine_first, &second),
+                PRIMARY_BODY,
+                &Secret::new(TEST_SECRET),
+                Default::default(),
+            ),
+            verify(
+                crate::Provider::Mollie,
+                &mollie_headers(PRIMARY_SIGNATURE),
+                PRIMARY_BODY,
+                &Secret::new(TEST_SECRET),
+                Default::default(),
+            ),
+        );
+
+        // And a corrupted *first* line still fails, so "the second line is
+        // unread" is not a claim that the header is unverified — only the
+        // duplicate is.
+        assert_eq!(
+            verify(
+                crate::Provider::Mollie,
+                &rotation_headers(&forged, &genuine_first),
+                PRIMARY_BODY,
+                &Secret::new(TEST_SECRET),
+                Default::default(),
+            ),
+            Err(VerifyError::SignatureMismatch),
+        );
     }
 }

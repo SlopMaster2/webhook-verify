@@ -2511,10 +2511,17 @@ best-practices docs publish matching PHP/Python/Node recipes).
 - No built-in timestamp; the signed data is just the body, so `max_age` has no
   effect for this provider — document this explicitly (mirroring GitHub).
 - Key rotation: during the documented 24-hour rotation window Mollie attaches
-  **two** `X-Mollie-Signature` headers on each event (one per secret). This
-  crate's single-header model reads the first value, so callers rotating
-  secrets should keep the previous secret until the window closes and verify
-  against each — at least one of those `verify()` calls will pass. That
+  **two** `X-Mollie-Signature` headers on each event, one per active secret
+  (<https://docs.mollie.com/reference/webhooks-new>, "Updating a live signing
+  secret"). [`HeaderMap`]'s lookup is first-match-only by contract, so this
+  crate reads the **first** of those two values and the second is inert — never
+  parsed, never compared. The window is therefore verified by keeping **both**
+  secrets configured and trying each, i.e. `verify_any(&[live, previous])`,
+  which accepts the delivery whichever order Mollie sends the two lines in
+  (Mollie signs the first line with one of the two active secrets). A deployment
+  that keeps only *one* of the two secrets rejects every event for the 24 hours
+  after a roll whenever the line it holds is not the first one, and that
+  `SignatureMismatch` is indistinguishable from a broken integration. That
   documented two-header shape is the **sole** exemption from the §4.4
   duplicate-header check: see §4.4's "provider-sent duplicate headers" for what
   the exemption does and does not change.
@@ -3094,9 +3101,12 @@ ambiguity).
    - it exempts the *ambiguity scan only*. `mollie::verify` still reads the
      first header value, so the exemption does not turn `verify()` into an
      accept-any-candidate check, and a forged value prepended to the rotation
-     pair is a denial, never a bypass. Mollie's second signature remains
-     reachable by the documented rotation workflow (call `verify()` once per
-     secret, §3 Mollie row), not by the exemption;
+     pair is a denial, never a bypass. The second line is **inert**: nothing in
+     the crate reads a second value of one header name, because [`HeaderMap`]'s
+     lookup is first-match-only by contract, so the exemption grants no extra
+     reach. What keeps the rotation window verifiable is configuring **both**
+     secrets and trying each (§3 Mollie row) — not the second signature becoming
+     readable, which it never does;
    - every other provider keeps its candidates out of the scan's reach — a
      comma-delimited list inside one value, or two *distinctly named* headers
      (Box) — and adding a provider to the exemption list is a security
