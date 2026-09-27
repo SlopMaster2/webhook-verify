@@ -36,6 +36,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`TimestampOutOfTolerance`'s `skew` field doc contradicted its own variant
+  doc and the value `check_replay` stores** (issue #243). The variant doc
+  defines `skew` as the timestamp's total distance from "now"
+  (`|now - timestamp|)`), and `check_replay` has always stored exactly that
+  (`abs_diff` against `max_age`, so it is symmetric for a future-dated
+  timestamp). The *field* doc opened with the same definition and then closed
+  with "how far the timestamp fell outside the allowed window" — the excess
+  past the boundary, precisely what the variant doc rules out. That clause was
+  a leftover from the doc pass in `596b88e`, which corrected the variant but
+  not the field.
+
+  A caller trusting the field doc to recover the overshoot computes
+  `skew - max_age` and double-subtracts the window, misreporting the excess for
+  any skew other than exactly one window, and reading a future-dated
+  timestamp's value as a negative overshoot. Documentation only — the value,
+  `Display`, and every per-provider assertion were already correct.
+
+  Now covered by `core::replay::tests::reported_skew_is_the_total_distance_from_now_not_the_excess`,
+  which pins the exact payload in both directions. Every other `check_replay`
+  test matched on `TimestampOutOfTolerance { .. }` and never inspected the
+  payload, so the field's value was unverified at its source.
+
 - **The fuzz seed-inventory guard compared the doc bullets against libFuzzer's
   working corpus, so `cargo test` failed after any local fuzz run** (issue
   #241). `providers::tests::fuzz_seed_bullets_and_corpus_agree` pins the two

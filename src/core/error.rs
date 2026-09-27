@@ -45,8 +45,9 @@ pub enum VerifyError {
     /// total distance from "now" (`|now - timestamp|`), not the excess beyond
     /// the window boundary.
     TimestampOutOfTolerance {
-        /// The timestamp's distance from "now" (`|now - timestamp|`); how far
-        /// the timestamp fell outside the allowed window.
+        /// The timestamp's total distance from "now" (`|now - timestamp|`), so
+        /// it is always at least `max_age` when this variant is returned — the
+        /// excess past the boundary is `skew - max_age`, not `skew` itself.
         skew: Duration,
         /// The configured maximum age.
         max_age: Duration,
