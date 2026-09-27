@@ -4381,10 +4381,17 @@ mod tests {
             {
                 continue;
             }
+            // Only the implementation counts: a test that re-derives a vector
+            // through the `_any` helper may split its own fixture header value,
+            // and that is not the scheme's separator.
+            let implementation = match source.find("#[cfg(test)]") {
+                Some(at) => &source[..at],
+                None => source.as_str(),
+            };
             // The candidate loop is the only `split` in these modules that takes
             // a bare char; `split_once` / `splitn` are field parsing, not the
             // rotation list.
-            let separator = source
+            let separator = implementation
                 .lines()
                 .find_map(|line| line.split("value.split(").nth(1))
                 .and_then(|rest| rest.trim_start().strip_prefix('\''))
