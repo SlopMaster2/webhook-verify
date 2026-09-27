@@ -69,12 +69,15 @@ x509-parser = { version = "0.18.1", default-features = false, optional = true }
 [features]
 default = ["std"]
 # The core verification path is `no_std + alloc` compatible (spec.md §1).
-# Building without this feature drops the wall-clock dependency: the
-# injectable `Clock::now()` returns unix seconds directly and `VerifyError`
-# does not implement `std::error::Error`. `SystemClock` is only available
-# under `std` (there is no wall clock in the no_std ecosystem); callers on
-# bare-metal/wasm targets supply their own `Clock` for timestamped
-# (replay-protected) providers.
+# Building without this feature drops the wall-clock dependency and nothing
+# else: `SystemClock` is only available under `std` (there is no wall clock in
+# the no_std ecosystem), so `VerifyOptions::now()` falls back to reading 0 and
+# callers on bare-metal/wasm targets supply their own `Clock` for timestamped
+# (replay-protected) providers. The error types are deliberately *not* gated on
+# `std`: `VerifyError` and `ProviderParseError` implement `core::error::Error`
+# unconditionally (issue #261), because that trait is stable in `core` since
+# Rust 1.81 — below the crate's MSRV of 1.85 — and `std::error::Error` is that
+# same trait, so a `std` build gains nothing from the narrower path.
 std = []
 # Enables the SendGrid provider: ECDSA P-256 verification (`spec.md` §3).
 # Pulls in `p256` (optional dependency, `no_std`-compatible build). Only the

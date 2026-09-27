@@ -148,6 +148,92 @@ mod tests {
         );
     }
 
+    /// The `std = []` feature's own comment, read out of the manifest.
+    ///
+    /// The `#[cfg]` above cannot be checked from a test, and a manifest
+    /// comment is not built or tested by anything — which is exactly how the
+    /// one in the tree went stale. So the block is recovered the same way a
+    /// reader reads it: everything commented immediately above the `std = []`
+    /// line, minus the leading `# ` markers.
+    fn std_feature_comment() -> String {
+        const MANIFEST: &str = include_str!("../../Cargo.toml");
+        let Some(declaration) = MANIFEST.find("\nstd = []") else {
+            panic!("Cargo.toml must still declare the `std` feature as `std = []`");
+        };
+        let before = &MANIFEST[..declaration];
+        let mut lines: Vec<&str> = Vec::new();
+        for line in before.lines().rev() {
+            let trimmed = line.trim();
+            if !trimmed.starts_with('#') {
+                break;
+            }
+            lines.push(trimmed.trim_start_matches('#').trim());
+        }
+        lines.reverse();
+        assert!(
+            !lines.is_empty(),
+            "Cargo.toml's `std` feature must keep a comment explaining what \
+             dropping it costs"
+        );
+        lines.join(" ")
+    }
+
+    #[test]
+    fn std_feature_comment_matches_the_unconditional_error_impls() {
+        // The claim this guards against: that dropping `std` also costs the
+        // error trait. It did once, and saying so was accurate then; #262
+        // moved both impls onto `core::error::Error` unconditionally, and the
+        // claim was left behind. The error was in the direction that
+        // *undersells* the crate — a `no_std + alloc` reader would conclude
+        // `VerifyError` is unusable in `Box<dyn Error>` / `?`-propagating
+        // aggregates, which is the capability #262 added. `spec.md` §7, the
+        // crate docs, and `README.md` were all corrected; the manifest was
+        // the one surface left, and nothing compiles or tests it, so it
+        // drifted silently behind a green suite.
+        //
+        // Both directions are pinned, and the reverse one is the load-bearing
+        // half: the comment must not deny the trait (the shipped bug) *and*
+        // must name `core::error::Error` as what is implemented — so simply
+        // deleting the error half of the comment cannot pass this either.
+        let comment = std_feature_comment();
+
+        // The stale claim, in the spellings a re-introduction might use.
+        // "not implement" subsumes both the singular and plural denials, so
+        // the reported phrase is the one that actually matched.
+        for denial in ["not implement", "no error type"] {
+            assert!(
+                !comment.contains(denial),
+                "Cargo.toml's `std` feature comment claims the error types {denial:?} \
+                 the error trait, which has been false since #262 (both `VerifyError` and \
+                 `ProviderParseError` implement `core::error::Error` unconditionally); \
+                 comment: {comment:?}"
+            );
+        }
+        for type_name in ["VerifyError", "ProviderParseError"] {
+            assert!(
+                comment.contains(type_name),
+                "Cargo.toml's `std` feature comment must name `{type_name}` when \
+                 describing the error types, so the claim stays checkable; \
+                 comment: {comment:?}"
+            );
+        }
+        assert!(
+            comment.contains("core::error::Error"),
+            "Cargo.toml's `std` feature comment must name the `core::error::Error` \
+             trait both error types implement unconditionally; comment: {comment:?}"
+        );
+
+        // The half that is still true, and still the only thing `std` buys:
+        // the wall clock. Requiring it keeps the fix from "solving" the drift
+        // by gutting the comment instead of correcting it.
+        assert!(
+            comment.contains("SystemClock") && comment.contains("Clock"),
+            "Cargo.toml's `std` feature comment must still document that `SystemClock` \
+             is `std`-only and that callers on std-less targets supply their own \
+             `Clock`; comment: {comment:?}"
+        );
+    }
+
     #[test]
     fn display_missing_header() {
         let e = VerifyError::MissingHeader {
