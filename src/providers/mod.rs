@@ -1176,8 +1176,11 @@ impl fmt::Display for ProviderParseError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for ProviderParseError {}
+/// Unconditional for the same reason as [`VerifyError`]'s impl: `core`'s
+/// `Error` trait is stable since Rust 1.81 (MSRV 1.85) and is the very trait
+/// `std::error::Error` re-exports, so gating it on `feature = "std"` only
+/// cost `no_std` callers an error type (issue #261).
+impl core::error::Error for ProviderParseError {}
 
 /// Header names that carry signing material for `provider`, per its row in
 /// `spec.md` §3.
@@ -3137,6 +3140,25 @@ mod tests {
                 "must reject `{bad}`"
             );
         }
+    }
+
+    #[test]
+    fn provider_parse_error_implements_core_error_in_every_configuration() {
+        // Unconditional `core::error::Error` impl, mirroring
+        // `VerifyError`'s — see issue #261. Not `#[cfg(feature = "std")]`:
+        // the `test-nostd` runs of spec.md §6 are what catch a re-gate.
+        fn boxed<E: core::error::Error + 'static>(
+            e: E,
+        ) -> alloc::boxed::Box<dyn core::error::Error> {
+            alloc::boxed::Box::new(e)
+        }
+
+        let err = boxed(ProviderParseError);
+        assert_eq!(
+            err.to_string(),
+            ProviderParseError.to_string(),
+            "boxing must preserve Display"
+        );
     }
 
     #[test]

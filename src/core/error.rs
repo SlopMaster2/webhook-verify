@@ -97,8 +97,13 @@ impl fmt::Display for VerifyError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for VerifyError {}
+/// Unconditional, and on `core::error::Error` rather than
+/// `std::error::Error`, so a `no_std + alloc` caller still gets a real error
+/// type: the trait is stable in `core` since Rust 1.81 (the crate's MSRV is
+/// 1.85), and under `std` it *is* `std::error::Error` — `std` re-exports
+/// core's trait — so this is strictly additive for existing std users and
+/// only adds capability to `no_std` builds (issue #261).
+impl core::error::Error for VerifyError {}
 
 #[cfg(test)]
 mod tests {
@@ -106,7 +111,42 @@ mod tests {
     use crate::test_helpers::*;
 
     use super::VerifyError;
+    use alloc::boxed::Box;
     use core::time::Duration;
+
+    /// Deliberately **not** `#[cfg(feature = "std")]`.
+    ///
+    /// The point of the impl is that it is unconditional, so the only place
+    /// that can catch a re-gate is a run with the crate's `std` feature off —
+    /// `spec.md` §6's `test-nostd` combos. `alloc::boxed::Box` is spelled out
+    /// rather than relying on the prelude, which does not inject `Box` under
+    /// `#![no_std]`.
+    #[test]
+    fn implements_core_error_in_every_feature_configuration() {
+        fn boxed<E: core::error::Error + 'static>(e: E) -> Box<dyn core::error::Error> {
+            Box::new(e)
+        }
+
+        let err = boxed(VerifyError::MissingHeader {
+            header: "X-Hub-Signature-256",
+        });
+        assert_eq!(
+            err.to_string(),
+            "missing header `X-Hub-Signature-256`",
+            "boxing must preserve Display"
+        );
+
+        // The ergonomics a `no_std` caller previously had no access to: `?`
+        // into a `Box<dyn Error>`-shaped error aggregate.
+        fn propagate() -> Result<(), Box<dyn core::error::Error>> {
+            Err(VerifyError::SignatureMismatch)?;
+            Ok(())
+        }
+        assert_eq!(
+            propagate().err().map(|e| e.to_string()).as_deref(),
+            Some("signature mismatch")
+        );
+    }
 
     #[test]
     fn display_missing_header() {

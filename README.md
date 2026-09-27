@@ -290,17 +290,18 @@ and keep the previous one until the window closes (at least one call succeeds).
 ### `no_std` support
 
 The core verification path is `no_std + alloc` compatible. The `std` feature (on by default) provides the wall
-clock used for replay protection and the `std::error::Error` impl. Disable it
-for constrained targets:
+clock used for replay protection. Disable it for constrained targets:
 
 ```toml
 # no wall clock; supply your own Clock for timestamped providers
 webhook-verify = { version = "0.1", default-features = false }
 ```
 
-Without `std`, [`Clock::now`] returns unix seconds directly, `SystemClock` is
-unavailable, and `VerifyError` does not implement `std::error::Error` — see
-`spec.md` §7.
+Without `std`, [`Clock::now`] returns unix seconds directly and `SystemClock` is
+unavailable — see `spec.md` §7. `VerifyError` and `ProviderParseError` still
+implement `core::error::Error` in that configuration (it is stable in `core`
+since Rust 1.81, and `std::error::Error` is that same trait), so error
+aggregation works either way.
 
 The `sendgrid` provider feature is `no_std`-compatible; the certificate-based
 `paypal` feature is **not** — its transitive dependencies (`der-parser`,
