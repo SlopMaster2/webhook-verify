@@ -44,6 +44,11 @@
 //! holds is not the first one, and `SignatureMismatch` is indistinguishable
 //! from a broken integration.
 //!
+//! The same pair through either framework adapter is
+//! `VerifyLayer::with_fallback_secrets` (`tower`) or
+//! `WebhookConfig::with_fallback_secrets` (`actix`), which run the identical
+//! `spec.md` §2.1 aggregation (issue #259).
+//!
 //! Those two differing header lines are also why Mollie is the one provider
 //! exempt from the `spec.md` §4.4 duplicate-header check: the shape is the
 //! provider's own rotation mechanism, not a smuggled duplicate. The exemption

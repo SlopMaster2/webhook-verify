@@ -33,6 +33,12 @@
 //! - **Fail closed**: every failure — including a missing
 //!   [`WebhookConfig`] — produces an error response; handler logic never
 //!   sees unverified bytes.
+//! - **Secret rotation**: [`WebhookConfig::with_fallback_secrets`] makes the
+//!   extractor try a second (and further) keys after the primary one, with the
+//!   same `verify_any()` aggregation rules (`spec.md` §2.1) — a delivery signed
+//!   by either side of a rotation window reaches the handler, and a
+//!   well-formed key that matches nothing is still a `401`. Without it, a
+//!   rotation window meant giving up on the extractor.
 //! - **Optional body size limit** (DoS hardening): use
 //!   [`WebhookConfig::with_max_body_size`] to reject oversized request bodies
 //!   with `413 Payload Too Large` before any signature work, so a malicious
@@ -112,11 +118,11 @@ use actix_web::{
 };
 
 use crate::core::adapter_utils::{
-    declared_content_length, find_ambiguous_signature_header, rejection_status,
+    KeyRing, declared_content_length, find_ambiguous_signature_header, rejection_status,
 };
 use crate::{HeaderMap, Provider, Secret, VerifyError, VerifyOptions};
 
-/// Configuration used by the [`VerifiedBody`] extractor: provider, secret,
+/// Configuration used by the [`VerifiedBody`] extractor: provider, key ring,
 /// and verification options.
 ///
 /// Register it once per app (or per scoped webhook route) with
@@ -126,18 +132,19 @@ use crate::{HeaderMap, Provider, Secret, VerifyError, VerifyOptions};
 #[derive(Clone)]
 pub struct WebhookConfig {
     provider: Provider,
-    secret: Arc<Secret>,
+    keys: KeyRing,
     options: Arc<VerifyOptions>,
     max_body_size: Option<usize>,
 }
 
 impl fmt::Debug for WebhookConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Provider name only; `Secret`'s Debug is redacted and
-        // `VerifyOptions`' Debug omits URL/form values (spec.md §4.3).
+        // Provider name only; `KeyRing`'s Debug lists the configured keys
+        // through `Secret`'s redacted Debug, and `VerifyOptions`' Debug omits
+        // URL/form values (spec.md §4.3).
         f.debug_struct("WebhookConfig")
             .field("provider", &self.provider)
-            .field("secret", &self.secret)
+            .field("keys", &self.keys)
             .field("options", &self.options)
             .field("max_body_size", &self.max_body_size)
             .finish()
@@ -156,10 +163,54 @@ impl WebhookConfig {
     pub fn with_options(provider: Provider, secret: Secret, options: VerifyOptions) -> Self {
         Self {
             provider,
-            secret: Arc::new(secret),
+            keys: KeyRing::new(secret),
             options: Arc::new(options),
             max_body_size: None,
         }
+    }
+
+    /// Also accepts signatures made with any of `fallbacks`, tried after the
+    /// primary `secret` — the signing-key rotation window of `verify_any()`
+    /// (`spec.md` §2.1), reachable through the extractor.
+    ///
+    /// A delivery verifies if *any* configured key matches, and the error
+    /// aggregation is the one `verify_any()` documents: structural errors
+    /// (`MissingHeader`, `MalformedHeader`, `BadEncoding`, …) return
+    /// immediately; a key rejected for its own shape (`InvalidSecret` — empty,
+    /// whitespace-only, or NUL-only) is *skipped* rather than aborting the
+    /// search, so one garbled entry cannot take the whole ring down; a
+    /// well-formed key that does not match yields `SignatureMismatch` once every
+    /// key has been tried; and `InvalidSecret` is reported only when *every*
+    /// key is unusable. A ring of exactly one key behaves exactly as before
+    /// this method existed.
+    ///
+    /// Order only matters for cost — the first match wins, and each attempt is
+    /// one HMAC — and for which key is blamed when none matches. Put the key
+    /// most deliveries arrive with first, so the common case stops at one
+    /// attempt.
+    ///
+    /// The keys stay valid for as long as they are configured: drop a key once
+    /// the provider's window has closed, and the old deliveries signed with it
+    /// stop verifying. This is only meaningful for the shared-secret providers;
+    /// PayPal and SendGrid ignore the `Secret` entirely and verify against
+    /// [`VerifyOptions::verifying_material`](crate::VerifyOptions), so
+    /// fallbacks give them no rotation semantics (see
+    /// [`verify_any`](crate::verify_any)).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use actix_web::App;
+    /// use webhook_verify::actix::WebhookConfig;
+    /// use webhook_verify::{Provider, Secret};
+    ///
+    /// let config = WebhookConfig::new(Provider::GitHub, Secret::new("the new secret"))
+    ///     .with_fallback_secrets([Secret::new("the previous secret")]);
+    /// let app = App::new().app_data(config);
+    /// ```
+    pub fn with_fallback_secrets(mut self, fallbacks: impl IntoIterator<Item = Secret>) -> Self {
+        self.keys = self.keys.with_fallbacks(fallbacks);
+        self
     }
 
     /// Sets an optional maximum body size in bytes (DoS hardening).
@@ -362,11 +413,10 @@ impl FromRequest for VerifiedBody {
                 }
             }
 
-            match crate::providers::verify_ref(
+            match config.keys.verify(
                 config.provider,
                 req.headers(),
                 raw_body.as_ref(),
-                &config.secret,
                 // Borrow the shared options out of the `Arc`; the by-value
                 // `crate::verify()` would deep-clone them on every request
                 // (copying `verifying_material`, `request_url`, ...), which is
@@ -827,6 +877,125 @@ mod tests {
             .set_payload(Bytes::from_static(SLACK_BODY))
             .to_request();
         let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // --- secret rotation through the extractor (issue #259) -----------------
+
+    /// The primary key of a rotation config. Deliberately *not* the secret that
+    /// signed [`GITHUB_SIGNATURE`], so the vector above can only verify when a
+    /// fallback is reached.
+    const ROTATION_PRIMARY_SECRET: &str = "the new secret, not the one that signed this";
+
+    /// Any second secret that is still not the one that signed the vector, so
+    /// a ring built from these two cannot verify it.
+    const ROTATION_OTHER_SECRET: &str = "an unrelated older secret";
+
+    /// App under test whose config's primary key is [`ROTATION_PRIMARY_SECRET`]
+    /// and whose fallbacks are the given expressions.
+    macro_rules! rotating_app {
+        ($($fallback:expr),* $(,)?) => {
+            aw_test::init_service(
+                App::new()
+                    .app_data(
+                        WebhookConfig::new(
+                            Provider::GitHub,
+                            Secret::new(ROTATION_PRIMARY_SECRET),
+                        )
+                        .with_fallback_secrets([$($fallback),*]),
+                    )
+                    .route("/", web::post().to(echo_len)),
+            )
+            .await
+        };
+    }
+
+    #[actix_web::test]
+    async fn a_delivery_signed_by_a_fallback_key_reaches_the_handler() {
+        // The bug: with a single `Arc<Secret>` there was no way to configure a
+        // second key, so every delivery signed by the not-yet-retired key was
+        // a 401 and the only workaround was giving up on the extractor.
+        let app = rotating_app!(Secret::new(GITHUB_SECRET));
+        let res = aw_test::call_service(&app, github_request(GITHUB_BODY).to_request()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(aw_test::read_body(res).await, Bytes::from_static(b"13"));
+    }
+
+    #[actix_web::test]
+    async fn a_delivery_signed_by_the_primary_key_still_verifies_with_fallbacks_configured() {
+        // Fallbacks are additive: adding one must not shadow the primary.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_fallback_secrets([Secret::new(ROTATION_OTHER_SECRET)]),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let res = aw_test::call_service(&app, github_request(GITHUB_BODY).to_request()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[actix_web::test]
+    async fn a_delivery_matching_no_key_in_the_ring_is_unauthorized() {
+        // The security-relevant half: a rotation list must not become a way to
+        // accept *more* than the keys configured in it.
+        let app = rotating_app!(Secret::new(ROTATION_OTHER_SECRET));
+        let res = aw_test::call_service(&app, github_request(GITHUB_BODY).to_request()).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[actix_web::test]
+    async fn an_unusable_key_in_the_ring_is_skipped_rather_than_aborting_the_search() {
+        // `spec.md` §2.1: an empty/whitespace-only/NUL-only key is unusable for
+        // that attempt only, so a garbled entry in a rotation list must not take
+        // the whole extractor down with a 500.
+        for unusable in ["", "   ", "\0\0\0"] {
+            let app = rotating_app!(Secret::new(unusable), Secret::new(GITHUB_SECRET));
+            let res = aw_test::call_service(&app, github_request(GITHUB_BODY).to_request()).await;
+            assert_eq!(
+                res.status(),
+                StatusCode::OK,
+                "an unusable key must be skipped, not reported: {unusable:?}"
+            );
+        }
+    }
+
+    #[actix_web::test]
+    async fn a_ring_of_only_unusable_keys_is_operator_misconfiguration() {
+        // Nothing usable at all: `InvalidSecret` → 500, so a broken key
+        // configuration is never disguised as a forgery.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(""))
+                        .with_fallback_secrets([Secret::new(" \t ")]),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let res = aw_test::call_service(&app, github_request(GITHUB_BODY).to_request()).await;
+        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[actix_web::test]
+    async fn a_ring_with_no_fallbacks_behaves_exactly_as_before() {
+        // The additive-promise check: an empty fallback list is a single-key
+        // ring, so the extractor must verify the documented vector and reject a
+        // tampered one — the same two answers it has always given.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_fallback_secrets([]),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let res = aw_test::call_service(&app, github_request(GITHUB_BODY).to_request()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let res = aw_test::call_service(&app, github_request(b"Hello, World?").to_request()).await;
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -1341,9 +1510,14 @@ mod tests {
             Provider::GitHub,
             Secret::new("super-secret-hmac-key"),
             crate::VerifyOptions::default().with_request_url("https://internal.example/hook"),
-        );
+        )
+        .with_fallback_secrets([Secret::new("previous-secret-hmac-key")]);
         let debug = format!("{config:?}");
         assert!(!debug.contains("super-secret-hmac-key"));
+        assert!(
+            !debug.contains("previous-secret-hmac-key"),
+            "a rotation key must not render any more than the primary: {debug}"
+        );
         assert!(!debug.contains("internal.example"));
 
         let body = VerifiedBody(Bytes::from_static(b"raw-secret-payload-bytes"));

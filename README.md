@@ -213,6 +213,26 @@ let result = verify_any(
   is malformed do you get `InvalidSecret` (an operator-configuration signal,
   not a forgery). Full decision record in `spec.md` §2.1.
 
+The framework adapters accept a key list too, so a rotation window does not
+force you out of the layer/extractor:
+
+```rust,ignore
+use webhook_verify::tower::VerifyLayer;            // `actix`:
+// use webhook_verify::actix::WebhookConfig;         // same method name
+
+// Try the new secret first; keep the old one listed until the window closes.
+let layer = VerifyLayer::new(Provider::Stripe, Secret::new(new_secret))
+    .with_fallback_secrets([Secret::new(old_secret)]);
+```
+
+`with_fallback_secrets` is additive — the primary key is still the one most
+deliveries must match, so list the dominant key first to keep the common case at
+one HMAC — and it aggregates errors exactly as `verify_any()` does above, so a
+delivery matching none of the keys is still a `401` and a list of nothing but
+unusable keys is a `500`. Fallbacks are only meaningful for the shared-secret
+providers; PayPal and SendGrid ignore `Secret` and verify against
+`VerifyOptions::verifying_material`.
+
 ## Installation
 
 ```toml

@@ -142,6 +142,10 @@
 //!   the same reason.
 //!
 //! See [`verify_any`] for cross-secret key rotation during a rotation window.
+//! The `tower` and `actix` adapters reach the same semantics without leaving
+//! the adapter: `VerifyLayer::with_fallback_secrets` and
+//! `WebhookConfig::with_fallback_secrets` (plain text rather than intra-doc
+//! links, for the reason above).
 //!
 //! ## Security properties
 //!

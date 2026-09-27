@@ -1,16 +1,22 @@
 //! The `spec.md` §4.4 ambiguity check, and the utilities the framework
 //! adapters (tower, actix) share so they cannot drift as new [`VerifyError`]
-//! variants are added.
+//! variants are added — or, with cross-secret rotation, as the list of keys an
+//! adapter tries gains entries.
 //!
-//! Two kinds of item live here:
+//! Three kinds of item live here:
 //!
 //! * the ambiguity scan itself, compiled under the `http` feature *and* both
 //!   adapter features, because it is public API for `http`-feature callers
 //!   (see [`ambiguous_signature_header`]) as well as the adapters' internal
-//!   step; and
-//! * adapter-only glue (`rejection_status`, `declared_content_length`),
-//!   which carries a narrower `cfg` so nothing is dead code in the
-//!   `http`-only configuration.
+//!   step;
+//! * adapter-only glue ([`KeyRing`], `rejection_status`,
+//!   `declared_content_length`), which carries a narrower `cfg` so nothing is
+//!   dead code in the `http`-only configuration.
+
+#[cfg(any(feature = "tower", feature = "actix"))]
+use alloc::{sync::Arc, vec::Vec};
+#[cfg(any(feature = "tower", feature = "actix"))]
+use core::fmt;
 
 #[cfg(any(feature = "tower", feature = "actix"))]
 use super::VerifyError;
@@ -18,6 +24,8 @@ use crate::providers::{
     CONTENTFUL_SIGNED_HEADERS_HEADER, Provider, provider_sent_duplicate_headers,
     signature_header_names,
 };
+#[cfg(any(feature = "tower", feature = "actix"))]
+use crate::{Secret, VerifyOptions};
 
 /// Raw, multi-value header access for the framework adapters.
 ///
@@ -322,6 +330,92 @@ pub(crate) fn declared_content_length<H: MultiValueHeaders + ?Sized>(headers: &H
     value.parse().ok()
 }
 
+/// The ordered set of signing keys one adapter request may be verified
+/// against (issue #259).
+///
+/// A provider may sign with the old or the new key for the length of its
+/// rotation window, and the caller has to be able to accept both. The adapters
+/// used to hold exactly one `Arc<Secret>`, which made that impossible: a
+/// delivery signed by the not-yet-retired key was rejected as a forgery, and
+/// the only way out was to abandon the adapter and hand-roll the request
+/// lifecycle — while `verify_any()` and the crate's own "prefer the layer"
+/// advice said otherwise.
+///
+/// Keys are tried in the order given — index 0 is the primary secret from
+/// `VerifyLayer::new` / `WebhookConfig::new`, and the rest are the fallbacks
+/// added by `with_fallback_secrets` — and verification delegates to the same
+/// `verify_ref` / `verify_any_ref` pair, with the same `spec.md` §2.1 error
+/// aggregation, that `verify()` / `verify_any()` use. Sharing the type is what
+/// keeps the two adapters from drifting: an aggregation rule or a
+/// secret-shape rule added for one framework is then already the other's.
+///
+/// The slice is behind an `Arc` so cloning a layer (or the middleware built
+/// from it, as tower runners routinely do) never copies key material, and
+/// verification borrows it in place — no per-request `Vec` or `Secret` clone.
+#[cfg(any(feature = "tower", feature = "actix"))]
+#[derive(Clone)]
+pub(crate) struct KeyRing {
+    /// Index 0 is the primary key; the remainder are fallbacks, in order.
+    keys: Arc<[Secret]>,
+}
+
+#[cfg(any(feature = "tower", feature = "actix"))]
+impl KeyRing {
+    /// A ring holding exactly one key — the configuration every adapter had
+    /// before `with_fallback_secrets` existed.
+    pub(crate) fn new(secret: Secret) -> Self {
+        Self {
+            keys: Arc::from(Vec::from([secret])),
+        }
+    }
+
+    /// Appends keys to try *after* the primary one, returning the new ring.
+    ///
+    /// Configuration-time only: this reallocates the ring, which is why the
+    /// adapters take it by value in a builder method rather than mutating a
+    /// ring a running server already cloned.
+    pub(crate) fn with_fallbacks(self, fallbacks: impl IntoIterator<Item = Secret>) -> Self {
+        let mut keys = Vec::from(&*self.keys);
+        keys.extend(fallbacks);
+        Self {
+            keys: Arc::from(keys),
+        }
+    }
+
+    /// Verifies one request against the ring, returning `Ok(())` if any key
+    /// matches.
+    ///
+    /// A single-key ring takes `verify_ref` directly: that is provably what a
+    /// one-element `verify_any` loop does (the loop's final report is
+    /// `SignatureMismatch` when a usable key mismatched and the first
+    /// `InvalidSecret` when the only key was unusable, which is exactly what
+    /// that key's own `verify_ref` returned), and keeping the direct call means
+    /// the default single-secret deployment runs the same code it always did,
+    /// with no aggregation state on the hot path.
+    pub(crate) fn verify(
+        &self,
+        provider: Provider,
+        headers: &dyn crate::HeaderMap,
+        raw_body: &[u8],
+        options: &VerifyOptions,
+    ) -> Result<(), VerifyError> {
+        match &*self.keys {
+            [only] => crate::providers::verify_ref(provider, headers, raw_body, only, options),
+            keys => crate::providers::verify_any_ref(provider, headers, raw_body, keys, options),
+        }
+    }
+}
+
+#[cfg(any(feature = "tower", feature = "actix"))]
+impl fmt::Debug for KeyRing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // `Secret`'s own `Debug` is redacted, so this reports only *how many*
+        // keys are configured — useful when a rotation window is open, and
+        // useless to an attacker.
+        f.debug_list().entries(self.keys.iter()).finish()
+    }
+}
+
 /// Maps a verification outcome to its rejection HTTP status code.
 ///
 /// Returns the raw numeric status (400/401/500) rather than a framework's
@@ -361,11 +455,230 @@ pub(crate) fn rejection_status(error: &VerifyError) -> u16 {
 #[cfg(test)]
 mod tests {
     #[cfg(any(feature = "tower", feature = "actix"))]
-    use super::{declared_content_length, rejection_status};
+    use super::{KeyRing, declared_content_length, rejection_status};
     #[cfg(any(feature = "tower", feature = "actix"))]
     use crate::VerifyError;
     #[cfg(all(not(feature = "std"), any(feature = "tower", feature = "actix")))]
     use crate::test_helpers::*;
+
+    /// The shared key-ring logic (issue #259), pinned once so the tower and
+    /// actix adapters — which differ only in their header map and status
+    /// types — cannot drift on rotation semantics. Each adapter's own tests
+    /// then cover the same cases as HTTP statuses.
+    ///
+    /// The `Vec<(String, String)>` `HeaderMap` impl is used rather than
+    /// `::http::HeaderMap` so this module compiles (and tests) under the
+    /// `actix`-only build, where the `http` feature is not enabled.
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    mod key_ring {
+        use super::KeyRing;
+        use crate::{Provider, Secret, VerifyError, VerifyOptions, verify};
+
+        /// GitHub's published `Hello, World!` vector
+        /// (<https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries>).
+        const GENUINE: &str =
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
+        const BODY: &[u8] = b"Hello, World!";
+        const LIVE: &str = "It's a Secret to Everybody";
+        const PREVIOUS: &str = "the previous signing secret";
+        const UNRELATED: &str = "some other secret entirely";
+
+        fn headers() -> Vec<(&'static str, &'static str)> {
+            vec![("x-hub-signature-256", GENUINE)]
+        }
+
+        fn ring(secrets: &[&str]) -> KeyRing {
+            match secrets {
+                // A ring always has a primary key; the empty case cannot arise
+                // from the fixtures below and falls back to a usable one.
+                [] => KeyRing::new(Secret::new(LIVE)),
+                [first, rest @ ..] => KeyRing::new(Secret::new(*first))
+                    .with_fallbacks(rest.iter().map(|secret| Secret::new(*secret))),
+            }
+        }
+
+        #[test]
+        fn a_single_key_ring_matches_the_public_verify() {
+            // The pre-rotation configuration: one key, one call, and exactly
+            // the result `verify()` would have produced. Pinned because the
+            // ring short-circuits to `verify_ref` for the single-key case, and
+            // that shortcut has to stay equivalent to the whole-`verify_any`
+            // path it stands in for.
+            let keys = ring(&[LIVE]);
+            for outcome in [
+                verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &Secret::new(LIVE),
+                    VerifyOptions::default(),
+                ),
+                keys.verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &VerifyOptions::default(),
+                ),
+            ] {
+                assert_eq!(outcome, Ok(()));
+            }
+
+            let keys = ring(&[UNRELATED]);
+            assert_eq!(
+                keys.verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &VerifyOptions::default(),
+                ),
+                verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &Secret::new(UNRELATED),
+                    VerifyOptions::default(),
+                ),
+                "a mismatching single key reports what `verify()` reports"
+            );
+        }
+
+        #[test]
+        fn a_delivery_signed_by_either_side_of_the_window_verifies() {
+            // The rotation window: a delivery signed by the key that is *not*
+            // the primary one must still be accepted, and adding a fallback
+            // must not shadow the primary.
+            let keys = ring(&[LIVE, PREVIOUS]);
+            assert_eq!(
+                keys.verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &VerifyOptions::default(),
+                ),
+                Ok(()),
+                "the primary key is what signed this delivery",
+            );
+
+            let keys = ring(&[PREVIOUS, LIVE]);
+            assert_eq!(
+                keys.verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &VerifyOptions::default(),
+                ),
+                Ok(()),
+                "and it verifies whichever side of the window it was signed with",
+            );
+        }
+
+        #[test]
+        fn a_ring_with_no_matching_key_is_a_signature_mismatch() {
+            let keys = ring(&[UNRELATED, PREVIOUS]);
+            assert_eq!(
+                keys.verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &VerifyOptions::default(),
+                ),
+                Err(VerifyError::SignatureMismatch),
+            );
+        }
+
+        #[test]
+        fn an_unusable_key_is_skipped_rather_than_aborting_the_search() {
+            // `spec.md` §2.1: an unusable key is unusable *for this request*
+            // only. A rotation list that picked up an empty/whitespace/NUL
+            // entry still verifies against the healthy one.
+            for unusable in ["", "  ", "\0\0"] {
+                let keys = ring(&[unusable, LIVE]);
+                assert_eq!(
+                    keys.verify(
+                        Provider::GitHub,
+                        &headers(),
+                        BODY,
+                        &VerifyOptions::default(),
+                    ),
+                    Ok(()),
+                    "{unusable:?} must be skipped, not reported",
+                );
+            }
+
+            // An unusable key *after* the live one is equally harmless.
+            let keys = ring(&[LIVE, ""]);
+            assert_eq!(
+                keys.verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &VerifyOptions::default(),
+                ),
+                Ok(())
+            );
+        }
+
+        #[test]
+        fn a_mismatch_outranks_an_unusable_key() {
+            // Well-formed-but-wrong is the definitive rejection signal, so an
+            // unusable entry must not turn a forgery into an operator error.
+            let keys = ring(&["", UNRELATED]);
+            assert_eq!(
+                keys.verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &VerifyOptions::default(),
+                ),
+                Err(VerifyError::SignatureMismatch),
+            );
+        }
+
+        #[test]
+        fn an_all_unusable_ring_is_reported_as_operator_misconfiguration() {
+            // Nothing usable at all: `InvalidSecret` (which both adapters
+            // answer with 500), not `SignatureMismatch`.
+            let keys = ring(&["", " \t "]);
+            assert_eq!(
+                keys.verify(
+                    Provider::GitHub,
+                    &headers(),
+                    BODY,
+                    &VerifyOptions::default(),
+                ),
+                Err(VerifyError::InvalidSecret {
+                    reason: "secret is empty"
+                }),
+            );
+        }
+
+        #[test]
+        fn a_structural_error_short_circuits_the_whole_ring() {
+            // Header-shaped errors do not depend on the key, so they are
+            // reported immediately rather than after exhausting the list.
+            let keys = ring(&[UNRELATED, PREVIOUS]);
+            let empty: Vec<(&str, &str)> = Vec::new();
+            assert_eq!(
+                keys.verify(Provider::GitHub, &empty, BODY, &VerifyOptions::default()),
+                Err(VerifyError::MissingHeader {
+                    header: "X-Hub-Signature-256"
+                }),
+            );
+        }
+
+        #[test]
+        fn debug_lists_the_keys_without_revealing_them() {
+            let keys = ring(&[LIVE, PREVIOUS]);
+            let debug = format!("{keys:?}");
+            assert!(
+                !debug.contains(LIVE) && !debug.contains(PREVIOUS),
+                "Debug must not render key material: {debug}"
+            );
+            // The count is the useful part in a log line: it says whether a
+            // rotation window is open.
+            assert_eq!(debug.matches("redacted").count(), 2, "{debug}");
+        }
+    }
 
     #[cfg(any(feature = "tower", feature = "actix"))]
     fn status_of(error: VerifyError) -> u16 {

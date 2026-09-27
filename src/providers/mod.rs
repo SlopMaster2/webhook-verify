@@ -1703,6 +1703,31 @@ pub fn verify_any(
     secrets: &[Secret],
     options: VerifyOptions,
 ) -> Result<(), VerifyError> {
+    // The by-value signature is pure ergonomics (no provider mutates its
+    // options), so delegate to the borrowing dispatch below immediately rather
+    // than ever cloning the caller's options.
+    verify_any_ref(provider, headers, raw_body, secrets, &options)
+}
+
+/// The shared multi-secret dispatch, taking `options` by reference.
+///
+/// Mirrors the [`verify`]/[`verify_ref`] split: [`verify_any`] takes
+/// [`VerifyOptions`] by value for API ergonomics and never mutates them, so it
+/// delegates here. The framework adapters call this directly — their key ring
+/// (`core::adapter_utils::KeyRing`, issue #259) may try several secrets per
+/// request, and the by-value form would deep-clone the shared options, plus the
+/// heap-allocated request context they carry (`verifying_material`,
+/// `request_url`, `form_params`, `webhook_id`), on every one of those attempts.
+///
+/// The aggregation rules documented on [`verify_any`] live here, so a
+/// caller-supplied secret list and an adapter-supplied one cannot diverge.
+pub(crate) fn verify_any_ref(
+    provider: Provider,
+    headers: &dyn HeaderMap,
+    raw_body: &[u8],
+    secrets: &[Secret],
+    options: &VerifyOptions,
+) -> Result<(), VerifyError> {
     // First InvalidSecret seen, reported only if *every* secret turns out
     // to be unusable. Not a structural error: it is specific to one secret,
     // so it must not abort the rotation search.
@@ -1713,12 +1738,12 @@ pub fn verify_any(
     let mut any_well_formed_mismatch = false;
 
     for secret in secrets {
-        // Verify against a single borrow of `options`, not a fresh deep clone
-        // per secret: rotation slices are iterated on the hot path, and the
-        // options may carry heap-allocated context (`verifying_material`,
-        // `request_url`, `form_params`) that costs a redundant allocation to
-        // copy for every key.
-        match verify_ref(provider, headers, raw_body, secret, &options) {
+        // Verify against the caller's single borrow of `options`, not a fresh
+        // deep clone per secret: rotation lists are iterated on the hot path
+        // (issue #259 puts one in every adapter request), and the options may
+        // carry heap-allocated context (`verifying_material`, `request_url`,
+        // `form_params`) that costs a redundant allocation to copy per key.
+        match verify_ref(provider, headers, raw_body, secret, options) {
             // A match on any active key is enough during rotation.
             Ok(()) => return Ok(()),
             // A well-formed key that simply doesn't match: keep trying the
