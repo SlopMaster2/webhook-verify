@@ -468,6 +468,10 @@ mod tests {
     use crate::VerifyError;
     #[cfg(all(not(feature = "std"), any(feature = "tower", feature = "actix")))]
     use crate::test_helpers::*;
+    // The README doc-drift guards below build strings and slices of blocks, so
+    // they need the same prelude the other test modules restore under `no_std`.
+    #[cfg(all(not(feature = "std"), feature = "http"))]
+    use crate::test_helpers::*;
 
     /// The shared key-ring logic (issue #259), pinned once so the tower and
     /// actix adapters — which differ only in their header map and status
@@ -1623,5 +1627,119 @@ mod tests {
                 "non-visible-ASCII Content-Length {bytes:?} must be treated as undeclared"
             );
         }
+    }
+
+    /// The README's `ambiguous_signature_header` section, pinned to the two
+    /// qualifiers that function's signature carries (issue #269).
+    ///
+    /// A `rust` fence in `README.md` is documentation, not a doctest — nothing
+    /// compiles it, and the crate is built without the README entirely — so
+    /// the section shipped a snippet passing a `Vec<(String, String)>` (the
+    /// map the README's own first example defines) to a function that takes
+    /// `&::http::HeaderMap`, while never naming the `http` feature that gates
+    /// it. A reader following the README top-to-bottom got a type error, or
+    /// concluded the check did not exist and dropped the §4.4 duplicate-header
+    /// defense. `src/core/headers.rs` and the helper's own doctest had both
+    /// qualifiers right, which is why only the README was wrong.
+    ///
+    /// The qualifiers are checked *inside the section that makes the claim*,
+    /// not anywhere in the file: a passing mention of the `http` feature two
+    /// paragraphs earlier (which the README has, for the `HeaderMap` impl) is
+    /// exactly the shape of prose that let the gap through, so anchoring only
+    /// the file would not catch its return.
+    #[cfg(feature = "http")]
+    #[test]
+    fn readme_states_the_ambiguity_checks_requirements() {
+        const README: &str = include_str!("../../README.md");
+
+        let blocks: Vec<&str> = README.split("\n\n").collect();
+        let Some(at) = blocks
+            .iter()
+            .position(|block| block.contains("ambiguous_signature_header"))
+        else {
+            panic!("README.md must still document `ambiguous_signature_header`");
+        };
+        // The prose paragraph that introduces the helper, plus the whole code
+        // fence after it (a fence is several blank-line-separated blocks, so
+        // it is reassembled rather than taken one block at a time).
+        let mut section = String::new();
+        for block in &blocks[at..] {
+            section.push_str(block);
+            section.push_str("\n\n");
+            if section.matches("```").count() >= 2 {
+                break;
+            }
+        }
+        let lower = section.to_lowercase();
+        assert!(
+            lower.contains("http` feature"),
+            "README.md's `ambiguous_signature_header` section must name the \
+             `http` feature, which is what exports the helper at all; found: {section}"
+        );
+        assert!(
+            section.contains("http::HeaderMap"),
+            "README.md's `ambiguous_signature_header` section must name the \
+             argument type it takes, `&http::HeaderMap`; found: {section}"
+        );
+
+        // The type error the shipped snippet had: the map has to exist, and
+        // has to be an `http::HeaderMap`, before the call that borrows it.
+        let fence = section.find("```rust").unwrap_or_else(|| {
+            panic!("the section must carry a runnable snippet; found: {section}")
+        });
+        let snippet = &section[fence..];
+        let built = snippet.find("http::HeaderMap::new()").unwrap_or_else(|| {
+            panic!(
+                "the snippet must build an `http::HeaderMap` to pass to \
+                     `ambiguous_signature_header`; found: {snippet}"
+            )
+        });
+        let called = snippet
+            .find("ambiguous_signature_header(")
+            .unwrap_or_else(|| {
+                panic!("the snippet must call `ambiguous_signature_header`; found: {snippet}")
+            });
+        assert!(
+            built < called,
+            "the snippet must build the `http::HeaderMap` before passing it to \
+             `ambiguous_signature_header`; found: {snippet}"
+        );
+    }
+
+    /// The honest limit the same section owes a caller whose map is not an
+    /// `http::HeaderMap`.
+    ///
+    /// `HeaderMap` is first-match-only by design (`spec.md` §4.4), so no other
+    /// impl *can* support the scan: a map holding one value per name has no
+    /// second value to compare against. The README pointed at the helper
+    /// without saying so, which reads as "this is how every caller does it".
+    #[cfg(feature = "http")]
+    #[test]
+    fn readme_states_why_other_map_types_cannot_use_the_ambiguity_check() {
+        const README: &str = include_str!("../../README.md");
+
+        let blocks: Vec<&str> = README.split("\n\n").collect();
+        let Some(at) = blocks
+            .iter()
+            .position(|block| block.contains("ambiguous_signature_header"))
+        else {
+            panic!("README.md must still document `ambiguous_signature_header`");
+        };
+        let limit = blocks[at + 1..]
+            .iter()
+            .find(|block| block.contains("first-match"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "README.md must explain that the `HeaderMap` trait's \
+                     first-match-only lookup is why no other map type can \
+                     support the ambiguity check"
+                )
+            });
+        assert!(
+            limit.contains("compare the values you hold"),
+            "that explanation must say what a caller with another map type \
+             does instead — compare the values it holds for the same name — \
+             found: {limit}"
+        );
     }
 }

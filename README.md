@@ -255,10 +255,21 @@ hyper requests) implements `HeaderMap` and can be passed to `verify()` directly.
 `HeaderMap` lookup returns only the *first* value for a name, so it cannot see a
 signature header that arrived twice. The `tower` and `actix` adapters reject
 that case for you; if you are calling `verify()` yourself, run the same check
-first with `ambiguous_signature_header`:
+first with `ambiguous_signature_header`. Two requirements come with it: it ships
+with the `http` feature, and it takes an `http::HeaderMap` (not a
+`Vec<(String, String)>`, and not any other `HeaderMap` impl):
 
 ```rust
-use webhook_verify::{Provider, VerifyError, ambiguous_signature_header, verify};
+use webhook_verify::{Provider, Secret, VerifyError, ambiguous_signature_header, verify};
+
+// Built explicitly, the way the `http` feature's own impl needs it: the helper
+// is gated on that feature and reads the whole map, not just the first value
+// `verify()` would see.
+let mut headers = http::HeaderMap::new();
+headers.insert(
+    "x-hub-signature-256",
+    http::HeaderValue::from_static("sha256=6d3f1e..."),
+);
 
 if let Some(header) = ambiguous_signature_header(Provider::GitHub, &headers) {
     return Err(VerifyError::MalformedHeader {
@@ -266,7 +277,13 @@ if let Some(header) = ambiguous_signature_header(Provider::GitHub, &headers) {
         reason: "header present multiple times with different values",
     });
 }
-verify(Provider::GitHub, &headers, &raw_body, &secret, Default::default())?;
+verify(
+    Provider::GitHub,
+    &headers,
+    b"the untouched request body",
+    &Secret::new("your GitHub webhook secret"),
+    Default::default(),
+)?;
 ```
 
 It returns the provider-spelled name of the offending header, or `None` when
@@ -276,6 +293,13 @@ it also follows the self-describing `x-contentful-signed-headers` list, so a
 header the delivery itself declares as signed is scanned too. See
 [`spec.md` §4.4](https://github.com/SlopMaster2/webhook-verify/blob/master/spec.md)
 for the full contract and the `Custom` carve-out.
+
+No other `HeaderMap` impl can offer this check, and that is a property of the
+trait rather than a gap in this one: it exposes first-match lookup only, so a
+map that keeps just one value per name has no second value to compare it
+against. If you build your own map type, compare the values you hold for the
+same signature-header name yourself, or route the request through the `tower` or
+`actix` adapter, which does exactly that.
 
 One provider is exempt, for a reason in its own signing scheme: during its
 documented 24-hour secret-rotation window
