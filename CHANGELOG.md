@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`VerifyLayer::with_fallback_secrets(iter)` and
+  `WebhookConfig::with_fallback_secrets(iter)`** (issue #259). Both adapters
+  held exactly one `Arc<Secret>` and called `verify_ref` with it, so a caller
+  had **no** supported way to accept deliveries signed by the not-yet-retired
+  key during a rotation window: every one of them was a `401`, and the only fix
+  was to drop out of the adapter and hand-roll the request lifecycle. That
+  contradicted two things the crate says elsewhere — `verify_any()` exists for
+  exactly this case (`spec.md` §2.1, §7), and the README's Mollie paragraph
+  documents a two-secret rotation workflow as the fix for Mollie's 24-hour
+  two-header window — while both adapters' docs tell callers to "prefer the
+  layer". Taking the crate's own advice locked a caller out of rotation.
+
+  Each method appends keys tried *after* the primary one, and the ring is
+  verified through the **same** `spec.md` §2.1 aggregation `verify_any()`
+  documents, so a fallback-verified delivery reaches the inner service or
+  handler, a delivery matching no key is still `401`, a key rejected for its
+  own shape (`InvalidSecret` — empty, whitespace-only, NUL-only) is *skipped*
+  rather than aborting the search, and a ring of nothing but unusable keys is
+  still the operator-misconfiguration `500`.
+
+  Supporting changes:
+
+  - `core::adapter_utils::KeyRing`, the ordered `Arc<[Secret]>` list both
+    adapters now hold, so the two frameworks cannot drift on rotation
+    semantics (the same reason `MultiValueHeaders` and `rejection_status` are
+    shared). A single-key ring short-circuits to `verify_ref`, so every
+    existing deployment keeps byte-identical behavior and the default
+    single-secret path carries no aggregation state.
+  - `providers::verify_any_ref`, the borrowing-options twin of
+    `verify_any` mirroring the existing `verify`/`verify_ref` split, so an
+    adapter request iterating several keys does not deep-clone the shared
+    `VerifyOptions` (and the heap-allocated context it may carry) per attempt.
+    The aggregation rules themselves stay in one place, so a caller-supplied
+    secret list and an adapter-supplied one cannot diverge.
+  - `Debug` for the ring renders the key count through `Secret`'s redacted
+    `Debug`, so a rotation window is visible in a log line and no key material
+    is rendered from either adapter's config.
+
+  Additive only: no existing item changes shape, and a config with no fallback
+  behaves exactly as before. No new dependency.
+
 - **`ambiguous_signature_header(provider, &headers)`, behind the `http`
   feature** (issue #233). `spec.md` §4.4 requires rejecting a request whose
   signature header arrives more than once with differing values, and says the

@@ -3112,8 +3112,9 @@ ambiguity).
      the crate reads a second value of one header name, because [`HeaderMap`]'s
      lookup is first-match-only by contract, so the exemption grants no extra
      reach. What keeps the rotation window verifiable is configuring **both**
-     secrets and trying each (§3 Mollie row) — not the second signature becoming
-     readable, which it never does;
+     secrets and trying each (§3 Mollie row) — through `verify_any` directly,
+     or through either adapter's `with_fallback_secrets` (§7, issue #259) —
+     not the second signature becoming readable, which it never does;
    - every other provider keeps its candidates out of the scan's reach — a
      multi-candidate list packed inside one header value (the separator is each
      provider's own: `,` for Stripe, PagerDuty, Mux, and Tailscale, `;` for
@@ -3487,6 +3488,16 @@ A provider implementation is not mergeable until it has:
   inside a single `verify()`); cross-secret rotation ships as the
   `verify_any(provider, headers, body, &[Secret], opts)` wrapper, whose
   error-aggregation rules are a decision record in §2.
+  *Adapters (issue #259):* both framework adapters hold an ordered key
+  list rather than one `Arc<Secret>` — `VerifyLayer::with_fallback_secrets`
+  and `WebhookConfig::with_fallback_secrets` append keys tried *after* the
+  primary — and run it through the **same** §2.1 aggregation, so a rotation
+  window is reachable without abandoning the layer or the extractor. The
+  list is a shared `core::adapter_utils::KeyRing` behind one `Arc`, so the
+  two adapters cannot drift on rotation semantics, and a single-key ring
+  takes `verify_ref` directly, leaving the pre-rotation behavior of every
+  existing deployment byte-identical. A key stays valid for as long as it is
+  listed: the operator drops it when the provider's window closes.
 - **`no_std` scope.** Full `no_std` (no `alloc`) is likely infeasible given
   base64/hex decoding and header string handling; target `no_std + alloc`
   and validate against `wasm32-unknown-unknown` as the primary constrained
