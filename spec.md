@@ -3364,7 +3364,8 @@ A provider implementation is not mergeable until it has:
   ripple.rs `.into()` drift it caught shipped only in tests, PR #124).
 - `cargo test --no-default-features --features sendgrid,paypal` on stable, so
   the `no_std + alloc` paths (the wall-clock fallback in [`Clock::now`], the
-  `std::error::Error`-less [`VerifyError`], and the `no_std` re-exports) are
+  unconditional `core::error::Error` impls on [`VerifyError`] and
+  [`ProviderParseError`], and the `no_std` re-exports) are
   behaviorally covered rather than only build-checked for wasm32. Shipped as
   the `test-nostd` CI job (`.github/workflows/ci.yml`), paired with the `http`
   run below.
@@ -3502,11 +3503,19 @@ A provider implementation is not mergeable until it has:
   base64/hex decoding and header string handling; target `no_std + alloc`
   and validate against `wasm32-unknown-unknown` as the primary constrained
   target (webhook verification at the edge, e.g. Cloudflare Workers via
-  `wasm-bindgen`, is a plausible real use case). *Implemented:
+  `wasm-bindgen`, is a plausible real use case).   *Implemented:
   the core is `no_std + alloc` behind the `std` feature (default on). Building
   with `--no-default-features` drops the wall clock: [`Clock::now`] returns
-  unix seconds directly (no `SystemTime`), [`SystemClock`] is `std`-only, and
-  [`VerifyError`] does not implement `std::error::Error`. Callers on
+  unix seconds directly (no `SystemTime`) and [`SystemClock`] is `std`-only.
+  The crate's error types are deliberately **not** gated on `std`:
+  [`VerifyError`] and [`ProviderParseError`] implement `core::error::Error`
+  unconditionally (issue #261), because that trait is stable in `core` since
+  Rust 1.81 — below the crate's MSRV of 1.85 — and `std::error::Error` *is*
+  the very trait `std` re-exports from `core`, so a `std` build gains nothing
+  from the narrower path. A `no_std + alloc` caller therefore gets a real error
+  type (usable in `Box<dyn core::error::Error>`, `?`-propagating error
+  aggregates) instead of one that is not an error by Rust's own definition.
+  Callers on
   bare-metal/wasm targets supply their own [`Clock`] for timestamped
   (replay-protected) providers; a missing clock reads 0 and fail-closes replay
   checks. The wasm32 regression job ships in CI

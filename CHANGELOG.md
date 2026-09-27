@@ -75,6 +75,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep calling the internal trait-generic version, so there is one
   implementation and it cannot drift from the public one.
 
+### Changed
+
+- **`VerifyError` and `ProviderParseError` implement `core::error::Error`
+  unconditionally instead of `std::error::Error` under the `std` feature**
+  (issue #261). Both impls were `#[cfg(feature = "std")]`, which is a leftover
+  from when the trait did not exist outside `std`: `core::error::Error` was
+  stabilized in Rust 1.81, well below this crate's MSRV of 1.85. The gate was
+  a real hole rather than a nicety — on a `no_std + alloc` target
+  (`spec.md` §1, §7) the type `verify()` returns was not an *error* by Rust's
+  own definition, so a caller could not put it in a `Box<dyn Error>`, could not
+  `?` it into an error-aggregating combinator, and any handler signature
+  shaped around `Box<dyn Error>` was unusable.
+
+  Strictly additive: under `std`, `std::error::Error` **is**
+  `core::error::Error` (`std` re-exports core's trait), so every existing
+  caller keeps the identical trait it had — no `no_std`-only fork of the
+  behavior, no change to any signature, no dependency change. Tests in both
+  error modules deliberately skip the `std` cfg so spec §6's `test-nostd`
+  runs are what catch a re-gate. The `lib.rs` feature list, README §
+  `no_std` support, and `spec.md` §6/§7 are updated so nothing still
+  documents `VerifyError` as not being an error type without `std`.
+
 ### Fixed
 
 - **Discord verification used dalek's non-strict equation, so a low-order

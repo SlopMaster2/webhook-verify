@@ -117,10 +117,13 @@
 //!
 //! ## Crate features
 //!
-//! - `std` *(default)* — provides the wall clock used for replay protection
-//!   and the `std::error::Error` impl. Disable for `no_std + alloc` targets
-//!   (validated against `wasm32-unknown-unknown`); supply your own [`Clock`]
-//!   for timestamped providers.
+//! - `std` *(default)* — provides the wall clock used for replay protection.
+//!   Disable for `no_std + alloc` targets (validated against
+//!   `wasm32-unknown-unknown`); supply your own [`Clock`] for timestamped
+//!   providers. Dropping it does **not** change the error types:
+//!   [`VerifyError`] and [`ProviderParseError`] implement
+//!   `core::error::Error` unconditionally (stable in `core` since Rust 1.81,
+//!   below the MSRV), which `std::error::Error` re-exports anyway.
 //! - `sendgrid` — enables the SendGrid provider (ECDSA P-256).
 //! - `paypal` — enables the PayPal provider (RSA, X.509, CRC-32).
 //! - `http` — `HeaderMap` impl for `http::HeaderMap` (axum, tower, hyper),
