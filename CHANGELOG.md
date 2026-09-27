@@ -36,6 +36,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`spec.md` §4.4 no longer claims Mollie's second rotation signature is
+  reachable** (issue #247). The §4.4 rationale for the crate's only
+  provider-sent-duplicate exemption ended with "Mollie's second signature
+  remains reachable by the documented rotation workflow ... not by the
+  exemption". That is false: `HeaderMap`'s lookup is first-match-only by
+  contract, so `mollie::verify` reads the first of the two `X-Mollie-Signature`
+  lines and the second is never parsed or compared. Nothing in the crate can
+  reach it.
+
+  What actually keeps the 24-hour rotation window verifiable is configuring
+  **both** secrets and trying each — `verify_any(&[live, previous])` — which
+  works because Mollie signs the first line with one of the two active secrets,
+  whichever order the lines arrive in. A deployment that keeps only one of the
+  two secrets rejects every event after a roll whenever the line it holds is not
+  the first, and that `SignatureMismatch` is indistinguishable from a broken
+  integration, so the corrected §3 and §4.4 text now say so explicitly instead
+  of implying a second chance to be verified.
+
+  Documentation only: `verify()`'s behavior is unchanged. §3's rotation row and
+  the `mollie` module docs are aligned to the same wording. Pinned at the
+  provider level by three new tests in `src/providers/mollie.rs`: the window
+  verifies with both secrets configured (in either line order), a single secret
+  does not cover it, and the second line is inert (corrupting, forging, or
+  dropping it changes nothing about a genuine first line — while corrupting the
+  *first* line still fails).
+
 - **Mollie's documented 24-hour secret-rotation window is no longer rejected as
   an ambiguous duplicate signature header** (issue #245). During a secret roll
   Mollie attaches **two** `X-Mollie-Signature` headers to the same delivery, one
