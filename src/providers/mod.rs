@@ -1311,6 +1311,54 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
     }
 }
 
+/// Header names the `spec.md` §4.4 ambiguity scan must **skip** for `provider`,
+/// because the provider itself sends them more than once with differing values.
+///
+/// The scan exists to catch a *smuggled* duplicate: a second value some
+/// intermediary added, which the verifier's first-match lookup will not read, so
+/// an upstream validator checks one signature while the verifier accepts
+/// another. A duplicate the **provider** puts there itself carries no such
+/// intent, and treating it as smuggled rejects deliveries the provider
+/// sanctions — an outage during, for example, a key-rotation window, which is
+/// the worst moment for one.
+///
+/// The list is deliberately a separate, tiny, per-provider declaration rather
+/// than a name filtered out inline at the scan site: it is a security-relevant
+/// exemption, so it has to be enumerable in one place and pinned by a test
+/// against [`signature_header_names`] (a stale name that is no longer one of the
+/// provider's signing headers would silently stop exempting anything).
+///
+/// Empty for every provider whose scheme keeps all its candidates out of the
+/// scan's reach — a comma-delimited list inside a single header value (Stripe,
+/// Paddle, PagerDuty, Mux, Tailscale, Standard Webhooks) or two *distinctly
+/// named* headers with one value each (Box's `BOX-SIGNATURE-PRIMARY` /
+/// `BOX-SIGNATURE-SECONDARY`), neither of which is a duplicate at all.
+#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
+pub(crate) fn provider_sent_duplicate_headers(provider: &Provider) -> &'static [&'static str] {
+    match provider {
+        // Mollie's documented 24-hour signing-secret rotation window sends
+        // **two** `X-Mollie-Signature` header lines on every event, one per
+        // active secret, with different values — verbatim from Mollie's own
+        // docs ("Updating a live signing secret",
+        // <https://docs.mollie.com/reference/webhooks-new>). `mollie::verify`
+        // reads the first value, and its module docs plus `spec.md` §3 promise
+        // that a caller rotating secrets verifies against each in turn; without
+        // this exemption the scan rejects the request before `verify()` is
+        // reached, so that promise holds only on the direct-`verify()` path and
+        // every adapter user gets a body-less 400 for the whole window.
+        //
+        // The scan cannot tell Mollie's second signature from a smuggled one —
+        // both are just two differing values — so the exemption is scoped to
+        // this provider's single header rather than taught to the scan. Nothing
+        // is loosened about what `verify()` accepts: it still reads the first
+        // value and verifies it, so an appended third line changes nothing an
+        // attacker can leverage, and a *prepended* forged value still fails
+        // verification (a denial, not a bypass).
+        Provider::Mollie => &[mollie::SIGNATURE_HEADER],
+        _ => &[],
+    }
+}
+
 /// Verifies that a webhook request was sent by `provider` and was not tampered
 /// with in transit.
 ///
@@ -4126,6 +4174,66 @@ mod tests {
             &identical,
             "X-Hub-Signature-256"
         ));
+    }
+
+    /// Every header the ambiguity scan is *exempted* from must be a header that
+    /// provider's scan list actually contains (issue #245).
+    ///
+    /// `provider_sent_duplicate_headers` is a security-relevant exemption: a
+    /// name in it stops the `spec.md` §4.4 duplicate check from running. The
+    /// scan intersects that list with `signature_header_names`, so a stale entry
+    /// cannot disable a check that is still needed — it just silently exempts
+    /// nothing, which is the failure mode a reviewer would never notice. This
+    /// guard turns that into a build failure.
+    #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
+    #[test]
+    fn provider_sent_duplicate_headers_are_a_subset_of_the_scanned_headers() {
+        for provider in provider_list() {
+            let scanned = signature_header_names(&provider);
+            for name in provider_sent_duplicate_headers(&provider) {
+                assert!(
+                    scanned.contains(name),
+                    "`{provider}` is exempt from the ambiguity scan for `{name:?}`, \
+                     but that is not one of its scanned headers, so the exemption \
+                     silently does nothing — a renamed or dropped header constant"
+                );
+                assert!(
+                    is_valid_field_name(name),
+                    "`{provider}` is exempt for `{name:?}`, which is not a valid HTTP \
+                     field name (RFC 9110 §5.1); the exemption would be unreadable"
+                );
+            }
+        }
+    }
+
+    /// Only Mollie legitimately sends its signature header twice (issue #245).
+    ///
+    /// Mollie's 24-hour rotation window ships two `X-Mollie-Signature` lines
+    /// with different values, which the §4.4 scan would otherwise read as a
+    /// smuggled duplicate. Every other provider keeps its candidates out of the
+    /// scan's reach (a comma-delimited list in one value, or two distinctly
+    /// named headers), so a new entry here means a new exemption, which is a
+    /// security decision that has to be made deliberately — with a linked
+    /// provider source, not by extending a match arm.
+    #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
+    #[test]
+    fn only_mollie_is_exempt_from_the_ambiguity_scan() {
+        let exempt: Vec<_> = provider_list()
+            .into_iter()
+            .filter(|provider| !provider_sent_duplicate_headers(provider).is_empty())
+            .collect();
+        assert_eq!(
+            exempt,
+            vec![Provider::Mollie],
+            "only Mollie sends its own signature header duplicated; a new entry here \
+             needs a linked provider source in the exemption's own doc comment"
+        );
+        assert_eq!(
+            provider_sent_duplicate_headers(&Provider::Mollie),
+            &[mollie::SIGNATURE_HEADER],
+            "the exemption is scoped to Mollie's one header, read from the provider's \
+             own constant rather than re-spelled"
+        );
     }
 
     /// No provider may recompute the HMAC once per candidate signature

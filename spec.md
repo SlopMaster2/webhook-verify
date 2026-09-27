@@ -2514,7 +2514,10 @@ best-practices docs publish matching PHP/Python/Node recipes).
   **two** `X-Mollie-Signature` headers on each event (one per secret). This
   crate's single-header model reads the first value, so callers rotating
   secrets should keep the previous secret until the window closes and verify
-  against each — at least one of those `verify()` calls will pass.
+  against each — at least one of those `verify()` calls will pass. That
+  documented two-header shape is the **sole** exemption from the §4.4
+  duplicate-header check: see §4.4's "provider-sent duplicate headers" for what
+  the exemption does and does not change.
 - Scope carve-out: Mollie's *classic* payment webhooks (the
   `webhookUrl`-configured deliveries that POST a single `id=<resource_id>`
   form field) are **unsigned** and deliver no signature header; only
@@ -3070,6 +3073,35 @@ ambiguity).
    `timestamp_header`, and if the user's `signed_string` closure reads
    additional headers, duplicates in those are **not** detected (see
    `CustomScheme` docs) — nothing in the request enumerates them.
+   **Provider-sent duplicate headers.** One exception to "for built-in
+   providers the scan covers every header the scheme declares" is forced by a
+   provider's own signing machinery rather than chosen for convenience: during
+   its documented 24-hour secret-rotation window Mollie attaches **two**
+   `X-Mollie-Signature` headers with differing values to the *same* delivery
+   (one per active secret — <https://docs.mollie.com/reference/webhooks-new>,
+   "Updating a live signing secret"). Read by a first-match `HeaderMap`, that
+   is indistinguishable from a smuggled duplicate, so a literal reading of this
+   requirement makes the rotation window **unverifiable** through the adapters
+   and rejects every event for 24 hours after each secret roll. Mollie's
+   `X-Mollie-Signature` is therefore exempt from the scan, and it is the only
+   exemption:
+
+   - the exemption is a per-provider fact about what that provider itself sends,
+     so it is keyed on the provider and intersected with that provider's
+     `signature_header_names` — it never applies to another provider's header,
+     and a stale entry that names a header the scheme no longer reads is a test
+     failure rather than a silently-inert entry;
+   - it exempts the *ambiguity scan only*. `mollie::verify` still reads the
+     first header value, so the exemption does not turn `verify()` into an
+     accept-any-candidate check, and a forged value prepended to the rotation
+     pair is a denial, never a bypass. Mollie's second signature remains
+     reachable by the documented rotation workflow (call `verify()` once per
+     secret, §3 Mollie row), not by the exemption;
+   - every other provider keeps its candidates out of the scan's reach — a
+     comma-delimited list inside one value, or two *distinctly named* headers
+     (Box) — and adding a provider to the exemption list is a security
+     decision that requires a linked provider source in the code and a spec
+     update here.
 5. **No panics on attacker-controlled input.** Every parsing path
    (`base64::decode`, `hex::decode`, header splitting, integer parsing of
    timestamps) must return `Result`, not `unwrap()`/`expect()`, and this is

@@ -34,6 +34,14 @@
 //! secret until the window closes and verify against each — at least one of
 //! those `verify()` calls will pass (`spec.md` §3).
 //!
+//! Those two differing header lines are also why Mollie is the one provider
+//! exempt from the `spec.md` §4.4 duplicate-header check: the shape is the
+//! provider's own rotation mechanism, not a smuggled duplicate. The exemption
+//! covers the ambiguity *scan* only — it does not make `verify()` try the
+//! second value, and every other provider's header is still scanned in full
+//! (the exemptions are listed by `provider_sent_duplicate_headers` in
+//! `src/providers/mod.rs`).
+//!
 //! # Scope
 //!
 //! Only Mollie's next-gen signed webhooks are covered. Classic payment

@@ -14,7 +14,10 @@
 
 #[cfg(any(feature = "tower", feature = "actix"))]
 use super::VerifyError;
-use crate::providers::{CONTENTFUL_SIGNED_HEADERS_HEADER, Provider, signature_header_names};
+use crate::providers::{
+    CONTENTFUL_SIGNED_HEADERS_HEADER, Provider, provider_sent_duplicate_headers,
+    signature_header_names,
+};
 
 /// Raw, multi-value header access for the framework adapters.
 ///
@@ -120,7 +123,9 @@ pub(crate) fn has_conflicting_duplicates<H: MultiValueHeaders + ?Sized>(
 /// skipped for the other. It has two halves:
 ///
 /// 1. the **static** scan over [`signature_header_names`], which covers every
-///    header a provider's scheme declares for all built-in providers; and
+///    header a provider's scheme declares for all built-in providers, minus any
+///    header the provider itself sends duplicated
+///    ([`provider_sent_duplicate_headers`] — today Mollie's rotation window);
 /// 2. a **dynamic** scan for [`Provider::Contentful`], whose
 ///    `x-contentful-signed-headers` value is self-describing — the headers it
 ///    names are folded into the canonical string, so a conflicting duplicate of
@@ -138,9 +143,15 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
     headers: &H,
     provider: &Provider,
 ) -> Option<&'static str> {
+    // The provider-sent exemptions are intersected with the provider's own
+    // header list rather than trusted as-is, so an entry naming a header the
+    // scheme no longer reads cannot silently disable a scan that is still
+    // needed.
+    let sent_by_provider = provider_sent_duplicate_headers(provider);
     signature_header_names(provider)
         .iter()
         .copied()
+        .filter(|name| !sent_by_provider.contains(name))
         .find(|name| has_conflicting_duplicates(headers, name))
         .or_else(|| dynamically_named_ambiguity(headers, provider))
 }
@@ -230,6 +241,14 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
 /// [`Provider::Custom`] the scan covers only `signature_header` and
 /// `timestamp_header`, and duplicates in any additional header a
 /// `signed_string` closure reads are not detected.
+///
+/// One header is exempt for the opposite reason — the **provider** sends it
+/// twice on purpose: [`Provider::Mollie`]'s `X-Mollie-Signature` arrives as two
+/// header lines with different values for the 24 hours after a signing-secret
+/// rotation (<https://docs.mollie.com/reference/webhooks-new>). Rejecting the
+/// provider's own documented shape would make Mollie's rotation window unusable
+/// through this check, so it is not reported as ambiguous. `verify()` still
+/// reads the first value and verifies it, unchanged.
 #[cfg(feature = "http")]
 #[must_use]
 pub fn ambiguous_signature_header(
@@ -604,6 +623,233 @@ mod tests {
             assert_eq!(
                 find_ambiguous_signature_header(&github, &Provider::GitHub),
                 None
+            );
+        }
+    }
+
+    /// Mollie is the one provider that sends its own signature header twice
+    /// (issue #245), so the scan must not read the provider's documented
+    /// rotation shape as a smuggled duplicate — while every other provider
+    /// stays fully scanned.
+    #[cfg(feature = "http")]
+    mod provider_sent_duplicates {
+        use super::super::find_ambiguous_signature_header;
+        #[cfg(not(feature = "std"))]
+        use crate::test_helpers::*;
+        use crate::{Provider, Secret, ambiguous_signature_header, verify};
+
+        /// Spelled as on the wire, like every other request fixture in this
+        /// module: a rename of the provider's own constant is then a test
+        /// failure rather than a scan that quietly follows a name no request
+        /// carries.
+        const MOLLIE_SIGNATURE_HEADER: &str = "X-Mollie-Signature";
+        /// Box's primary signature header, spelled as on the wire (see above).
+        const BOX_PRIMARY_SIGNATURE_HEADER: &str = "BOX-SIGNATURE-PRIMARY";
+        const FORGED: &str =
+            "sha256=0000000000000000000000000000000000000000000000000000000000000000";
+        const BODY: &[u8] = b"{\"resource\":\"event\",\"id\":\"event_GvJ8WHrp5isUdRub9CJyH\"}";
+        const LIVE_SECRET: &str = "current-signing-secret";
+        const PREVIOUS_SECRET: &str = "previous-signing-secret";
+
+        /// Mollie's documented signing construction (`spec.md` §3): the
+        /// `sha256=`-prefixed hex HMAC-SHA256 of the raw body. Computed here
+        /// rather than hardcoded so the fixture and the assertion about which
+        /// value `verify()` reads cannot drift apart.
+        fn mollie_signature(secret: &str, body: &[u8]) -> String {
+            use hmac::{Hmac, KeyInit, Mac};
+            use sha2::Sha256;
+
+            let mut mac = match Hmac::<Sha256>::new_from_slice(secret.as_bytes()) {
+                Ok(mac) => mac,
+                // Unreachable for a constant test secret (HMAC accepts
+                // arbitrary-length keys); kept panic-free to honor the
+                // crate-wide clippy deny on unwrap/expect.
+                Err(_) => panic!("HMAC-SHA256 with a constant test secret cannot fail"),
+            };
+            mac.update(body);
+            format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+        }
+
+        /// The two header values Mollie sends for 24 hours after a secret roll,
+        /// verbatim in shape from
+        /// <https://docs.mollie.com/reference/webhooks-new> ("Updating a live
+        /// signing secret"): two `X-Mollie-Signature` lines, one per active
+        /// secret, with different values.
+        fn rotation_window() -> (String, String) {
+            (
+                mollie_signature(LIVE_SECRET, BODY),
+                mollie_signature(PREVIOUS_SECRET, BODY),
+            )
+        }
+
+        /// A single-valued Mollie delivery.
+        fn single_valued(value: &str) -> ::http::HeaderMap {
+            let mut headers = ::http::HeaderMap::new();
+            headers.insert(
+                MOLLIE_SIGNATURE_HEADER,
+                ::http::HeaderValue::from_str(value)
+                    .unwrap_or_else(|_| panic!("a computed signature is a valid header value")),
+            );
+            headers
+        }
+
+        /// Mollie's rotation window as an `http::HeaderMap`, in the order the
+        /// provider sends it.
+        fn rotation_window_headers() -> ::http::HeaderMap {
+            let (live, previous) = rotation_window();
+            let mut headers = ::http::HeaderMap::new();
+            for value in [live, previous] {
+                headers.append(
+                    MOLLIE_SIGNATURE_HEADER,
+                    ::http::HeaderValue::from_str(&value)
+                        .unwrap_or_else(|_| panic!("a computed signature is a valid header value")),
+                );
+            }
+            headers
+        }
+
+        #[test]
+        fn mollies_rotation_window_is_not_ambiguous() {
+            // The reported bug: this request is exactly what Mollie emits for
+            // 24 hours after a secret roll, and the scan used to report
+            // `Some("X-Mollie-Signature")`, so both adapters answered a
+            // body-less 400 and a `http`-feature caller was told to reject —
+            // making the rotation workflow `mollie::verify`'s docs promise
+            // unreachable through any of them.
+            let headers = rotation_window_headers();
+            assert_eq!(
+                find_ambiguous_signature_header(&headers, &Provider::Mollie),
+                None
+            );
+            assert_eq!(ambiguous_signature_header(Provider::Mollie, &headers), None);
+        }
+
+        #[test]
+        fn mollies_rotation_window_reaches_verify_and_the_first_value_is_the_one_checked() {
+            // The exemption only restores the documented *flow*; it does not
+            // loosen what `verify()` accepts. `mollie::verify` reads the first
+            // header value, so the documented workflow is "keep the previous
+            // secret until the window closes and verify against each":
+            //
+            // * the first value is `TEST_SECRET`'s genuine signature, so it
+            //   verifies against that secret;
+            // * the second value is a different secret's signature, so it does
+            //   *not* verify against it — the second header is never silently
+            //   accepted as if it were the first.
+            let headers = rotation_window_headers();
+            assert_eq!(
+                verify(
+                    Provider::Mollie,
+                    &headers,
+                    BODY,
+                    &Secret::new(LIVE_SECRET),
+                    Default::default(),
+                ),
+                Ok(()),
+                "the first rotation signature is the caller's key and must verify",
+            );
+            assert_eq!(
+                verify(
+                    Provider::Mollie,
+                    &headers,
+                    BODY,
+                    &Secret::new(PREVIOUS_SECRET),
+                    Default::default(),
+                ),
+                Err(crate::VerifyError::SignatureMismatch),
+                "the second rotation signature must not verify against the first \
+                 secret; `verify()` still reads only the first value"
+            );
+        }
+
+        #[test]
+        fn a_forged_value_appended_to_mollie_changes_nothing() {
+            // The scan cannot tell Mollie's own second signature from an
+            // appended one, so the exemption does not stop a third line. What
+            // matters is that nothing is *accepted* on account of it: `verify()`
+            // reads the first value regardless, so an appended forgery changes
+            // the response only when the genuine first value is absent.
+            let (live, _) = rotation_window();
+            let mut headers = single_valued(&live);
+            headers.append(
+                MOLLIE_SIGNATURE_HEADER,
+                ::http::HeaderValue::from_static(FORGED),
+            );
+            assert_eq!(ambiguous_signature_header(Provider::Mollie, &headers), None);
+            assert_eq!(
+                verify(
+                    Provider::Mollie,
+                    &headers,
+                    BODY,
+                    &Secret::new(LIVE_SECRET),
+                    Default::default(),
+                ),
+                Ok(()),
+            );
+
+            // Prepending a forgery is a denial, never a bypass: the verifier
+            // reads the forged first value and rejects the delivery.
+            let mut prepended = ::http::HeaderMap::new();
+            prepended.append(
+                MOLLIE_SIGNATURE_HEADER,
+                ::http::HeaderValue::from_static(FORGED),
+            );
+            prepended.append(
+                MOLLIE_SIGNATURE_HEADER,
+                ::http::HeaderValue::from_str(&live)
+                    .unwrap_or_else(|_| panic!("a computed signature is a valid header value")),
+            );
+            assert_eq!(
+                verify(
+                    Provider::Mollie,
+                    &prepended,
+                    BODY,
+                    &Secret::new(LIVE_SECRET),
+                    Default::default(),
+                ),
+                Err(crate::VerifyError::SignatureMismatch),
+            );
+        }
+
+        #[test]
+        fn the_exemption_is_scoped_to_mollie_and_does_not_leak_to_other_providers() {
+            // A different provider carrying the very same duplicate shape is
+            // still rejected — the exemption is a per-provider fact about what
+            // Mollie itself sends, not a general "duplicates are fine" rule.
+            let mut github = ::http::HeaderMap::new();
+            github.append(
+                "x-hub-signature-256",
+                ::http::HeaderValue::from_static(
+                    "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17",
+                ),
+            );
+            github.append(
+                "x-hub-signature-256",
+                ::http::HeaderValue::from_static(FORGED),
+            );
+            assert_eq!(
+                find_ambiguous_signature_header(&github, &Provider::GitHub),
+                Some("X-Hub-Signature-256")
+            );
+            assert_eq!(
+                ambiguous_signature_header(Provider::GitHub, &github),
+                Some("X-Hub-Signature-256"),
+            );
+
+            // Nor does it leak across providers *within* Mollie's own header
+            // name: a Box delivery is scanned in full.
+            let mut box_headers = ::http::HeaderMap::new();
+            box_headers.append(
+                BOX_PRIMARY_SIGNATURE_HEADER,
+                ::http::HeaderValue::from_static("sha256=4a4c6f3ed4d15fee87ad44e07a7fa9b8"),
+            );
+            box_headers.append(
+                BOX_PRIMARY_SIGNATURE_HEADER,
+                ::http::HeaderValue::from_static(FORGED),
+            );
+            assert_eq!(
+                find_ambiguous_signature_header(&box_headers, &Provider::Box),
+                Some(BOX_PRIMARY_SIGNATURE_HEADER)
             );
         }
     }
