@@ -533,7 +533,10 @@ before the body is read, but verification requires those bytes.
 
 ## Security notes
 
-- All signature comparisons use constant-time equality (`subtle::ConstantTimeEq`).
+- All signature comparisons use constant-time equality (`subtle::ConstantTimeEq`),
+  constant-time across candidates of the expected length. A candidate of a
+  different length is rejected without a byte-by-byte comparison; that length is
+  public information, so nothing secret leaks.
 - A dudect-style statistical timing assertion on the comparison step is
   provided (spec §5.7) but `#[ignore]`d due to runner noise; run it locally
   with `cargo test --release --all-features -- constant_time_comparison --ignored`.

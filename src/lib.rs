@@ -166,7 +166,10 @@
 //!
 //! ## Security properties
 //!
-//! - All signature comparisons are constant-time ([`subtle::ConstantTimeEq`]).
+//! - All signature comparisons use [`subtle::ConstantTimeEq`], constant-time
+//!   across candidates of the expected length. A candidate of a different
+//!   length is rejected without a byte-by-byte comparison; that length is
+//!   public information, so nothing secret leaks (issue #294).
 //! - Bodies are hashed exactly as received; never re-encoded.
 //! - A signature header that arrives twice with *differing* values is
 //!   ambiguous and must be rejected before [`verify`] is trusted (spec §4.4).

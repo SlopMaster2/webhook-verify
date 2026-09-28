@@ -3103,7 +3103,14 @@ ambiguity).
    through `core::crypto::verify_hmac_sha256_any`, which takes the caller's
    already-split candidates and accumulates the per-candidate matches without an
    early exit, so which candidate matched — and whether any did — is not
-   observable in the comparison's timing.
+   observable in the comparison's timing. `subtle`'s slice implementation
+   short-circuits when the two slices differ in *length*, so "constant-time"
+   means constant-time across candidates **of the expected length**: a
+   wrong-length candidate is rejected without a byte-by-byte comparison. That
+   length is public information (it is the length of the caller's own
+   signature), so the early return leaks nothing secret, and no implementation
+   needs — or should add — a length pre-check in front of the comparison
+   (issue #294).
 2. **Verify against raw bytes only.** No implementation may re-serialize,
    re-encode, or normalize the body before hashing. The `raw_body: &[u8]`
    passed in is hashed exactly as received.
