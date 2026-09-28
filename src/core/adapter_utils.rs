@@ -148,11 +148,32 @@ where
 /// different bytes, and opaque-byte values that could never parse as a
 /// signature are still ambiguous when duplicated with differing bytes.
 ///
-/// Static header-name constants always parse, so the unparseable-name arm is
-/// unreachable for the names `signature_header_names` returns and simply fails
-/// closed (reported as ambiguous). It *is* reachable for the names a request
-/// supplies (Contentful's signed-header list), and failing closed there is
-/// still the only safe answer: such a name can never be verified against.
+/// An unparseable name means the scan cannot see *any* value for it, so it
+/// fails closed (reported as ambiguous) rather than skipping the name — a name
+/// no header map can represent can never be verified against either, and
+/// "nothing to scan" would read as "no duplicate". The arm is reachable from
+/// two directions, and only one of them is a bug in this crate:
+///
+/// - names a *request* supplies (Contentful's signed-header list): attacker-
+///   reachable, so failing closed is the only safe answer, and it is what
+///   `unparseable_scan_name_reads_as_ambiguous` pins;
+/// - names a *caller* supplies to a [`CustomScheme`](crate::CustomScheme),
+///   which `signature_header_names` returns verbatim: a typo, a space, or a
+///   stray control byte in a `signature_header` / `timestamp_header` therefore
+///   makes the scan report that header ambiguous for **every** request, while
+///   `verify()` on a pair table still reads the same name (the crate's own
+///   `HeaderMap` impls compare names as plain case-insensitive strings). That
+///   is fail-closed and deliberate — `verify()` must not be the weaker of the
+///   two paths — but it is an operator footgun, so it is documented on
+///   `CustomScheme` and pinned by
+///   `custom::tests::an_unparseable_declared_header_name_is_always_ambiguous`.
+///
+/// For every *built-in* provider the names are in-crate constants, so the arm
+/// is statically unreachable. What keeps it that way is
+/// `providers::tests::signature_header_names_are_valid_http_field_names`, which
+/// cannot cover `Provider::Custom` (not name-constructible, so absent from
+/// `provider_list()`) — hence the documentation rather than a guard for that
+/// one.
 ///
 /// `pub(crate)` so each adapter's tests can pin the behavior of *its own*
 /// `MultiValueHeaders` impl (the two `http` versions) against this predicate,
@@ -295,7 +316,11 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
 /// [`CustomScheme`](crate::CustomScheme) is unchanged: for
 /// [`Provider::Custom`] the scan covers only `signature_header` and
 /// `timestamp_header`, and duplicates in any additional header a
-/// `signed_string` closure reads are not detected.
+/// `signed_string` closure reads are not detected. Note the second consequence
+/// of those two names being caller-typed rather than in-crate constants: a name
+/// that is not a valid HTTP field name (RFC 9110 §5.1) cannot be looked up, so
+/// it is reported as ambiguous on *every* request — see
+/// [`CustomScheme::signature_header`](crate::CustomScheme::signature_header).
 ///
 /// One header is exempt for the opposite reason — the **provider** sends it
 /// twice on purpose: [`Provider::Mollie`]'s `X-Mollie-Signature` arrives as two

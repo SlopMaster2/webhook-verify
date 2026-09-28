@@ -28,6 +28,20 @@
 //! *additional* headers, duplicates in those are **not** detected. See the
 //! [`CustomScheme`] struct docs for details.
 //!
+//! **Declared header names must be valid HTTP field names:** a
+//! `signature_header` or `timestamp_header` containing a space, a stray
+//! control byte, or a non-ASCII character is not a `field-name = token`
+//! (RFC 9110 §5.1), so the ambiguity scan cannot look it up and reports it as
+//! ambiguous on **every** request — a `400` with an empty body through the
+//! adapters, and a "reject this request" verdict for a caller driving
+//! [`ambiguous_signature_header_in`](crate::ambiguous_signature_header_in)
+//! themselves, including for a header table that holds no duplicate at all.
+//! Meanwhile `verify()` called on a pair table still *reads* the same name,
+//! because the crate's own `HeaderMap` impls compare names as plain
+//! case-insensitive strings. Fail-closed is the right direction, so this is
+//! documented rather than changed; see
+//! [`CustomScheme::signature_header`].
+//!
 //! **Replay-check caveat:** Setting `timestamp_header` runs the shared replay
 //! window (`|now - t| <= max_age`) against whatever the header says — but the
 //! check only *binds* when `signed_string` copies that value into the bytes
@@ -218,6 +232,13 @@ impl fmt::Display for TimestampUnit {
 /// either limit `signed_string` to the two declared headers, or accept that
 /// the adapter cannot guard against proxy disagreement on undeclared headers.
 ///
+/// The second way the scan can reject a delivery the scheme would otherwise
+/// accept is a declared name that is not a valid HTTP field name: unlike every
+/// built-in provider, these two names are caller-typed and nothing validates
+/// them, so a space or a stray control byte makes the scan report the header as
+/// ambiguous for *every* request while `verify()` on a pair table still reads
+/// it. See [`signature_header`](Self::signature_header).
+///
 /// [`PartialEq`] compares the declarative configuration only; `signed_string`
 /// is excluded — function pointers have no meaningful or reliable equality.
 #[must_use]
@@ -226,6 +247,30 @@ pub struct CustomScheme {
     /// HMAC hash algorithm the sender uses.
     pub hash: HashAlg,
     /// Name of the header carrying the encoded signature.
+    ///
+    /// Must be a valid HTTP field name — `field-name = token`, RFC 9110 §5.1.
+    /// Every built-in provider's header names are in-crate constants guarded
+    /// by `providers::tests::signature_header_names_are_valid_http_field_names`,
+    /// but this one is typed by the caller and nothing can check it before use.
+    ///
+    /// A name that is **not** a valid field name (a space, a stray control
+    /// byte, a non-ASCII character) makes the `spec.md` §4.4 ambiguity scan
+    /// report this header as ambiguous on *every* request — it cannot look up a
+    /// name it cannot represent, and failing closed is the only safe answer,
+    /// since a name no header map can hold can never be verified against
+    /// either. The symptom is a `400` with an empty body from the `tower`/
+    /// `actix` adapters, or a "reject this request" verdict for a caller
+    /// running
+    /// [`ambiguous_signature_header_in`](crate::ambiguous_signature_header_in)
+    /// — including for a table with no duplicate in it at all. `verify()` on a
+    /// pair table still *reads* the same name (the crate's `HeaderMap` impls
+    /// compare names as plain case-insensitive strings), so a scheme with a
+    /// malformed name is one where the ambiguity check rejects what `verify()`
+    /// would have accepted. `Provider::Custom` is deliberately absent from the
+    /// guard test (it is not name-constructible), so nothing but this note
+    /// stands between a typo and a total, undiagnosable outage; the fail-closed
+    /// direction is pinned by
+    /// `tests::an_unparseable_declared_header_name_is_always_ambiguous`.
     pub signature_header: &'static str,
     /// Name of the header carrying the timestamp, when the sender signs one.
     /// Setting this enables replay protection with the shared symmetric
@@ -240,6 +285,10 @@ pub struct CustomScheme {
     /// **The replay check only binds when `signed_string` copies this
     /// header's value into the signed bytes** — see
     /// [`CustomScheme::with_timestamp_header`].
+    ///
+    /// Subject to the same "must be a valid HTTP field name" requirement as
+    /// [`signature_header`](Self::signature_header), with the same
+    /// reject-everything consequence when it is not.
     pub timestamp_header: Option<&'static str>,
     /// Unit of [`timestamp_header`](Self::timestamp_header)'s value.
     ///
@@ -1660,5 +1709,145 @@ mod tests {
         let c = CustomScheme { prefix: None, ..a };
         assert_ne!(a, c, "prefix participates in equality");
         assert_ne!(hash_of(&a), hash_of(&c), "prefix participates in Hash");
+    }
+
+    /// A caller-typed header name that is not a valid HTTP field name must
+    /// read as *ambiguous on every request*, not as "nothing to scan"
+    /// (issue #286).
+    ///
+    /// `signature_header_names` returns `CustomScheme`'s two declared names
+    /// verbatim, and unlike every built-in provider's in-crate constants no
+    /// guard can check them before use — `Provider::Custom` is deliberately
+    /// absent from `provider_list()`. The scan's answer for a name it cannot
+    /// represent has to stay "ambiguous": a name no header map can hold can
+    /// never be proven unambiguous, and returning `false` would be the
+    /// tempting-but-wrong "fix" that turns a typo into a silently disabled
+    /// §4.4 check.
+    ///
+    /// Pinned in both directions, and against the strongest form of the wrong
+    /// behavior: the verdict holds for a completely **empty** header table,
+    /// where there is provably no duplicate of anything. The last assertion is
+    /// the operator-visible tell — `verify()` on a pair table still *reads* the
+    /// malformed name and reaches the signature comparison, so the scan is the
+    /// stricter of the two paths. That divergence is documented on
+    /// [`CustomScheme::signature_header`]; this test keeps it from being
+    /// "fixed" out from under that note.
+    #[test]
+    fn an_unparseable_declared_header_name_is_always_ambiguous() {
+        use crate::ambiguous_signature_header_in;
+        use crate::core::headers::is_valid_field_name;
+
+        // A space is not a `tchar`, so this is not a `field-name = token`
+        // (RFC 9110 §5.1) and no header map can hold it.
+        const MALFORMED: &str = "X-Bad Name";
+        assert!(!is_valid_field_name(MALFORMED));
+
+        let scheme = CustomScheme::new(
+            HashAlg::Sha256,
+            MALFORMED,
+            Encoding::Hex,
+            |_headers, raw_body| raw_body.to_vec(),
+        );
+
+        // Even with nothing in the table at all: there is no duplicate here, and
+        // the answer is still "ambiguous", because "cannot look the name up" is
+        // not evidence of "no duplicate".
+        let empty: Vec<(&str, &str)> = vec![];
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(scheme), &empty),
+            Some(MALFORMED)
+        );
+
+        // And the same scheme over a single-valued table naming the header
+        // once — still ambiguous, not a pass.
+        let single: Vec<(&str, &str)> = vec![(MALFORMED, "abcd")];
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(scheme), &single),
+            Some(MALFORMED)
+        );
+
+        // The control: the identical scheme with a *valid* name over the
+        // identical single-valued table is unambiguous, so the assertions above
+        // are about the name and not about the table or the scheme shape.
+        let valid = CustomScheme {
+            signature_header: "X-Bad-Name",
+            ..scheme
+        };
+        assert!(is_valid_field_name("X-Bad-Name"));
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(valid), &single),
+            None
+        );
+
+        // The `verify()` side of the documented divergence: a pair-table
+        // `HeaderMap` compares names as plain case-insensitive strings, so it
+        // finds the malformed name and gets as far as the signature check. The
+        // `BadEncoding` here is the two-byte `abcd` failing the 32-byte digest
+        // length — proof the lookup happened, not a rejection of the name.
+        assert_eq!(
+            verify_custom(
+                &scheme,
+                &single,
+                b"payload",
+                "shared-secret",
+                Default::default()
+            ),
+            Err(VerifyError::BadEncoding {
+                reason: "signature length does not match the hash algorithm's digest size"
+            }),
+            "`verify()` reads the malformed name; only the ambiguity scan refuses to"
+        );
+    }
+
+    /// A malformed `timestamp_header` is scanned on the same terms as a
+    /// malformed `signature_header` (issue #286).
+    ///
+    /// The two declared names reach the scan through the same
+    /// `signature_header_names` arm, and the scan reports the *first* ambiguous
+    /// entry in list order, so a mistyped timestamp name has to be reported on
+    /// its own terms — not masked by, and not masking, a well-formed signature
+    /// name.
+    #[test]
+    fn an_unparseable_timestamp_header_name_is_also_always_ambiguous() {
+        use crate::ambiguous_signature_header_in;
+
+        // A tab is not a `tchar` (RFC 9110 §5.1), so this cannot be a
+        // `field-name`. The signature name is deliberately well-formed and
+        // single-valued, so the malformed timestamp name is the only thing the
+        // scan can report.
+        let scheme = CustomScheme {
+            timestamp_header: Some("X-Ts\t"),
+            ..CustomScheme::new(
+                HashAlg::Sha256,
+                "X-Webhook-Sig",
+                Encoding::Hex,
+                |_headers, raw_body| raw_body.to_vec(),
+            )
+        };
+
+        let single: Vec<(&str, &str)> = vec![("X-Webhook-Sig", "abcd")];
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(scheme), &single),
+            Some("X-Ts\t")
+        );
+
+        // And with nothing in the table at all, still the timestamp name.
+        let empty: Vec<(&str, &str)> = vec![];
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(scheme), &empty),
+            Some("X-Ts\t")
+        );
+
+        // The control: the same scheme with a valid timestamp name over the same
+        // single-valued table is unambiguous, so the two assertions above are
+        // about the name and not about the table or the scheme shape.
+        let valid = CustomScheme {
+            timestamp_header: Some("X-Ts"),
+            ..scheme
+        };
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(valid), &single),
+            None
+        );
     }
 }

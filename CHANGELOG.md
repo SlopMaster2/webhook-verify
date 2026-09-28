@@ -191,6 +191,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **a `CustomScheme` header name that is not a valid HTTP field name is
+  documented as a fail-closed outage, and pinned** (issue #286). Every built-in
+  provider's header names are in-crate constants, and
+  `providers::tests::signature_header_names_are_valid_http_field_names` is what
+  keeps them parseable — a typo there would make the §4.4 ambiguity scan report
+  that provider's header as ambiguous on *every* request, which is the correct
+  fail-closed answer but a total, undiagnosable outage in the field. That guard
+  cannot cover `Provider::Custom`: its two declared names are
+  caller-typed (`signature_header`, `timestamp_header`) and the variant is
+  deliberately absent from `provider_list()`, so nothing checked the name that
+  the scan then refuses to look up. The symptom was undocumented on every
+  surface an operator would reach for, and
+  `core::adapter_utils::has_conflicting_duplicates`'s doc claimed the
+  unparseable-name arm was "unreachable for the names
+  `signature_header_names` returns" — false, because that function returns a
+  `CustomScheme`'s names verbatim.
+
+  The behavior is unchanged and deliberately so: an unparseable name fails
+  closed, and loosening it to "skip the name" would be the wrong direction
+  (it trades a loud rejection for a silently disabled check). What this adds is
+  the note — on `CustomScheme::signature_header`,
+  `CustomScheme::timestamp_header`, the struct-level ambiguity caveat, the
+  module docs, `ambiguous_signature_header`, and `spec.md` §4.4 — naming the
+  shapes that cause it (a space, a stray control byte, a non-ASCII character),
+  the `400`-with-empty-body / reject-everything symptom, and the tell that makes
+  it diagnosable: `verify()` on a pair table still *reads* the malformed name
+  (the crate's `HeaderMap` impls compare names as plain case-insensitive
+  strings), so the scan is the stricter of the two paths. Two tests
+  (`an_unparseable_declared_header_name_is_always_ambiguous`,
+  `an_unparseable_timestamp_header_name_is_also_always_ambiguous`) pin the
+  fail-closed direction against its strongest form — the verdict holds for an
+  *empty* header table, where no duplicate provably exists — with a valid-name
+  control so the assertions are about the name and not the table, and a
+  companion assertion on the `verify()` side of the divergence. Docs, doc
+  comments, and tests only: no API change, no provider behavior change, no new
+  dependency.
+
 - **both front-door examples now run the §4.4 ambiguity check** (issue #284).
   `README.md`'s first code block and the crate docs' headline doctest are the
   two snippets a new reader copies, and both hand `verify()` a
