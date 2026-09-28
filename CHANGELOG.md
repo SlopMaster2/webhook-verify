@@ -361,8 +361,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Nothing compiles a README `toml` fence, so the bump could not have failed
   the build and the drift survived a green suite — the same failure shape as
-  the stale `std` feature comment in #262. The snippets are corrected, and a
-  new guard test (`docs::readme_dependency_snippets_resolve_to_the_current_release`)
+  the stale `std` feature comment #264 fixed. The snippets are corrected, and
+  a new guard test (`docs::readme_dependency_snippets_resolve_to_the_current_release`)
   reads the `[package]` version out of the manifest and requires every
   `webhook-verify` dependency line in `README.md`, in both the bare and table
   spellings, to name that release line and not a patch newer than the

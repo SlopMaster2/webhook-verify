@@ -321,7 +321,7 @@ mod docs {
     ///
     /// Nothing compiles a README `toml` fence, so the bump to 0.2.0 could not
     /// have failed the build and the drift survived a green suite — the same
-    /// shape as the stale `std` comment in #262. Hence this guard.
+    /// shape as the stale `std` feature comment #264 fixed. Hence this guard.
     #[test]
     fn readme_dependency_snippets_resolve_to_the_current_release() {
         const README: &str = include_str!("../README.md");
