@@ -1,6 +1,11 @@
 [package]
 name = "webhook-verify"
-version = "0.1.0"
+# 0.2.0 absorbs the `CustomScheme::timestamp_unit` source break (#273/#274):
+# that struct has public fields, so adding one is a compile-time break for
+# downstream struct-literal construction, and a pre-1.0 crate takes such a
+# break in a *minor* bump (Cargo's rule: for `0.y.z`, only changes in `y` are
+# the compatibility boundary). See CHANGELOG.md and issue #276.
+version = "0.2.0"
 edition = "2024"
 # First release with edition 2024 support; verified by the CI matrix.
 rust-version = "1.85"
@@ -38,6 +43,26 @@ exclude = [
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+# `cargo semver-checks` lint configuration for the blocking `semver-checks` CI
+# job. The baseline is the newest published version (0.1.0, 2026-09-08), so the
+# check is a real gate, not the no-baseline no-op it was before that release.
+#
+# `constructible_struct_adds_field` fires when a pub field is added to a pub
+# struct that downstream code can construct with a literal — `CustomScheme` is
+# exactly that, and `timestamp_unit` (#273) is what tripped it (issue #276). The
+# lint's default `required-update = "major"` does not fit a pre-1.0 crate: per
+# the Cargo semver reference, for a `0.y.z` release "changes in y" *are* the
+# major-release boundary and `z` is minor, so the field addition requires a
+# minor bump (0.1.x -> 0.2.0), not a major one. `level = "deny"` is kept, so a
+# future field added without a minor bump still fails the job.
+#
+# Re-evaluate at 1.0: the left-most non-zero component becomes `x` and every
+# component below it is then patch-compatible, so this entry must be deleted
+# (or the field addition paired with a `#[non_exhaustive]` + `Default`
+# construction path) to make the lint demand a major bump again.
+[package.metadata.cargo-semver-checks.lints]
+constructible_struct_adds_field = { level = "deny", required-update = "minor" }
 
 [dependencies]
 actix-web = { version = "4", optional = true, default-features = false }

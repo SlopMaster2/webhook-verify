@@ -124,10 +124,18 @@ jobs:
   semver-checks:
     name: semver-checks
     runs-on: ubuntu-latest
-    # Informational until the first version publishes: cargo-semver-checks has
-    # no baseline to compare against for an unpublished crate. Flip this to
-    # blocking as part of the first release.
-    continue-on-error: true
+    # Blocking as of issue #276. This job was informational with the comment
+    # "no baseline until the first version publishes", but 0.1.0 *is* published
+    # (crates.io, 2026-09-08), so the baseline exists and the job has been a
+    # real check whose result gated nothing: #274 added a pub field to the
+    # exhaustively constructible `CustomScheme` and merged with the job red. The
+    # break is deliberate and pre-1.0, so it lands in 0.2.0 (a minor bump, which
+    # is this crate's compatibility boundary) and the requirement is recorded in
+    # `Cargo.toml`'s `[package.metadata.cargo-semver-checks.lints]`.
+    # A newer cargo-semver-checks release can introduce a lint that trips on
+    # unchanged code; that is a tripwire to triage — allow the specific lint
+    # with a justification rather than restoring `continue-on-error`, the way
+    # `.cargo/audit.toml` handles the dependency advisories.
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master

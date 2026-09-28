@@ -345,6 +345,16 @@ available since the fields are public). The declarative fields participate in
 `PartialEq`/`Hash`; `signed_string` is excluded (function pointers have no
 meaningful equality).
 
+**Construction compatibility.** The struct is not `#[non_exhaustive]`, so a
+struct literal must name every field and adding one is a source-level break for
+that form (`timestamp_unit`, released in 0.2.0, was the first). `new(_)` plus
+the builders are the forward-compatible path: they fill in each new field's
+`Default`. The break is bounded by the crate's version line rather than by an
+API freeze — while the crate is pre-1.0 it may break in a minor bump, which is
+what the `semver-checks` CI job enforces for the
+`constructible_struct_adds_field` lint
+(`Cargo.toml`'s `[package.metadata.cargo-semver-checks.lints]`, issue #276).
+
 This lets callers cover a long-tail provider today without waiting on a
 crate release, and it's how new built-in providers get prototyped before
 being promoted into the `Provider` enum.

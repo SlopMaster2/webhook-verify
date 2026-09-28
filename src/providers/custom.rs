@@ -197,6 +197,19 @@ impl fmt::Display for TimestampUnit {
 /// All comparisons are constant-time and all decoding fails closed, exactly
 /// as for built-in providers.
 ///
+/// **Construction compatibility.** This struct is not
+/// `#[non_exhaustive]` and its fields are public, so a struct *literal* has to
+/// name every field: adding a field (as `timestamp_unit` did in 0.2.0) is a
+/// source break for that form. [`CustomScheme::new`] plus the `with_*` builders
+/// keep compiling across field additions because they fill in each new field's
+/// `Default`, so prefer them in code you cannot edit in lockstep with a
+/// release. Migrating a literal is one line — add
+/// `timestamp_unit: TimestampUnit::Seconds` to keep the pre-0.2.0 behavior.
+/// Whether such a break may ship is bounded by this crate's version line: a
+/// pre-1.0 release may break in a *minor* bump, and `cargo semver-checks` (CI
+/// job `semver-checks`) enforces exactly that for
+/// `constructible_struct_adds_field`.
+///
 /// **Ambiguity-check caveat.** Framework adapters (`tower`, `actix`) reject
 /// duplicate headers whose values differ — but they only scan the headers
 /// listed by the crate's adapter ambiguity check, which for `Custom` is

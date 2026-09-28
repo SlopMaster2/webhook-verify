@@ -28,12 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TimestampUnit::Seconds | Millis` is a new declarative config enum alongside
   `HashAlg` and `Encoding`; `CustomScheme::timestamp_unit` defaults to
   `Seconds` via the enum's `Default`, so **every existing scheme keeps its
-  exact current behavior** and no release-candidate migration is needed.
-  `Millis` routes through `parse_millis` and floors to whole seconds before the
-  comparison, exactly as the six built-ins do. The unit participates in
-  `PartialEq`/`Hash` with the other declarative fields, `Display` spells out
-  only the non-default unit (so an existing seconds scheme's rendering is
-  byte-identical), and the unit is inert when `timestamp_header` is `None`.
+  exact current runtime behavior** — a scheme built from a 0.1.x literal
+  verifies and replay-checks exactly as it did. `Millis` routes through
+  `parse_millis` and floors to whole seconds before the comparison, exactly as
+  the six built-ins do. The unit participates in `PartialEq`/`Hash` with the
+  other declarative fields, `Display` spells out only the non-default unit (so
+  an existing seconds scheme's rendering is byte-identical), and the unit is
+  inert when `timestamp_header` is `None`.
 
   The unit is *declared* rather than sniffed, which is why this is a field
   rather than a heuristic: both units parse as a plain digit run, so a
@@ -49,12 +50,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a timestamp header, the `Default`, `PartialEq`/`Hash`, and both
   `Display` impls.
 
-  Adding a field to a struct with public fields is a source-level break for
-  downstream struct-literal construction. Accepted at 0.1.0: the crate is
-  unpublished, its `semver-checks` CI job has no baseline yet
-  (`continue-on-error`), and `CustomScheme::new(_)` plus the three builders
-  remain the ergonomic path. `Provider::Custom`'s `Display` and the
+  **Breaking: struct-literal construction needs one added line.** `CustomScheme`
+  has public fields and is not `#[non_exhaustive]`, so a downstream crate that
+  builds a scheme with a struct *literal* must now name the new field:
+
+  ```rust
+  // 0.1.x
+  let scheme = CustomScheme {
+      hash: HashAlg::Sha256,
+      signature_header: "X-Webhook-Sig",
+      timestamp_header: None,
+      encoding: Encoding::Hex,
+      prefix: None,
+      signed_string: |_headers, raw_body| raw_body.to_vec(),
+  };
+  // 0.2.0
+  let scheme = CustomScheme {
+      hash: HashAlg::Sha256,
+      signature_header: "X-Webhook-Sig",
+      timestamp_header: None,
+      timestamp_unit: TimestampUnit::Seconds, // the new field; Seconds is 0.1.x behavior
+      encoding: Encoding::Hex,
+      prefix: None,
+      signed_string: |_headers, raw_body| raw_body.to_vec(),
+  };
+  ```
+
+  This ships in **0.2.0** rather than 0.1.1: for a pre-1.0 crate the *minor*
+  is the compatibility boundary (Cargo's semver reference: for a `0.y.z`
+  release, changes in `y` are treated as a major release and `z` as a minor
+  one), so a source break may ride in 0.2.0 but not in a 0.1.z patch.
+  `CustomScheme::new(_)` plus the `with_timestamp_header` /
+  `with_timestamp_unit` / `with_prefix` builders are unaffected — they fill in
+  the new field from its `Default` — and remain the forward-compatible
+  construction path, since a later field addition is a break only for literal
+  construction. `Provider::Custom`'s `Display` and the
   `hash_agrees_with_partial_eq_fields` lockstep test were updated in step.
+  `spec.md` §2.2 documents both construction forms.
 
 - **`VerifyLayer::with_fallback_secrets(iter)` and
   `WebhookConfig::with_fallback_secrets(iter)`** (issue #259). Both adapters
@@ -123,6 +155,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implementation and it cannot drift from the public one.
 
 ### Changed
+
+- **the `semver-checks` CI job is a blocking gate, and
+  `constructible_struct_adds_field` requires a *minor* bump while the crate is
+  pre-1.0** (issue #276). The job carried the comment "informational until the
+  first version publishes", which stopped being true when 0.1.0 reached crates.io
+  (2026-09-08): the baseline is real, so the job has been reporting a genuine
+  finding that no one read, and #274 merged a `CustomScheme` field addition
+  through it while it was red. The finding itself is not a defect — see the
+  `TimestampUnit` entry above, which is a deliberate break absorbed by 0.2.0 —
+  but the lint's default `required-update = "major"` is the wrong requirement
+  for a `0.y.z` crate, where the minor is already the breaking-change boundary.
+
+  `Cargo.toml` now states the real requirement
+  (`[package.metadata.cargo-semver-checks.lints]`,
+  `constructible_struct_adds_field = { level = "deny", required-update = "minor" }`),
+  so the deliberate 0.2.0 bump satisfies the check and a *future* field added
+  without a minor bump still fails it. `level` stays `deny`: nothing is silenced,
+  and no lint is set to `allow`. The job drops `continue-on-error` for the same
+  reason the `cargo audit` job does not have it — a finding the repo reads in
+  full (`.cargo/audit.toml` carries the same shape: per-entry justification and
+  a re-evaluation trigger) is worth more than a red job that gates nothing. The
+  entry must be revisited at 1.0, when the minor stops being the boundary and
+  the lint goes back to demanding a major bump.
+
+  README §`Versioning & MSRV` now states the pre-1.0 rule the manifest comment
+  assumes (breaking change ⇒ minor bump, `0.1.z` patch stays
+  source-compatible) and points at the manifest's lint table as the place a
+  non-default requirement is recorded.
 
 - **`VerifyError` and `ProviderParseError` implement `core::error::Error`
   unconditionally instead of `std::error::Error` under the `std` feature**
