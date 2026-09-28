@@ -1,0 +1,4 @@
+X-Ms-Signature:sha256=5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e5f8c89c40d3c5a2e
+X-Ms-Timestamp:1700000000123
+
+{"text": "custom millisecond-unit fuzz seed", "channel": "C123456", "user": "U12345"}
