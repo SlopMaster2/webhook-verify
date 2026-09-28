@@ -167,7 +167,7 @@ SendGrid verification is compiled only with the crate feature:
 
 ```toml
 [dependencies]
-webhook-verify = { version = "0.1", features = ["sendgrid"] }
+webhook-verify = { version = "0.2", features = ["sendgrid"] }
 ```
 
 For `no_std + alloc` targets, keep `default-features = false` together with
@@ -177,7 +177,7 @@ PayPal verification is compiled only with the crate feature:
 
 ```toml
 [dependencies]
-webhook-verify = { version = "0.1", features = ["paypal"] }
+webhook-verify = { version = "0.2", features = ["paypal"] }
 ```
 
 It verifies against the caller-supplied certificate (the crate never fetches
@@ -249,16 +249,16 @@ providers; PayPal and SendGrid ignore `Secret` and verify against
 
 ```toml
 [dependencies]
-webhook-verify = "0.1"
+webhook-verify = "0.2"
 
 # verify straight against http::HeaderMap (axum, tower, hyper, ...)
-webhook-verify = { version = "0.1", features = ["http"] }
+webhook-verify = { version = "0.2", features = ["http"] }
 
 # generic tower middleware (works with axum routers too)
-webhook-verify = { version = "0.1", features = ["tower"] }
+webhook-verify = { version = "0.2", features = ["tower"] }
 
 # actix-web 4 extractor + header bridge
-webhook-verify = { version = "0.1", features = ["actix"] }
+webhook-verify = { version = "0.2", features = ["actix"] }
 ```
 
 With the `http` feature enabled, any `http::HeaderMap` (from axum, tower, or
@@ -364,7 +364,7 @@ clock used for replay protection. Disable it for constrained targets:
 
 ```toml
 # no wall clock; supply your own Clock for timestamped providers
-webhook-verify = { version = "0.1", default-features = false }
+webhook-verify = { version = "0.2", default-features = false }
 ```
 
 Without `std`, [`Clock::now`] returns unix seconds directly and `SystemClock` is

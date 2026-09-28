@@ -341,6 +341,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every `README.md` dependency snippet still said `version = "0.1"` after the
+  0.2.0 release, so a copied install line resolved to the wrong release line**
+  (issue #288). The manifest declares `version = "0.2.0"`, but all seven
+  `webhook-verify` dependency snippets — the plain one under **Installation**
+  and the `sendgrid` / `paypal` / `http` / `tower` / `actix` /
+  `default-features = false` ones — still carried `version = "0.1"` for the
+  whole 0.2 line.
+
+  For a pre-1.0 crate a caret requirement is not loose: `"0.1"` means
+  `>=0.1.0, <0.2.0`, so a snippet naming the previous minor does not fail to
+  resolve, it resolves *away* from the current release. A reader who copied
+  the **Installation** line got 0.1.x and could not get 0.2.0 at all — and
+  0.1.x cannot express `CustomScheme`'s `timestamp_unit` field (the 0.2.0
+  minor bump, #273/#274), which the same README's `Provider::Custom(..)`
+  provider-table row advertises. `CustomScheme` is deliberately *not*
+  `#[non_exhaustive]`, so the 0.1.x and 0.2.x struct-literal forms are not
+  interchangeable either.
+
+  Nothing compiles a README `toml` fence, so the bump could not have failed
+  the build and the drift survived a green suite — the same failure shape as
+  the stale `std` feature comment #264 fixed. The snippets are corrected, and
+  a new guard test (`docs::readme_dependency_snippets_resolve_to_the_current_release`)
+  reads the `[package]` version out of the manifest and requires every
+  `webhook-verify` dependency line in `README.md`, in both the bare and table
+  spellings, to name that release line and not a patch newer than the
+  manifest's — so the next minor bump cannot leave the snippets behind.
+
 - **Discord verification used dalek's non-strict equation, so a low-order
   public key verified signatures that were trivially forgeable** (issue #257).
   `core::crypto::verify_ed25519` called `VerifyingKey::verify`, which in

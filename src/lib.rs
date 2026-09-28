@@ -242,3 +242,128 @@ pub use crate::providers::{
 pub mod klaviyo {
     pub use crate::providers::klaviyo::{SIGNATURE_HEADER, TIMESTAMP_HEADER, WEBHOOK_ID_HEADER};
 }
+
+#[cfg(test)]
+mod docs {
+    /// Splits a `major.minor[.patch]` version into numbers, so two versions can
+    /// be compared without pulling in a semver dependency the crate does not
+    /// otherwise need. A third component that is not a number (a pre-release
+    /// suffix such as `0.3.0-rc.1`) yields `None`: the caller decides what to
+    /// do with it, and the guard below only ever *narrows* on it.
+    fn version_numbers(version: &str) -> (u64, u64, Option<u64>) {
+        let mut components = version.trim().split('.');
+        let major = components
+            .next()
+            .and_then(|component| component.parse().ok())
+            .unwrap_or_else(|| {
+                panic!("version {version:?} does not begin with a numeric major component")
+            });
+        let minor = components
+            .next()
+            .and_then(|component| component.parse().ok())
+            .unwrap_or_else(|| panic!("version {version:?} has no numeric minor component"));
+        (
+            major,
+            minor,
+            components.next().and_then(|patch| patch.parse().ok()),
+        )
+    }
+
+    /// The `[package]` version from the manifest, read the way a reader reads
+    /// it: the first `version = "…"` under the `[package]` header and before
+    /// the next section.
+    fn manifest_version() -> &'static str {
+        const MANIFEST: &str = include_str!("../Cargo.toml");
+        MANIFEST
+            .lines()
+            .skip_while(|line| line.trim() != "[package]")
+            .skip(1)
+            .take_while(|line| !line.trim_start().starts_with('['))
+            .find_map(|line| line.trim().strip_prefix("version = "))
+            .and_then(|quoted| quoted.trim().strip_prefix('"'))
+            .and_then(|version| version.strip_suffix('"'))
+            .unwrap_or_else(|| {
+                panic!("Cargo.toml must still declare a quoted `[package] version = \"…\"`")
+            })
+    }
+
+    /// The version requirement a README dependency line asks for, in either
+    /// Cargo spelling: `webhook-verify = "0.2"` (bare) or
+    /// `webhook-verify = { version = "0.2", features = ["http"] }` (table).
+    /// The table form has further keys after `version`, so the value ends at
+    /// the next `"` rather than at the closing brace.
+    fn readme_requirement(line: &str) -> Option<&str> {
+        let value = line.trim().strip_prefix("webhook-verify = ")?.trim();
+        if let Some(quoted) = value.strip_prefix('"') {
+            return quoted.strip_suffix('"');
+        }
+        let table = value.strip_prefix('{')?;
+        let version = table
+            .split_once("version = ")?
+            .1
+            .trim_start()
+            .strip_prefix('"')?;
+        Some(&version[..version.find('"')?])
+    }
+
+    /// The requirement a reader who copy-pastes a `README.md` dependency
+    /// snippet ends up with must be able to resolve to the release the rest of
+    /// the README documents.
+    ///
+    /// The claim being guarded is the one the README makes seven times: "add
+    /// this line to your `Cargo.toml`". For a `0.y.z` crate a caret requirement
+    /// is *not* loose — `version = "0.1"` means `>=0.1.0, <0.2.0` — so a
+    /// snippet that names an older minor line silently resolves away from
+    /// the current release instead of failing. Every snippet said `0.1` for
+    /// the whole 0.2 line (#288), which meant a copied install line could not
+    /// get 0.2.0 at all, and could not express the `CustomScheme` field the
+    /// README's own provider table advertises.
+    ///
+    /// Nothing compiles a README `toml` fence, so the bump to 0.2.0 could not
+    /// have failed the build and the drift survived a green suite — the same
+    /// shape as the stale `std` feature comment #264 fixed. Hence this guard.
+    #[test]
+    fn readme_dependency_snippets_resolve_to_the_current_release() {
+        const README: &str = include_str!("../README.md");
+        let (major, minor, patch) = version_numbers(manifest_version());
+        // A two-component manifest version is pre-release, so no stable patch
+        // has shipped; treat its floor as 0, which admits `"0.2"` but not
+        // `"0.2.1"`.
+        let manifest_patch = patch.unwrap_or(0);
+
+        let mut checked = 0_usize;
+        for line in README.lines() {
+            let Some(requirement) = readme_requirement(line) else {
+                continue;
+            };
+            checked += 1;
+
+            let (req_major, req_minor, req_patch) = version_numbers(requirement);
+            assert_eq!(
+                (req_major, req_minor),
+                (major, minor),
+                "README.md's `webhook-verify = \"{requirement}\"` names release line \
+                 {req_major}.{req_minor}.x while the manifest is {major}.{minor}.x — a caret \
+                 requirement on a `0.y.z` crate pins the reader to that line rather than \
+                 failing, so copying this line installs a release the rest of this file does \
+                 not describe"
+            );
+            if let Some(req_patch) = req_patch {
+                assert!(
+                    req_patch <= manifest_patch,
+                    "README.md's `webhook-verify = \"{requirement}\"` requires a patch release \
+                     newer than the manifest's {major}.{minor}.{manifest_patch}, which is not \
+                     released"
+                );
+            }
+        }
+
+        // Without this the loop above passes vacuously if the README's
+        // dependency lines are ever renamed or reformatted out of recognition.
+        assert!(
+            checked > 0,
+            "README.md must still show `webhook-verify` as a `Cargo.toml` dependency in a form \
+             this guard can read"
+        );
+    }
+}
