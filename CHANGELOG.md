@@ -341,6 +341,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `README.md` **Releasing** checklist still said `git tag v0.1.0`, so
+  following it tagged the 0.2.0 release `v0.1.0`** (issue #292). The
+  manifest declares `version = "0.2.0"` (bumped for the
+  `CustomScheme::timestamp_unit` source break, #273/#274/#276), and step 1 of
+  the documented release procedure is "bump `version` in `Cargo.toml` and
+  commit" — but step 3's tag command was never moved off 0.1.
+
+  Executed in order, the checklist therefore publishes 0.2.0 and then tags
+  *that* commit `v0.1.0`. The tag is what consumers and tooling are pointed
+  at as the stable reference for a release, so it would name a release line
+  the manifest has already left, and it would leave 0.2.0 untagged. It also
+  collides with the version `Cargo.toml`'s
+  `[package.metadata.cargo-semver-checks.lints]` comments are written
+  against, so "which version is published?" stops having one answer.
+
+  Nothing compiles a README `sh` fence, so the stale tag could not have failed
+  the build — the same failure shape as the stale `std` feature comment #264
+  fixed. The #288 guard for this file,
+  `docs::readme_dependency_snippets_resolve_to_the_current_release`, does not
+  reach it: it only recognizes lines starting with `webhook-verify = ` that
+  yield a Cargo version requirement, and a `git tag` command is not a
+  dependency snippet. The tag is corrected and a new guard
+  (`docs::readme_release_tag_names_the_manifest_version`) requires every
+  `git tag v…` line in `README.md` to name the manifest's own version — and
+  requires at least one such line to exist, so the check cannot pass
+  vacuously if the checklist is reworded out of recognition.
+
 - **Every `README.md` dependency snippet still said `version = "0.1"` after the
   0.2.0 release, so a copied install line resolved to the wrong release line**
   (issue #288). The manifest declares `version = "0.2.0"`, but all seven
