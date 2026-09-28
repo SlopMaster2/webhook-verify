@@ -306,6 +306,15 @@ mod docs {
         Some(&version[..version.find('"')?])
     }
 
+    /// The version a README line tags, for the `git tag v…` command in the
+    /// Releasing checklist. A trailing `# …` comment on the same line is not
+    /// part of the tag name, so it is cut before the version is read.
+    fn readme_release_tag(line: &str) -> Option<&str> {
+        let version = line.trim().strip_prefix("git tag v")?;
+        let version = version.split('#').next()?.trim();
+        (!version.is_empty()).then_some(version)
+    }
+
     /// The requirement a reader who copy-pastes a `README.md` dependency
     /// snippet ends up with must be able to resolve to the release the rest of
     /// the README documents.
@@ -363,6 +372,55 @@ mod docs {
         assert!(
             checked > 0,
             "README.md must still show `webhook-verify` as a `Cargo.toml` dependency in a form \
+             this guard can read"
+        );
+    }
+
+    /// The release tag the README's Releasing checklist tells a maintainer to
+    /// push must name the release the manifest is about to publish.
+    ///
+    /// Step 3 of that checklist was still `git tag v0.1.0` after the manifest
+    /// moved to 0.2.0 (#292). Following it literally publishes 0.2.0 and then
+    /// tags *that* commit `v0.1.0`, so the tag consumers are pointed at for a
+    /// stable reference names a release line the manifest has already left —
+    /// and `Cargo.toml`'s semver-checks lints, which are written against a
+    /// specific published version, stop naming a version a reader can find.
+    ///
+    /// `readme_dependency_snippets_resolve_to_the_current_release` (#288) does
+    /// not cover this line: `readme_requirement` only recognizes lines that
+    /// start with `webhook-verify = ` and yield a Cargo version requirement,
+    /// and a `git tag` command is not a dependency snippet. Same shape as that
+    /// guard's motivation — nothing compiles a README `sh` fence, so the stale
+    /// tag could not have failed the build.
+    #[test]
+    fn readme_release_tag_names_the_manifest_version() {
+        const README: &str = include_str!("../README.md");
+        let manifest = manifest_version();
+        let (major, minor, patch) = version_numbers(manifest);
+
+        let mut checked = 0_usize;
+        for line in README.lines() {
+            let Some(tag) = readme_release_tag(line) else {
+                continue;
+            };
+            checked += 1;
+
+            let (tag_major, tag_minor, tag_patch) = version_numbers(tag);
+            assert_eq!(
+                (tag_major, tag_minor, tag_patch),
+                (major, minor, patch),
+                "README.md's Releasing checklist tags the release `v{tag}`, but the manifest is \
+                 `{manifest}` — step 1 of that checklist bumps `version` first, so a tag that \
+                 does not match it publishes one release and names another. Update the tag in the \
+                 same change that bumps the version"
+            );
+        }
+
+        // Without this the loop above passes vacuously if the checklist's
+        // `git tag` line is ever reworded out of recognition.
+        assert!(
+            checked > 0,
+            "README.md's Releasing checklist must still show a `git tag v…` command in a form \
              this guard can read"
         );
     }

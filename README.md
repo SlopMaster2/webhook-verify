@@ -607,7 +607,7 @@ To publish a new version to crates.io:
    and gives consumers a stable reference:
 
    ```sh
-   git tag v0.1.0
+   git tag v0.2.0    # `v` + the `version` you bumped in step 1
    git push origin master --tags
    ```
 
