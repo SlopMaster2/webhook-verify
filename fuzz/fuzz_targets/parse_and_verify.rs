@@ -18,7 +18,7 @@
 //! `cargo fuzz run parse_and_verify` appends every newly-interesting input it
 //! finds — named after the hex digest of that input, and git-ignored — right
 //! alongside the seeds. That is expected; `git clean -fdx fuzz/` puts the
-//! directory back to the committed 62. The doc-bullet-vs-files guard in
+//! directory back to the committed 63. The doc-bullet-vs-files guard in
 //! `src/providers/mod.rs` compares *committed* seeds, so those entries no
 //! longer fail it — see issue #241.)
 //!
@@ -226,6 +226,15 @@
 //!   target configuration (`X-Raw-Sig`, no prefix, no timestamp, three hash
 //!   algorithms), reaching base64 decode, the digest-length gate, and the
 //!   constant-time comparison for `Provider::Custom`.
+//! - `custom-millis-timestamp-delivery` — the millisecond-unit `CustomScheme`
+//!   target configuration (`X-Ms-Signature` with a `sha256=` hex HMAC over
+//!   `{ts}:{body}`, plus the epoch-millisecond `X-Ms-Timestamp`), reaching the
+//!   user-supplied signed string, prefix-strip, hex decode, the 32-byte gate,
+//!   the millisecond timestamp parse, and the ms→s floored replay path of
+//!   `Provider::Custom` (`spec.md` §2.2). It is the only seed that reaches
+//!   `TimestampUnit::Millis`: the other two `Custom` configurations are
+//!   seconds-unit and timestamp-less, and the six built-in millisecond
+//!   providers only cover the shared `parse_millis`, not this unit dispatch.
 //! - `airwallex-signature-delivery` — Airwallex's two-header shape
 //!   (bare-hex `x-signature` + epoch-milliseconds `x-timestamp`), reaching the
 //!   ms timestamp parse, hex decode, the 32-byte gate, the `{timestamp}{body}`
@@ -843,6 +852,39 @@ fuzz_target!(|data: &[u8]| {
             &url_scoped_options.clone(),
         );
     }
+
+    // `TimestampUnit::Millis` is the one `CustomScheme` field neither
+    // configuration above sets, so `src/providers/custom.rs`'s
+    // `TimestampUnit::Millis` branch — `parse_millis(...)? / MILLIS_PER_SECOND`
+    // — was reachable from no fuzz configuration at all: the six built-in
+    // millisecond providers exercise `parse_millis` itself, but the unit
+    // dispatch and the ms→s flooring on a *caller-declared* scheme did not,
+    // which is what `spec.md` §5.6 requires of this target. The header names
+    // are deliberately not HubSpot's, so this configuration cannot be mistaken
+    // for the built-in `Provider::HubSpot` attempt above.
+    let custom_millis = CustomScheme {
+        hash: HashAlg::Sha256,
+        signature_header: "X-Ms-Signature",
+        timestamp_header: Some("X-Ms-Timestamp"),
+        timestamp_unit: TimestampUnit::Millis,
+        encoding: Encoding::Hex,
+        prefix: Some("sha256="),
+        signed_string: |headers, raw_body| {
+            let ts = headers.get("X-Ms-Timestamp").unwrap_or_default();
+            let mut signed = Vec::with_capacity(ts.len() + 1 + raw_body.len());
+            signed.extend_from_slice(ts.as_bytes());
+            signed.push(b':');
+            signed.extend_from_slice(raw_body);
+            signed
+        },
+    };
+    attempt(
+        Provider::Custom(custom_millis),
+        &headers,
+        body,
+        "fuzz-signing-secret",
+        &VerifyOptions::default(),
+    );
 
     // Cloudflare: a well-formed-shaped `Webhook-Signature` (valid hex sig1,
     // digit time) lets arbitrary body bytes reach the 32-byte length gate and

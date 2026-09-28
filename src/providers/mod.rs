@@ -3852,6 +3852,102 @@ mod tests {
     }
 
     #[test]
+    fn fuzz_target_configures_the_custom_millis_timestamp_unit() {
+        use std::fs;
+        use std::path::Path;
+
+        // The `IMPLEMENTED` pool guard above pins which *providers* the fuzz
+        // target drives, but `Provider::Custom` is not name-constructible and
+        // so is exercised only through the target's hand-written
+        // `CustomScheme` configurations — nothing pinned *which* ones.
+        // `TimestampUnit::Millis` (issues #273/#274) is the concrete gap: the
+        // target shipped with a seconds-unit and a timestamp-less
+        // configuration, so `src/providers/custom.rs`'s millisecond branch
+        // (`parse_millis(...)? / MILLIS_PER_SECOND`) had no fuzz coverage at
+        // all. The six built-in millisecond providers do exercise
+        // `parse_millis`, which is exactly why this rotted unnoticed: the
+        // shared parser is covered while the caller-declared unit dispatch
+        // around it is not. `spec.md` §5.6 asks for each provider's
+        // header-parsing path to be reachable from this target, and a
+        // millisecond-stamping long-tail sender — the case `Custom` exists for
+        // — is the one a panic or an overflow in that branch would hit.
+        //
+        // Checked on the *variant* rather than an exact field spelling so both
+        // the struct-literal (`timestamp_unit: TimestampUnit::Millis`) and the
+        // builder (`.with_timestamp_unit(TimestampUnit::Millis)`) forms
+        // satisfy it, and so re-pointing the configuration at a different
+        // `CustomScheme` field set does not produce a false failure. A floor of
+        // one, not an exact count: what matters is that the unit is configured
+        // at all, and a second millisecond configuration is a gain, not drift.
+        //
+        // `fuzz/` is excluded from the crates.io tarball (Cargo.toml
+        // `exclude`), so in a packaged checkout the file does not exist and
+        // the guard is skipped — it is a repo-internal test, not part of the
+        // shipped crate's contract.
+        let target = {
+            let path =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/fuzz_targets/parse_and_verify.rs");
+            match fs::read_to_string(path) {
+                Ok(src) => src,
+                // `fuzz/` not present (e.g. the publish tarball): nothing to
+                // guard against here, and the crate's own tests must not fail
+                // on files it does not ship.
+                Err(_) => return,
+            }
+        };
+
+        let hits = fuzz_millis_timestamp_unit_hits(&target);
+        assert!(
+            hits > 0,
+            "fuzz target must configure at least one `CustomScheme` with `TimestampUnit::Millis` — the millisecond unit is never set by any other configuration, so `src/providers/custom.rs`'s `parse_millis(...)? / MILLIS_PER_SECOND` branch has no fuzz coverage and `spec.md` §5.6 is unmet for it"
+        );
+    }
+
+    /// The count of code (non-comment) lines in the fuzz target that name
+    /// `TimestampUnit::Millis`. Whole-line `//` comments and trailing `// …`
+    /// comments are dropped first: the target documents each configuration's
+    /// rationale in prose that names the very variant this counts, so a raw
+    /// line count would be satisfied by a comment alone. A `//` inside a
+    /// string literal would be mis-trimmed; the fuzz target has none, and this
+    /// is a floor check over a repo-internal file, not a parser. Test-only
+    /// helper over the target's source text.
+    fn fuzz_millis_timestamp_unit_hits(target: &str) -> usize {
+        target
+            .lines()
+            .filter(|line| {
+                let line = line.trim_start();
+                !line.starts_with("//")
+                    && match line.find("//") {
+                        Some(at) => &line[..at],
+                        None => line,
+                    }
+                    .contains("TimestampUnit::Millis")
+            })
+            .count()
+    }
+
+    #[test]
+    fn fuzz_millis_timestamp_unit_hits_ignores_prose() {
+        // The positive side: a struct-literal configuration, the builder form,
+        // and a code line that mentions the variant only in a trailing comment.
+        let target = "\
+            let a = CustomScheme { timestamp_unit: TimestampUnit::Millis, ..d };
+            let b = scheme.with_timestamp_unit(TimestampUnit::Millis);
+            let c = other.with_timestamp_unit(TimestampUnit::Seconds); // was TimestampUnit::Millis
+        ";
+        assert_eq!(fuzz_millis_timestamp_unit_hits(target), 2);
+
+        // The negative side: only a module-doc bullet, a prose comment, and a
+        // seconds-unit configuration — none of which configure the unit.
+        let target = "\
+//! - `custom-millis-timestamp-delivery` — the millisecond-unit TimestampUnit::Millis path.
+// The Millis branch floors via parse_millis(..) / MILLIS_PER_SECOND.
+            let d = CustomScheme { timestamp_unit: TimestampUnit::Seconds, ..e };
+        ";
+        assert_eq!(fuzz_millis_timestamp_unit_hits(target), 0);
+    }
+
+    #[test]
     fn fuzz_seed_bullets_and_corpus_agree() {
         use std::fs;
         use std::path::Path;
