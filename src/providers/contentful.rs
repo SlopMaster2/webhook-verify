@@ -414,12 +414,14 @@ fn normalized_request_path(url: &str) -> String {
                 }
                 None => Cow::Borrowed("/"),
             },
-            // No `://`, so this is the bare form: a path (`/webhooks/…`) or a
-            // query/fragment-only reference. The path it names is still
-            // root-relative — `new URL(…).pathname` always begins with `/` —
-            // so a slash-less spelling (`?a=b`, `#f`, ``) gets the same root
-            // synthesized as the full-URL branch above. Without this, the two
-            // spellings of one request target signed different strings.
+            // No `://` *and* no leading `/` — a `/`-prefixed path is already
+            // borrowed verbatim above — so this is a slash-less bare
+            // reference: a query/fragment-only one (`?a=b`, `#f`, ``) or a
+            // root-relative path written without its leading slash
+            // (`webhooks/cms`). Either way the path it names is root-relative,
+            // since `new URL(…).pathname` always begins with `/`, so the same
+            // root is synthesized as in the full-URL branch above. Without it
+            // the two spellings of one request target signed different strings.
             None => {
                 let mut rooted = String::with_capacity(url.len() + 1);
                 rooted.push('/');
