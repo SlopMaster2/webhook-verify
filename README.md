@@ -535,6 +535,14 @@ previously-accepted requests are treated as breaking (major version bump),
 except where required to fix a genuine security defect, which will be
 called out explicitly in the changelog and a security advisory.
 
+While the crate is **pre-1.0** (`0.y.z`), a breaking change ships as a
+*minor* bump — `0.1.x` → `0.2.0` — because that is the compatibility boundary
+Cargo's semver reference defines for a `0.y.z` release, so a `0.1.z` patch
+stays source-compatible. The `semver-checks` CI job enforces that, and its
+configuration (`Cargo.toml`'s `[package.metadata.cargo-semver-checks.lints]`)
+is where a lint that needs a different requirement than its default is
+recorded with a justification.
+
 MSRV: **1.85** (first Rust release with edition 2024 support), checked in CI.
 
 ## Releasing
