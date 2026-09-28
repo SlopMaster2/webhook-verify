@@ -71,7 +71,7 @@ mod xero;
 mod zendesk;
 mod zoom;
 
-pub use custom::{CustomScheme, Encoding, HashAlg};
+pub use custom::{CustomScheme, Encoding, HashAlg, TimestampUnit};
 
 use core::fmt;
 
@@ -655,6 +655,14 @@ impl fmt::Display for Provider {
                 }
                 if let Some(timestamp) = scheme.timestamp_header {
                     write!(f, ", timestamp header `{timestamp}`")?;
+                    // Only the non-default unit is spelled out, so a seconds
+                    // scheme's rendering stays byte-identical to what it was
+                    // before the field existed. A log line still tells the
+                    // two apart, which matters because picking the wrong unit
+                    // is the footgun `TimestampUnit` exists to prevent.
+                    if scheme.timestamp_unit != TimestampUnit::Seconds {
+                        write!(f, ", timestamp unit {}", scheme.timestamp_unit)?;
+                    }
                 }
                 f.write_str(")")
             }
@@ -2779,7 +2787,7 @@ mod tests {
     #[test]
     fn provider_display_names() {
         use super::CustomScheme;
-        use crate::{Encoding, HashAlg};
+        use crate::{Encoding, HashAlg, TimestampUnit};
 
         assert_eq!(Provider::Stripe.to_string(), "Stripe");
         assert_eq!(Provider::GitHub.to_string(), "GitHub");
@@ -2844,6 +2852,7 @@ mod tests {
             hash: HashAlg::Sha256,
             signature_header: "X-My-Sig",
             timestamp_header: None,
+            timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Hex,
             prefix: None,
             signed_string: |_h, b| b.to_vec(),
@@ -2857,6 +2866,7 @@ mod tests {
             hash: HashAlg::Sha512,
             signature_header: "X-My-Sig",
             timestamp_header: Some("X-My-Ts"),
+            timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Base64,
             prefix: Some("v1="),
             signed_string: |_h, b| b.to_vec(),
@@ -2865,6 +2875,24 @@ mod tests {
             prefixed.to_string(),
             "Custom(X-My-Sig, SHA-512, base64, prefix `v1=`, timestamp header `X-My-Ts`)"
         );
+
+        // A millisecond scheme shares every other field with `prefixed`, so
+        // the declared unit is the only thing that can tell the two
+        // configurations apart in a log line. Only the non-default unit is
+        // spelled out, leaving the seconds rendering above byte-identical to
+        // what it was before the field existed.
+        let millis = Provider::Custom(match prefixed {
+            Provider::Custom(scheme) => CustomScheme {
+                timestamp_unit: TimestampUnit::Millis,
+                ..scheme
+            },
+            other => panic!("expected a Custom provider, got {other:?}"),
+        });
+        assert_eq!(
+            millis.to_string(),
+            "Custom(X-My-Sig, SHA-512, base64, prefix `v1=`, timestamp header `X-My-Ts`, timestamp unit milliseconds)"
+        );
+        assert_ne!(prefixed.to_string(), millis.to_string());
     }
 
     #[test]
@@ -4237,6 +4265,7 @@ mod tests {
                     hash: HashAlg::Sha256,
                     signature_header: "X-Acme-Signature",
                     timestamp_header: Some("X-Acme-Timestamp"),
+                    timestamp_unit: TimestampUnit::Seconds,
                     encoding: Encoding::Hex,
                     prefix: None,
                     signed_string: |_headers, raw_body| raw_body.to_vec(),
@@ -4248,6 +4277,7 @@ mod tests {
                     hash: HashAlg::Sha256,
                     signature_header: "X-Acme-Signature",
                     timestamp_header: None,
+                    timestamp_unit: TimestampUnit::Seconds,
                     encoding: Encoding::Hex,
                     prefix: None,
                     signed_string: |_headers, raw_body| raw_body.to_vec(),

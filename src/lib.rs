@@ -206,7 +206,8 @@ pub use crate::core::SystemClock;
 pub use crate::core::adapter_utils::ambiguous_signature_header;
 pub use crate::core::{Clock, HeaderMap, Secret, VerifyError, VerifyOptions, VerifyingKeyMaterial};
 pub use crate::providers::{
-    CustomScheme, Encoding, HashAlg, Provider, ProviderParseError, verify, verify_any,
+    CustomScheme, Encoding, HashAlg, Provider, ProviderParseError, TimestampUnit, verify,
+    verify_any,
 };
 
 /// Header-name constants for the Klaviyo provider.

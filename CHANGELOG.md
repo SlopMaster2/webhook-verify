@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`TimestampUnit` and `CustomScheme::with_timestamp_unit(_)`** (issue #273).
+  `CustomScheme` could only express a **unix-seconds** timestamp header, so a
+  sender in the millisecond family could not be given working replay
+  protection — and the two ways out were both lossy. Six of the crate's own 58
+  built-in providers timestamp in epoch milliseconds (HubSpot, Contentful,
+  WorkOS, Ripple, Airwallex, Webflow — each calls `parse_millis`,
+  `spec.md` §3), and `parse_millis` is `pub(crate)`, so a caller could not
+  even reach it. Leaving `timestamp_header` unset silently disables replay
+  protection; setting it and leaving the unit at seconds accepts the header,
+  verifies the signature, and then fails the window with a `skew` on the order
+  of 5.6e10 seconds — an error that reads like a tolerance misconfiguration
+  and invites widening `max_age`, which would make the check permanently
+  vacuous. Since `CustomScheme` is documented as "the prototyping shape new
+  built-in providers are implemented against before promotion", a new provider
+  in that family could not be prototyped with the crate's own replay check.
+
+  `TimestampUnit::Seconds | Millis` is a new declarative config enum alongside
+  `HashAlg` and `Encoding`; `CustomScheme::timestamp_unit` defaults to
+  `Seconds` via the enum's `Default`, so **every existing scheme keeps its
+  exact current behavior** and no release-candidate migration is needed.
+  `Millis` routes through `parse_millis` and floors to whole seconds before the
+  comparison, exactly as the six built-ins do. The unit participates in
+  `PartialEq`/`Hash` with the other declarative fields, `Display` spells out
+  only the non-default unit (so an existing seconds scheme's rendering is
+  byte-identical), and the unit is inert when `timestamp_header` is `None`.
+
+  The unit is *declared* rather than sniffed, which is why this is a field
+  rather than a heuristic: both units parse as a plain digit run, so a
+  mismatched declaration fails the window in either direction (a millisecond
+  value read as seconds compares ~56.6 billion seconds ahead; a seconds value
+  read as milliseconds floors toward 1970) instead of ever passing it. A test
+  pins both directions as `TimestampOutOfTolerance`.
+
+  Supporting changes: `TimestampUnit` re-exported from the crate root and
+  `providers`; `spec.md` §2.2's `CustomScheme` sketch and construction prose
+  updated; nine tests covering verify, replay-window edges, both
+  wrong-unit directions, malformed-header diagnostics, tamper, inertness
+  without a timestamp header, the `Default`, `PartialEq`/`Hash`, and both
+  `Display` impls.
+
+  Adding a field to a struct with public fields is a source-level break for
+  downstream struct-literal construction. Accepted at 0.1.0: the crate is
+  unpublished, its `semver-checks` CI job has no baseline yet
+  (`continue-on-error`), and `CustomScheme::new(_)` plus the three builders
+  remain the ergonomic path. `Provider::Custom`'s `Display` and the
+  `hash_agrees_with_partial_eq_fields` lockstep test were updated in step.
+
 - **`VerifyLayer::with_fallback_secrets(iter)` and
   `WebhookConfig::with_fallback_secrets(iter)`** (issue #259). Both adapters
   held exactly one `Arc<Secret>` and called `verify_ref` with it, so a caller

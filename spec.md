@@ -329,6 +329,7 @@ pub struct CustomScheme {
     pub hash: HashAlg,                 // Sha256 | Sha1 | Sha512
     pub signature_header: &'static str,
     pub timestamp_header: Option<&'static str>,
+    pub timestamp_unit: TimestampUnit, // Seconds (default) | Millis
     pub encoding: Encoding,            // Hex | Base64
     pub prefix: Option<&'static str>,  // e.g. "sha256=" or "v0="
     pub signed_string: fn(&dyn HeaderMap, &[u8]) -> Vec<u8>,
@@ -337,8 +338,9 @@ pub struct CustomScheme {
 
 Construction: `CustomScheme::new(hash, signature_header, encoding,
 signed_string)` sets the required fields with `timestamp_header`/`prefix`
-left `None`, and the `with_timestamp_header(_)` / `with_prefix(_)` builders
-set those optional fields (struct-literal construction also remains
+left `None` and `timestamp_unit` at its `Default` of `Seconds`, and the
+`with_timestamp_header(_)` / `with_timestamp_unit(_)` / `with_prefix(_)`
+builders set those optional fields (struct-literal construction also remains
 available since the fields are public). The declarative fields participate in
 `PartialEq`/`Hash`; `signed_string` is excluded (function pointers have no
 meaningful equality).
@@ -346,6 +348,21 @@ meaningful equality).
 This lets callers cover a long-tail provider today without waiting on a
 crate release, and it's how new built-in providers get prototyped before
 being promoted into the `Provider` enum.
+
+**Timestamp-unit requirement.** The shared replay window compares in seconds,
+so a scheme that declares a `timestamp_header` must also declare the unit that
+header's value is expressed in — `TimestampUnit::Seconds` (the default) or
+`TimestampUnit::Millis`, which floors to whole seconds before the comparison
+exactly as the six millisecond providers do (HubSpot, Contentful, WorkOS,
+Ripple, Airwallex, Webflow). The unit is declared rather than sniffed because
+both units parse as a plain digit run: a millisecond value read as seconds
+compares ~56.6 billion seconds in the future and a seconds value read as
+milliseconds floors toward 1970, so both directions fail the window rather
+than passing it — but they fail it as `TimestampOutOfTolerance` with an
+implausible `skew`, which reads like a tolerance misconfiguration and invites
+widening `max_age` (which would make the check permanently vacuous). The
+field makes that footgun a compile-time declaration instead. The unit is inert
+when `timestamp_header` is `None`, since no replay check runs.
 
 **Replay-check caveat.** Setting `timestamp_header` runs the shared replay
 window (`|now - t| <= max_age`) against the header value, but the check only

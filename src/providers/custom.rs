@@ -39,10 +39,20 @@
 //! `Custom` scheme must do so deliberately — see
 //! [`CustomScheme::with_timestamp_header`].
 //!
+//! **Timestamp-unit caveat:** The shared window compares in seconds, so the
+//! header's unit must be declared — [`TimestampUnit::Seconds`] (the default)
+//! or [`TimestampUnit::Millis`] via
+//! [`CustomScheme::with_timestamp_unit`]. Both units parse as a digit run, so
+//! an undeclared millisecond sender is rejected as
+//! `TimestampOutOfTolerance` rather than as a malformed header, with a `skew`
+//! that looks like a tolerance misconfiguration. Six of the 58 built-in
+//! providers timestamp in milliseconds (HubSpot, Contentful, WorkOS, Ripple,
+//! Airwallex, Webflow).
+//!
 //! # Example
 //!
 //! ```
-//! use webhook_verify::{verify, CustomScheme, Encoding, HashAlg, Provider, Secret};
+//! use webhook_verify::{verify, CustomScheme, Encoding, HashAlg, Provider, Secret, TimestampUnit};
 //!
 //! // A fictional provider that signs the raw body with HMAC-SHA256 and
 //! // sends it hex-encoded in `X-Webhook-Sig`.
@@ -50,6 +60,7 @@
 //!     hash: HashAlg::Sha256,
 //!     signature_header: "X-Webhook-Sig",
 //!     timestamp_header: None,
+//!     timestamp_unit: TimestampUnit::Seconds,
 //!     encoding: Encoding::Hex,
 //!     prefix: None,
 //!     signed_string: |_headers, raw_body| raw_body.to_vec(),
@@ -75,9 +86,14 @@ use crate::core::VerifyOptions;
 use crate::core::crypto::{verify_hmac_sha1, verify_hmac_sha256, verify_hmac_sha512};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
-use crate::core::replay::{check_replay, parse_timestamp};
+use crate::core::replay::{check_replay, parse_millis, parse_timestamp};
 use crate::core::secret::Secret;
 use base64::Engine;
+
+/// Milliseconds in one second, for flooring a `TimestampUnit::Millis` header
+/// down to the whole seconds the shared replay window compares in. Same
+/// constant the built-in millisecond providers divide by.
+const MILLIS_PER_SECOND: u64 = 1000;
 
 /// HMAC hash algorithms available to a [`CustomScheme`] (`spec.md` §2.2).
 #[must_use]
@@ -135,6 +151,44 @@ impl fmt::Display for Encoding {
     }
 }
 
+/// Unit of the timestamp a [`CustomScheme`] reads from its
+/// [`timestamp_header`](CustomScheme::timestamp_header) (`spec.md` §2.2).
+///
+/// The shared replay window compares against a wall clock in **seconds**
+/// (`|now - t| <= max_age`), so the unit has to be declared for the comparison
+/// to mean anything. Declaring the wrong one does not fail closed on a
+/// malformed value — a 13-digit epoch-milliseconds stamp is a perfectly valid
+/// `u64` — it just compares a millisecond value against a seconds-valued
+/// clock and rejects every delivery with a `skew` on the order of 5.6e10
+/// seconds. Worse, the resulting `TimestampOutOfTolerance` reads like a
+/// tolerance problem, so the tempting fix is to widen `max_age`, which makes
+/// the check permanently vacuous and silently drops replay protection. Say
+/// which unit the sender actually sends.
+#[must_use]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TimestampUnit {
+    /// Integer unix **seconds** since the epoch (issue #273). The default, and
+    /// what most senders use: Slack, Stripe, Zoom, Sentry, and most of the 58
+    /// built-in providers timestamp in whole seconds.
+    #[default]
+    Seconds,
+    /// Integer unix **milliseconds** since the epoch, floored to whole seconds
+    /// before the replay comparison. Six built-in providers need this:
+    /// HubSpot, Contentful, WorkOS, Ripple, Airwallex, and Webflow
+    /// (`spec.md` §3).
+    Millis,
+}
+
+impl fmt::Display for TimestampUnit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TimestampUnit::Seconds => f.write_str("seconds"),
+            TimestampUnit::Millis => f.write_str("milliseconds"),
+        }
+    }
+}
+
 /// A user-configured HMAC verification scheme for providers not yet built in
 /// (`spec.md` §2.2). Also the prototyping shape new built-in providers are
 /// implemented against before promotion into the [`Provider`](crate::Provider)
@@ -165,16 +219,29 @@ pub struct CustomScheme {
     pub hash: HashAlg,
     /// Name of the header carrying the encoded signature.
     pub signature_header: &'static str,
-    /// Name of the header carrying the unix-seconds timestamp, when the
-    /// sender signs one. Setting this enables replay protection with the
-    /// shared symmetric tolerance (`|now - t| <= max_age`, default 300s);
-    /// leaving it `None` disables replay checks for this scheme, mirroring
-    /// built-ins like GitHub whose schemes sign no timestamp.
+    /// Name of the header carrying the timestamp, when the sender signs one.
+    /// Setting this enables replay protection with the shared symmetric
+    /// tolerance (`|now - t| <= max_age`, default 300s); leaving it `None`
+    /// disables replay checks for this scheme, mirroring built-ins like GitHub
+    /// whose schemes sign no timestamp.
+    ///
+    /// The value is interpreted in the unit named by
+    /// [`timestamp_unit`](Self::timestamp_unit) — whole seconds unless that is
+    /// set to [`TimestampUnit::Millis`].
     ///
     /// **The replay check only binds when `signed_string` copies this
     /// header's value into the signed bytes** — see
     /// [`CustomScheme::with_timestamp_header`].
     pub timestamp_header: Option<&'static str>,
+    /// Unit of [`timestamp_header`](Self::timestamp_header)'s value.
+    ///
+    /// Ignored when `timestamp_header` is `None` (no replay check runs, so
+    /// there is no value to interpret). Defaults to
+    /// [`TimestampUnit::Seconds`] via [`TimestampUnit`]'s `Default` impl;
+    /// declare [`TimestampUnit::Millis`] for a sender that timestamps in
+    /// epoch milliseconds, as HubSpot, Contentful, WorkOS, Ripple, Airwallex,
+    /// and Webflow all do.
+    pub timestamp_unit: TimestampUnit,
     /// Encoding of the signature value in its header.
     pub encoding: Encoding,
     /// Literal prefix required before the encoded signature (e.g. `"v0="`
@@ -200,6 +267,7 @@ impl PartialEq for CustomScheme {
         self.hash == other.hash
             && self.signature_header == other.signature_header
             && self.timestamp_header == other.timestamp_header
+            && self.timestamp_unit == other.timestamp_unit
             && self.encoding == other.encoding
             && self.prefix == other.prefix
     }
@@ -212,6 +280,7 @@ impl core::hash::Hash for CustomScheme {
         self.hash.hash(state);
         self.signature_header.hash(state);
         self.timestamp_header.hash(state);
+        self.timestamp_unit.hash(state);
         self.encoding.hash(state);
         self.prefix.hash(state);
     }
@@ -219,9 +288,12 @@ impl core::hash::Hash for CustomScheme {
 
 impl CustomScheme {
     /// Creates a scheme from the required fields, leaving the optional
-    /// `timestamp_header` and `prefix` unset (`None`).
+    /// `timestamp_header` and `prefix` unset (`None`) and
+    /// `timestamp_unit` at its default of [`TimestampUnit::Seconds`].
     ///
-    /// Configure those with [`CustomScheme::with_timestamp_header`] and
+    /// Configure the optional fields with
+    /// [`CustomScheme::with_timestamp_header`],
+    /// [`CustomScheme::with_timestamp_unit`], and
     /// [`CustomScheme::with_prefix`] when the sender's scheme uses them.
     ///
     /// # Example
@@ -249,6 +321,7 @@ impl CustomScheme {
             hash,
             signature_header,
             timestamp_header: None,
+            timestamp_unit: TimestampUnit::Seconds,
             encoding,
             prefix: None,
             signed_string,
@@ -257,6 +330,10 @@ impl CustomScheme {
 
     /// Sets the timestamp header, enabling replay protection with the shared
     /// symmetric tolerance (`|now - t| <= max_age`, default 300s).
+    ///
+    /// The value is read in **unix seconds** unless the unit is changed with
+    /// [`CustomScheme::with_timestamp_unit`] — set that too when the sender
+    /// timestamps in milliseconds.
     ///
     /// **Replay protection only binds if `signed_string` incorporates the
     /// timestamp value into the signed bytes.** The replay check runs against
@@ -269,6 +346,57 @@ impl CustomScheme {
     /// `v0:{timestamp}:{raw_body}`) before relying on this setting.
     pub fn with_timestamp_header(mut self, timestamp_header: &'static str) -> Self {
         self.timestamp_header = Some(timestamp_header);
+        self
+    }
+
+    /// Sets the unit [`timestamp_header`](Self::timestamp_header)'s value is
+    /// expressed in, for the shared replay comparison (issue #273).
+    ///
+    /// Only meaningful together with
+    /// [`CustomScheme::with_timestamp_header`]; a scheme with no timestamp
+    /// header never reaches the comparison, so the unit is inert. The default
+    /// is [`TimestampUnit::Seconds`], so this is a no-op for the majority of
+    /// senders — call it with [`TimestampUnit::Millis`] only for a sender that
+    /// stamps in epoch milliseconds.
+    ///
+    /// Declaring the wrong unit is not a benign no-op: both units parse as a
+    /// plain digit run, so a millisecond value read as seconds still passes
+    /// parsing and then fails the comparison, and a seconds value read as
+    /// milliseconds is floored toward 1970 and fails the same way. Both
+    /// surface as `TimestampOutOfTolerance` with an implausible `skew`, which
+    /// is the signal this field exists to remove.
+    ///
+    /// # Example
+    ///
+    /// A HubSpot-shaped sender: `X-HubSpot-Request-Timestamp` is epoch
+    /// milliseconds, and the signed bytes are `"{ts}:{raw_body}"` in the exact
+    /// decimal form the header carried.
+    ///
+    /// ```
+    /// use webhook_verify::{CustomScheme, Encoding, HashAlg, TimestampUnit};
+    ///
+    /// let scheme = CustomScheme::new(
+    ///     HashAlg::Sha256,
+    ///     "X-HubSpot-Signature",
+    ///     Encoding::Hex,
+    ///     |headers, raw_body| {
+    ///         let ts = headers
+    ///             .get("X-HubSpot-Request-Timestamp")
+    ///             .unwrap_or_default();
+    ///         let mut signed = Vec::with_capacity(ts.len() + 1 + raw_body.len());
+    ///         signed.extend_from_slice(ts.as_bytes());
+    ///         signed.push(b':');
+    ///         signed.extend_from_slice(raw_body);
+    ///         signed
+    ///     },
+    /// )
+    /// .with_timestamp_header("X-HubSpot-Request-Timestamp")
+    /// .with_timestamp_unit(TimestampUnit::Millis);
+    ///
+    /// assert_eq!(scheme.timestamp_unit, TimestampUnit::Millis);
+    /// ```
+    pub fn with_timestamp_unit(mut self, timestamp_unit: TimestampUnit) -> Self {
+        self.timestamp_unit = timestamp_unit;
         self
     }
 
@@ -313,8 +441,17 @@ pub(crate) fn verify(
 
     let provided_signature = parse_signature(scheme, signature_value)?;
 
+    // The unit is resolved here, before the comparison, because both parsers
+    // accept the other's values (a digit run parses either way) — picking the
+    // right one is the whole point of `TimestampUnit`. `parse_millis` also
+    // carries millisecond-specific diagnostics, and the shared replay window
+    // is in seconds, so `Millis` floors exactly as the six built-in
+    // millisecond providers do (`spec.md` §3).
     let timestamp = match timestamp_raw {
-        Some((timestamp_header, raw)) => Some(parse_timestamp(timestamp_header, raw)?),
+        Some((timestamp_header, raw)) => Some(match scheme.timestamp_unit {
+            TimestampUnit::Seconds => parse_timestamp(timestamp_header, raw)?,
+            TimestampUnit::Millis => parse_millis(timestamp_header, raw)? / MILLIS_PER_SECOND,
+        }),
         None => None,
     };
 
@@ -389,7 +526,7 @@ fn parse_signature(scheme: &CustomScheme, value: &str) -> Result<Vec<u8>, Verify
 
 #[cfg(test)]
 mod tests {
-    use super::{CustomScheme, Encoding, HashAlg};
+    use super::{CustomScheme, Encoding, HashAlg, TimestampUnit};
     use crate::core::error::VerifyError;
     use crate::core::options::VerifyOptions;
     use crate::core::secret::Secret;
@@ -439,6 +576,24 @@ mod tests {
             "a651431edb322282434426d3e5bbb1c39eadd68e32d68e7604b28f3deee73791";
     }
 
+    /// The same fictional sender, but timestamping in epoch **milliseconds**
+    /// the way HubSpot, Contentful, WorkOS, Ripple, Airwallex, and Webflow all
+    /// do — the six built-in providers that call `parse_millis`
+    /// (`spec.md` §3). This is the configuration issue #273 says the API
+    /// could not previously express.
+    mod ms_scheme {
+        pub const SECRET: &str = "custom_shared_secret";
+        pub const HEADER: &str = "X-Example-Signature";
+        pub const TS_HEADER: &str = "X-Example-Timestamp";
+        /// The same instant `ts_scheme::TIMESTAMP` names, in milliseconds.
+        pub const TIMESTAMP_MILLIS: u64 = 1_700_000_000_123;
+        pub const PING_BODY: &[u8] = b"{\"event\":\"ping\"}";
+        /// HMAC-SHA256 over `1700000000123.{PING_BODY}`, cross-checked
+        /// against Python's `hmac`/`hashlib`.
+        pub const PING_SIG: &str =
+            "325311d7e44a82a8ee6aa561285a9bcb71dea12d5c4b0bb89bc57fae4d511d73";
+    }
+
     fn ts_signed_string(headers: &dyn crate::HeaderMap, raw_body: &[u8]) -> Vec<u8> {
         let ts = headers.get(ts_scheme::TS_HEADER).unwrap_or_default();
         let mut signed = Vec::with_capacity(ts.len() + 1 + raw_body.len());
@@ -453,6 +608,7 @@ mod tests {
             hash: HashAlg::Sha256,
             signature_header: ts_scheme::HEADER,
             timestamp_header: Some(ts_scheme::TS_HEADER),
+            timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Hex,
             prefix: Some("sha256="),
             signed_string: ts_signed_string,
@@ -486,6 +642,7 @@ mod tests {
             hash: HashAlg::Sha256,
             signature_header: "X-Slack-Signature",
             timestamp_header: Some("X-Slack-Request-Timestamp"),
+            timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Hex,
             prefix: Some("v0="),
             signed_string: |headers, raw_body| {
@@ -526,6 +683,7 @@ mod tests {
             hash,
             signature_header: "X-Raw-Sig",
             timestamp_header: None,
+            timestamp_unit: TimestampUnit::Seconds,
             encoding,
             prefix: None,
             signed_string: |_headers, raw_body| raw_body.to_vec(),
@@ -767,6 +925,7 @@ mod tests {
             hash: HashAlg::Sha256,
             signature_header: "X-Raw-Sig",
             timestamp_header: None,
+            timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Hex,
             prefix: None,
             signed_string: |_headers, raw_body| raw_body.to_vec(),
@@ -808,6 +967,7 @@ mod tests {
             signature_header: "X-Raw-Sig",
             // Declared, so a timestamp header is required and replay-checked...
             timestamp_header: Some("X-Raw-Timestamp"),
+            timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Hex,
             prefix: None,
             // ...but the signed bytes cover the body only, not the stamp.
@@ -1151,6 +1311,312 @@ mod tests {
             Default::default(),
         );
         assert_eq!(result, Ok(()));
+    }
+
+    // --- TimestampUnit (issue #273) -----------------------------------------
+
+    /// A millisecond scheme verifies, and the `Millis` value is floored to
+    /// whole seconds for the shared replay window.
+    ///
+    /// The millisecond stamp is `1700000000123`, i.e. the same instant as
+    /// `ts_scheme::TIMESTAMP` plus 123ms, so a clock at `1_700_000_000` gives a
+    /// floored skew of 0. Without the floor the same value would read as
+    /// ~56.6 billion seconds into the future and be rejected.
+    #[test]
+    fn millisecond_scheme_verifies_and_floors_to_whole_seconds() {
+        let scheme = CustomScheme {
+            timestamp_unit: TimestampUnit::Millis,
+            ..ts_scheme_config()
+        };
+        let result = verify_custom(
+            &scheme,
+            &[
+                (
+                    ms_scheme::HEADER.to_string(),
+                    format!("sha256={}", ms_scheme::PING_SIG),
+                ),
+                (
+                    ms_scheme::TS_HEADER.to_string(),
+                    "1700000000123".to_string(),
+                ),
+            ],
+            ms_scheme::PING_BODY,
+            ms_scheme::SECRET,
+            clocked_at(
+                ms_scheme::TIMESTAMP_MILLIS / 1000,
+                Some(Duration::from_secs(300)),
+            ),
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    /// The millisecond path honours the same symmetric window at its edges as
+    /// the seconds path: `max_age` itself verifies, one second past it does
+    /// not. Pinning the boundary is what proves the flooring happens *before*
+    /// the comparison rather than the value being compared as milliseconds.
+    #[test]
+    fn millisecond_scheme_replay_window_edges() {
+        let scheme = CustomScheme {
+            timestamp_unit: TimestampUnit::Millis,
+            ..ts_scheme_config()
+        };
+        let headers = [
+            (
+                ms_scheme::HEADER.to_string(),
+                format!("sha256={}", ms_scheme::PING_SIG),
+            ),
+            (
+                ms_scheme::TS_HEADER.to_string(),
+                "1700000000123".to_string(),
+            ),
+        ];
+        let at = |now| {
+            verify_custom(
+                &scheme,
+                &headers,
+                ms_scheme::PING_BODY,
+                ms_scheme::SECRET,
+                clocked_at(now, Some(Duration::from_secs(300))),
+            )
+        };
+
+        let base = ms_scheme::TIMESTAMP_MILLIS / 1000;
+        assert_eq!(at(base + 300), Ok(()), "exactly max_age old must verify");
+        assert_eq!(at(base - 300), Ok(()), "exactly max_age ahead must verify");
+
+        let stale = match at(base + 301) {
+            Ok(()) => panic!("301s old must be rejected, but it verified"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(stale, VerifyError::TimestampOutOfTolerance { .. }),
+            "301s old must be rejected, got {stale:?}"
+        );
+        // The reported skew is measured in seconds, not milliseconds: the
+        // flooring is what makes `skew` mean what `max_age` is denominated in.
+        assert!(
+            matches!(stale, VerifyError::TimestampOutOfTolerance { skew, .. }
+                if skew == Duration::from_secs(301)),
+            "skew must be floored seconds, got {stale:?}"
+        );
+    }
+
+    /// Declaring the unit wrong is the footgun issue #273 is about, and it
+    /// must fail *closed in both directions* rather than silently pass.
+    ///
+    /// A millisecond value read as seconds compares ~56.6 billion seconds
+    /// into the future; a seconds value read as milliseconds floors toward
+    /// 1970 and compares ~53.9 years in the past. Both are `u64` digit runs,
+    /// so neither trips a parse error — which is exactly why the unit has to
+    /// be declared rather than sniffed.
+    #[test]
+    fn a_mismatched_timestamp_unit_never_verifies() {
+        let ms_stamp = "1700000000123";
+        let secs_stamp = "1700000000";
+        let now = 1_700_000_000;
+
+        // Millisecond stamp, scheme left at the Seconds default.
+        let read_as_seconds = CustomScheme::new(
+            HashAlg::Sha256,
+            ms_scheme::HEADER,
+            Encoding::Hex,
+            ts_signed_string,
+        )
+        .with_timestamp_header(ms_scheme::TS_HEADER)
+        .with_prefix("sha256=");
+        let misread = verify_custom(
+            &read_as_seconds,
+            &[
+                (
+                    ms_scheme::HEADER.to_string(),
+                    format!("sha256={}", ms_scheme::PING_SIG),
+                ),
+                (ms_scheme::TS_HEADER.to_string(), ms_stamp.to_string()),
+            ],
+            ms_scheme::PING_BODY,
+            ms_scheme::SECRET,
+            clocked_at(now, Some(Duration::from_secs(300))),
+        );
+        assert!(
+            matches!(misread, Err(VerifyError::TimestampOutOfTolerance { .. })),
+            "a millisecond stamp read as seconds must be rejected, got {misread:?}"
+        );
+
+        // Seconds stamp, scheme declared as Millis.
+        let read_as_millis = CustomScheme {
+            timestamp_unit: TimestampUnit::Millis,
+            ..ts_scheme_config()
+        };
+        let misread = verify_custom(
+            &read_as_millis,
+            &[
+                (
+                    ms_scheme::HEADER.to_string(),
+                    format!("sha256={}", ts_scheme::PING_SIG),
+                ),
+                (ms_scheme::TS_HEADER.to_string(), secs_stamp.to_string()),
+            ],
+            ts_scheme::PING_BODY,
+            ts_scheme::SECRET,
+            clocked_at(now, Some(Duration::from_secs(300))),
+        );
+        assert!(
+            matches!(misread, Err(VerifyError::TimestampOutOfTolerance { .. })),
+            "a seconds stamp read as milliseconds must be rejected, got {misread:?}"
+        );
+    }
+
+    /// A millisecond header that isn't a digit run is still a malformed
+    /// header, and the diagnostic names the *millisecond* unit — the operator
+    /// debugging it is looking at an epoch-ms sender, not a seconds one.
+    #[test]
+    fn malformed_millisecond_header_reports_the_declared_unit() {
+        let scheme = CustomScheme {
+            timestamp_unit: TimestampUnit::Millis,
+            ..ts_scheme_config()
+        };
+        let misparsed = verify_custom(
+            &scheme,
+            &[
+                (
+                    ms_scheme::HEADER.to_string(),
+                    format!("sha256={}", ms_scheme::PING_SIG),
+                ),
+                (
+                    ms_scheme::TS_HEADER.to_string(),
+                    "not-a-timestamp".to_string(),
+                ),
+            ],
+            ms_scheme::PING_BODY,
+            ms_scheme::SECRET,
+            clocked_at(1_700_000_000, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(
+            misparsed,
+            Err(VerifyError::MalformedHeader {
+                header: ts_scheme::TS_HEADER,
+                reason: "timestamp is not valid epoch milliseconds",
+            }),
+        );
+    }
+
+    /// A tampered body still fails on the signature check *before* the replay
+    /// comparison, so the unit never becomes a way to skip the HMAC.
+    #[test]
+    fn millisecond_scheme_still_rejects_a_tampered_body() {
+        let scheme = CustomScheme {
+            timestamp_unit: TimestampUnit::Millis,
+            ..ts_scheme_config()
+        };
+        let result = verify_custom(
+            &scheme,
+            &[
+                (
+                    ms_scheme::HEADER.to_string(),
+                    format!("sha256={}", ms_scheme::PING_SIG),
+                ),
+                (
+                    ms_scheme::TS_HEADER.to_string(),
+                    "1700000000123".to_string(),
+                ),
+            ],
+            b"{\"event\":\"pong\"}",
+            ms_scheme::SECRET,
+            clocked_at(
+                ms_scheme::TIMESTAMP_MILLIS / 1000,
+                Some(Duration::from_secs(300)),
+            ),
+        );
+        assert_eq!(result, Err(VerifyError::SignatureMismatch));
+    }
+
+    /// The unit defaults to seconds everywhere a caller does not say
+    /// otherwise, so no existing scheme changes behavior (issue #273's
+    /// backward-compatibility requirement) and the `Default` impl the field
+    /// doc points at agrees.
+    #[test]
+    fn timestamp_unit_defaults_to_seconds() {
+        assert_eq!(TimestampUnit::default(), TimestampUnit::Seconds);
+        assert_eq!(ts_scheme_config().timestamp_unit, TimestampUnit::Seconds);
+        assert_eq!(
+            CustomScheme::new(
+                HashAlg::Sha256,
+                "X-Webhook-Sig",
+                Encoding::Hex,
+                |_headers, raw_body| raw_body.to_vec(),
+            )
+            .timestamp_unit,
+            TimestampUnit::Seconds
+        );
+
+        // The builder sets what it says, in both directions, and composes
+        // with the other optional setters without disturbing them.
+        let scheme = CustomScheme::new(
+            HashAlg::Sha256,
+            "X-Webhook-Sig",
+            Encoding::Hex,
+            ts_signed_string,
+        )
+        .with_timestamp_header("X-Ts")
+        .with_timestamp_unit(TimestampUnit::Millis)
+        .with_prefix("sha256=");
+        assert_eq!(scheme.timestamp_unit, TimestampUnit::Millis);
+        assert_eq!(scheme.timestamp_header, Some("X-Ts"));
+        assert_eq!(scheme.prefix, Some("sha256="));
+    }
+
+    /// The declared unit is part of the scheme's identity, so it has to
+    /// participate in `PartialEq` and `Hash` alongside the other declarative
+    /// fields — two schemes differing only in unit are different schemes, and
+    /// a caller keying a map by scheme must not collapse them.
+    #[test]
+    fn timestamp_unit_participates_in_equality_and_hash() {
+        use crate::test_helpers::hash_of;
+
+        let seconds = ts_scheme_config();
+        let millis = CustomScheme {
+            timestamp_unit: TimestampUnit::Millis,
+            ..ts_scheme_config()
+        };
+        assert_ne!(seconds, millis, "timestamp_unit participates in equality");
+        assert_ne!(
+            hash_of(&seconds),
+            hash_of(&millis),
+            "timestamp_unit participates in Hash"
+        );
+    }
+
+    /// A `Millis` unit is inert without a timestamp header: no replay check
+    /// runs, so the value is never parsed and a malformed one is not read.
+    #[test]
+    fn millisecond_unit_without_a_timestamp_header_is_inert() {
+        let scheme = CustomScheme {
+            timestamp_header: None,
+            timestamp_unit: TimestampUnit::Millis,
+            // Raw-body signing, so nothing reads a timestamp header at all.
+            signed_string: |_headers, raw_body| raw_body.to_vec(),
+            ..ts_scheme_config()
+        };
+        let result = verify_custom(
+            &scheme,
+            &[(
+                ts_scheme::HEADER.to_string(),
+                // HMAC-SHA256 over b"payload" with key "shared-secret", behind
+                // the `sha256=` prefix `ts_scheme_config` requires.
+                "sha256=0e7320e558b4421b7aa464a9027132b7176c02adf16ed36778ce302d6f2a6ac3"
+                    .to_string(),
+            )],
+            b"payload",
+            "shared-secret",
+            Default::default(),
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn timestamp_unit_display_names_the_unit() {
+        assert_eq!(TimestampUnit::Seconds.to_string(), "seconds");
+        assert_eq!(TimestampUnit::Millis.to_string(), "milliseconds");
     }
 
     #[test]
