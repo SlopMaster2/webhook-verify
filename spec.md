@@ -531,7 +531,12 @@ the SDK and reference examples disambiguate its details.
   ahead of the query (an empty path and the root path are the same request
   target, and the SDK's `new URL(...).pathname` reports `/`). A `/` *inside* a
   query or fragment therefore belongs to neither the authority nor the path and
-  must not be mistaken for the path start (issue #216).
+  must not be mistaken for the path start (issue #216). That root synthesis
+  applies to the bare spelling too: a slash-less bare reference (`?a=b`, `#f`,
+  `webhooks/cms`, `""`) is root-relative and gets the same leading `/`, so both
+  spellings of one request target sign identically (issue #290). Without it the
+  bare form signed a zero-length — or unrooted — path that Contentful never
+  signed, so the failure direction is a false *reject* of a legitimate delivery.
 - Path/query encoding — **unsettled divergence between the two cited sources**
   (issue #231; §7). The docs' pseudo-code encodes the query once; the
   reference SDK's `getNormalizedEncodedURI` applies `querystring.escape`
@@ -3681,8 +3686,11 @@ A provider implementation is not mergeable until it has:
     failure. A future wire capture should update that table, §3, and the
     provider's module docs in one change.
   - Related but separate: issue #216 fixed a path-normalization *bug* in the
-    same function (authority delimiters, `?`/`#` before the first `/`). It did
-    not touch encoding and is not affected by this divergence.
+    same function (authority delimiters, `?`/`#` before the first `/`). Issue
+    #290 fixed the sibling case the #216 fix missed — the bare `request_url`
+    spelling never reached the root-`/` synthesis, so `?a=b` signed `?a%3Db`
+    where the full URL signed `/?a%3Db`. Neither touches the query *encoding*
+    divergence above, and #290 is unaffected by it.
 - **Provider promotion criteria.** A `CustomScheme` recipe gets promoted to
   a first-class `Provider` variant once it has (a) official test vectors,
   (b) at least one external user request or contribution, and (c) no open
