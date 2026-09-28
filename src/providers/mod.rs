@@ -3823,8 +3823,6 @@ mod tests {
             Provider::Coinbase => coinbase::SIGNATURE_HEADER,
             Provider::Contentful => contentful::SIGNATURE_HEADER,
             Provider::Custom(_) => return None,
-            // The Svix spelling is the documented alternative of the same field,
-            // so the standard name satisfies the row.
             Provider::Discord => discord::SIGNATURE_HEADER,
             Provider::DocuSign => docusign::SIGNATURE_HEADER,
             Provider::Dropbox => dropbox::SIGNATURE_HEADER,
@@ -3863,6 +3861,8 @@ mod tests {
             Provider::Shopify => shopify::SIGNATURE_HEADER,
             Provider::Slack => slack::SIGNATURE_HEADER,
             Provider::Square => square::SIGNATURE_HEADER,
+            // The Svix spelling is the documented alternative of the same field,
+            // so the standard name alone satisfies the row.
             Provider::StandardWebhooks => standard_webhooks::SIGNATURE_HEADER,
             Provider::Stripe => stripe::SIGNATURE_HEADER,
             Provider::Tailscale => tailscale::SIGNATURE_HEADER,
