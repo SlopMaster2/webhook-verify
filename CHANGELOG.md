@@ -341,6 +341,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`verify_hmac_sha256`'s doc claimed a wrong-length signature compares unequal
+  in constant time; `subtle` short-circuits on length** (issue #294). The doc
+  read "Signature length mismatches also simply compare unequal in constant
+  time — length is public information, so branching on it leaks nothing secret":
+  the second clause concedes the branch, which makes the first one false.
+  `subtle::ConstantTimeEq for [T]` documents its own `# Note`: "This function
+  short-circuits if the lengths of the input slices are different." A
+  wrong-length candidate is therefore rejected without a byte-by-byte
+  comparison.
+
+  No behavior changes and none should: the early return is over a public value
+  (the length of the caller's own signature), never over the key or the expected
+  digest, and a wrong-length signature is a mismatch either way. What was wrong
+  was the *description*, in the one place a future contributor would look before
+  adding a length pre-check — or worse, an `==` length gate presented as
+  "equivalent" — in front of a `ct_eq` elsewhere. The accurate wording already
+  existed 35 lines below, in `verify_hmac_sha256_any`'s doc; all four sibling
+  helpers inherit the fix through "Same guarantees as `verify_hmac_sha256`".
+
+  The crate's two headline statements of the same property are now qualified
+  rather than absolute: the crate docs' **Security properties** list and
+  `README.md` §**Security notes** both read "all signature comparisons use
+  `subtle::ConstantTimeEq`", constant-time across candidates of the expected
+  length, with the length mismatch called out. `spec.md` §4.1 records the same
+  qualification normatively, so the guarantee cannot be silently widened by a
+  later edit to one surface only.
+
+  Two comparison helpers asserted a wrong-length rejection that no test pinned,
+  unlike the three that already had `rejects_tampered_and_wrong_length`
+  coverage: `verify_hmac_sha256_any` (where a rotation list carrying a truncated
+  entry beside a genuine signature is the realistic case, and a helper that
+  `return`ed on the first candidate would drop the match that follows it) and
+  `verify_sha256_prepended_key` (Recharge's plain `sha256(secret || body)`).
+  `hmac_sha256_any_rejects_a_wrong_length_candidate` covers short, over-long, and
+  empty candidates and asserts the full list is still walked; the prepended-key
+  case is pinned inside its existing vector test. Docs, doc comments, and tests
+  only: no API change, no provider behavior change, no new dependency.
+
 - **The `README.md` **Releasing** checklist still said `git tag v0.1.0`, so
   following it tagged the 0.2.0 release `v0.1.0`** (issue #292). The
   manifest declares `version = "0.2.0"` (bumped for the

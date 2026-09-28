@@ -64,9 +64,19 @@ where
 ///
 /// Fails closed: if key construction fails (cannot happen for HMAC, which
 /// accepts arbitrary-length keys, but the API returns `Result`) this returns
-/// `false`. Signature length mismatches also simply compare unequal in
-/// constant time — length is public information, so branching on it leaks
-/// nothing secret.
+/// `false`.
+///
+/// "Constant-time" here covers candidates *of the digest's length*, which is
+/// what [`subtle::ConstantTimeEq`]'s slice implementation promises — it
+/// short-circuits when the two slices have different lengths, so a
+/// wrong-length `provided_signature` is rejected without a byte-by-byte
+/// comparison at all. That branch is over a public value (the length of the
+/// caller's own signature, which the caller already knows and which an
+/// attacker chooses freely) and never over the key or the expected digest,
+/// so it leaks nothing secret. It is also the reason no caller of these
+/// helpers should pre-check the length with `==` and treat that as an
+/// equivalent comparison: the short-circuit is inside `subtle`, not something
+/// to re-implement.
 #[must_use]
 pub(crate) fn verify_hmac_sha256(
     key: &[u8],
@@ -96,11 +106,12 @@ pub(crate) fn verify_hmac_sha256(
 /// the per-delivery HMAC work by the candidate count, all of it attacker-
 /// reachable.
 ///
-/// The comparison keeps [`verify_hmac_sha256`]'s guarantees: constant-time per
-/// candidate, no early exit (the accumulator is OR-ed across the whole
-/// iterator), and `false` — not an error — if key construction fails or the
-/// candidate list is empty. A wrong-length candidate compares unequal, which
-/// leaks nothing secret.
+/// The comparison keeps [`verify_hmac_sha256`]'s guarantees: constant-time for
+/// each candidate of the digest's length, no early exit (the accumulator is
+/// OR-ed across the whole iterator), and `false` — not an error — if key
+/// construction fails or the candidate list is empty. A wrong-length candidate
+/// compares unequal without a byte-by-byte comparison, which leaks nothing
+/// secret.
 #[must_use]
 pub(crate) fn verify_hmac_sha256_any<'a, I>(
     key: &[u8],
@@ -642,6 +653,45 @@ mod tests {
         ));
     }
 
+    /// Pins the length-mismatch behavior the comparison docs describe for
+    /// every helper in this module: a `subtle::ConstantTimeEq` slice
+    /// comparison short-circuits on unequal lengths, so a wrong-length
+    /// candidate is rejected outright rather than compared byte by byte. The
+    /// docs must never claim the comparison is constant-time *across* that
+    /// branch — it is constant-time for candidates of the digest's length,
+    /// and the short-circuit is over a public value.
+    ///
+    /// The multi-candidate list is where a wrong-length entry is realistic:
+    /// a rotation list can carry a truncated or unencoded entry next to a
+    /// genuine signature, and a short-circuited helper that `return`ed on the
+    /// first candidate would drop the match that follows it.
+    #[test]
+    fn hmac_sha256_any_rejects_a_wrong_length_candidate() {
+        let key = b"Jefe";
+        let data = b"what do ya want for nothing?";
+        let signature = decode("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+        let short = &signature[..31];
+        let mut long = signature.clone();
+        long.push(0);
+
+        // Sole candidate: wrong length either way is a mismatch.
+        assert!(!verify_hmac_sha256_any(key, data, [short]));
+        assert!(!verify_hmac_sha256_any(key, data, [long.as_slice()]));
+        // Empty is the degenerate length mismatch, same outcome.
+        assert!(!verify_hmac_sha256_any(key, data, [&[][..]]));
+
+        // ... and the whole list is still walked: a wrong-length entry beside
+        // a genuine one must not stop the genuine one from matching.
+        assert!(verify_hmac_sha256_any(
+            key,
+            data,
+            [short, long.as_slice(), signature.as_slice()],
+        ));
+        // Same list without the genuine entry is a mismatch, so the pass above
+        // is the match and not some "something was well-formed" shortcut.
+        assert!(!verify_hmac_sha256_any(key, data, [short, long.as_slice()]));
+    }
+
     #[test]
     fn hmac_sha1_matches_rfc2202_vector() {
         // RFC 2202 test case 2: key "Jefe", data "what do ya want for nothing?"
@@ -751,6 +801,21 @@ mod tests {
         // `printf 'data' | openssl dgst -sha256 -hmac "key"`.
         let hmac = decode("5031fe3d989c6d1537a013fa6e739da23463fdaec3b70137d828e36ace221bd0");
         assert!(!super::verify_sha256_prepended_key(b"key", b"data", &hmac));
+
+        // A wrong-length digest is a mismatch for the same reason every other
+        // helper in this module rejects one: `subtle`'s slice `ct_eq`
+        // short-circuits on the length, before comparing any bytes. The
+        // digest size is public, so that early return leaks nothing.
+        assert!(!super::verify_sha256_prepended_key(
+            b"key",
+            b"data",
+            &digest[..31]
+        ));
+        let mut over_long = digest.clone();
+        over_long.push(0);
+        assert!(!super::verify_sha256_prepended_key(
+            b"key", b"data", &over_long
+        ));
     }
 
     #[test]
