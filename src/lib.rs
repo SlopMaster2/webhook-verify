@@ -52,7 +52,7 @@
 //!
 //! | Provider | Scheme |
 //! |---|---|
-//! | Stripe | HMAC-SHA256 over `timestamp.body`, tolerance window |
+//! | Stripe | HMAC-SHA256 over `timestamp.body`, `Stripe-Signature` (`t=`,`v1=` rotation list) + tolerance window |
 //! | GitHub | HMAC-SHA256, `X-Hub-Signature-256` |
 //! | Bitbucket | HMAC-SHA256, `sha256=` prefix, `X-Hub-Signature` |
 //! | Contentful | hex HMAC-SHA256 of `[method, path, signedHeaders, body].join('\n')`, `x-contentful-signature` (headers and order self-described by `x-contentful-signed-headers`) + `x-contentful-timestamp` (epoch ms) replay window (needs `VerifyOptions::request_method` + `request_url`) |
@@ -63,7 +63,7 @@
 //! | HubSpot | HMAC-SHA256 over `{method}{uri}{body}{timestamp}` (epoch ms), base64, `X-HubSpot-Signature-V3` + tolerance window (needs `VerifyOptions::request_method` + `request_url`) |
 //! | Klaviyo | HMAC-SHA256 over `{raw_body}{timestamp}`, hex, `Klaviyo-Signature` + `Klaviyo-Timestamp` (IMF-fixdate) replay window |
 //! | Shopify | HMAC-SHA256, base64, `X-Shopify-Hmac-Sha256` |
-//! | Slack | HMAC-SHA256 `v0=` scheme + `X-Slack-Request-Timestamp` tolerance window |
+//! | Slack | HMAC-SHA256 `v0=` scheme, `X-Slack-Signature` + `X-Slack-Request-Timestamp` tolerance window |
 //! | Square | HMAC-SHA256 over notification URL + body, base64, `x-square-hmacsha256-signature` (needs `VerifyOptions::request_url`) |
 //! | Tally | HMAC-SHA256 over raw body, base64, `Tally-Signature` (no timestamp) |
 //! | FastSpring | HMAC-SHA256 over raw body, base64, `X-FS-Signature` (per-webhook HMAC secret, no timestamp; header may arrive with varying case) |
@@ -74,9 +74,9 @@
 //! | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) |
 //! | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp tolerance window |
 //! | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` |
-//! | Discord | Ed25519 public-key signatures (no shared secret) + `X-Signature-Timestamp` tolerance window |
-//! | PayPal | RSASSA-PKCS1-v1_5 SHA-256, X.509 cert + webhook ID + `PayPal-Transmission-Time` tolerance window |
-//! | SendGrid | ECDSA P-256 over `{timestamp}{raw_body}` (no separator) + `X-Twilio-Email-Event-Webhook-Timestamp` tolerance window |
+//! | Discord | Ed25519 public-key signatures (no shared secret): `X-Signature-Ed25519` + `X-Signature-Timestamp` tolerance window |
+//! | PayPal | RSASSA-PKCS1-v1_5 SHA-256, `PayPal-Transmission-Sig` (+ `-Id`/`-Time`/`-Cert-Url`/`-Auth-Algo`), X.509 cert + webhook ID + `PayPal-Transmission-Time` tolerance window |
+//! | SendGrid | ECDSA P-256 over `{timestamp}{raw_body}` (no separator), `X-Twilio-Email-Event-Webhook-Signature` + `X-Twilio-Email-Event-Webhook-Timestamp` tolerance window |
 //! | Paystack | HMAC-SHA512 over raw body, hex, `x-paystack-signature` (no timestamp) |
 //! | Paddle | HMAC-SHA256 over `{ts}:{raw_body}`, hex, `Paddle-Signature` + tolerance window |
 //! | PagerDuty | HMAC-SHA256 over raw body, hex, `v1=` prefix, `X-PagerDuty-Signature` (`v1=` rotation list) |
@@ -85,7 +85,7 @@
 //! | LaunchDarkly | HMAC-SHA256 over raw body, hex, `X-LD-Signature` (no timestamp) |
 //! | Notion | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Notion-Signature` |
 //! | Nylas | HMAC-SHA256 over raw body, bare hex, `x-nylas-signature` (no timestamp) |
-//! | Zoom | HMAC-SHA256 `v0=` scheme + `x-zm-request-timestamp` tolerance window |
+//! | Zoom | HMAC-SHA256 `v0=` scheme, `x-zm-signature` + `x-zm-request-timestamp` tolerance window |
 //! | Cloudflare (Stream) | HMAC-SHA256 over `time.body`, hex, `Webhook-Signature` + `time=` timestamp tolerance window |
 //! | CircleCI (outbound webhooks) | HMAC-SHA256 over raw body, hex, `v1=` prefix, `circleci-signature` (versioned signature list, no timestamp) |
 //! | Coinbase (CDP) | HMAC-SHA256 over `t.body`, hex, `X-Hook0-Signature` + tolerance window |
@@ -109,7 +109,7 @@
 //! | Webflow | HMAC-SHA256 over `{timestamp}:{raw_body}` (epoch ms), hex, `x-webflow-signature` + `x-webflow-timestamp` replay window |
 //! | X (formerly Twitter) | HMAC-SHA256 over raw body, base64, `sha256=` prefix, `x-twitter-webhooks-signature` (no timestamp) |
 //! | Tailscale | HMAC-SHA256 over `t.body`, hex, `Tailscale-Webhook-Signature` (`t=,v1=` list, rotation-safe) + tolerance window |
-//! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists, via `webhook-*` or Svix-branded `svix-*` header names (Svix, Clerk, Resend, Bird/MessageBird, GitLab 19.0+ signing tokens, OpenAI, Warp, Loops, Anthropic, Gemini, Brex, BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments, Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip, Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona, Polar, Helcim, 360Learning, Celitech, Natural, Origami, Parallel, Openlayer, Acolad, Allo, Lexe, ...) |
+//! | Standard Webhooks | HMAC-SHA256 with replay + rotation lists, `webhook-signature`/`webhook-id`/`webhook-timestamp` or Svix-branded `svix-signature`/`svix-id`/`svix-timestamp` (Svix, Clerk, Resend, Bird/MessageBird, GitLab 19.0+ signing tokens, OpenAI, Warp, Loops, Anthropic, Gemini, Brex, BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments, Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip, Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona, Polar, Helcim, 360Learning, Celitech, Natural, Origami, Parallel, Openlayer, Acolad, Allo, Lexe, ...) |
 //! | Custom | User-supplied HMAC scheme via [`Provider::Custom`] (SHA-256/SHA-1/SHA-512, hex/base64, optional prefix + timestamp replay window when a `timestamp_header` is set) |
 //!
 //! PayPal and SendGrid ship behind crate features; calling [`verify()`] with

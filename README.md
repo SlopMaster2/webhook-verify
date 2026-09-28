@@ -85,7 +85,7 @@ hand-copied signing-string logic to get wrong.
 
 | Provider | Scheme | Status |
 |---|---|---|
-| Stripe | HMAC-SHA256 over `timestamp.body`, tolerance window | ✅ |
+| Stripe | HMAC-SHA256 over `timestamp.body`, `Stripe-Signature` (`t=`,`v1=` list, rotation-safe) + tolerance window | ✅ |
 | GitHub | HMAC-SHA256, `X-Hub-Signature-256` | ✅ |
 | Bitbucket | HMAC-SHA256, `sha256=` prefix, `X-Hub-Signature` | ✅ |
 | Contentful | Hex HMAC-SHA256 of `[method, path, signedHeaders, body].join('\n')`, `x-contentful-signature` (signed headers self-described by `x-contentful-signed-headers`) + `x-contentful-timestamp` (epoch ms) replay window (needs `VerifyOptions::request_method` + `request_url`; only the query portion is URL-encoded, per Contentful's docs) | ✅ |
@@ -107,9 +107,9 @@ hand-copied signing-string logic to get wrong.
 | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) | ✅ |
 | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp replay window | ✅ |
 | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` | ✅ |
-| Discord | Ed25519 (public-key), no shared secret + `X-Signature-Timestamp` (unix seconds) replay window | ✅ |
-| PayPal | RSASSA-PKCS1-v1_5 SHA-256 over `transmission_id|time|webhook_id|crc32(body)`, X.509 cert + webhook ID via `VerifyOptions::verifying_material` + `webhook_id` (needs `paypal` feature) + `PayPal-Transmission-Time` (RFC 3339) replay window | ✅ |
-| SendGrid | ECDSA P-256 over the raw timestamp from its header immediately concatenated with the raw body (no separator), public key via `VerifyOptions::verifying_material` (needs `sendgrid` feature) + `X-Twilio-Email-Event-Webhook-Timestamp` (unix seconds) replay window | ✅ |
+| Discord | Ed25519 (public-key), no shared secret: `X-Signature-Ed25519` + `X-Signature-Timestamp` (unix seconds) replay window | ✅ |
+| PayPal | RSASSA-PKCS1-v1_5 SHA-256 over `transmission_id|time|webhook_id|crc32(body)`, `PayPal-Transmission-Sig` (plus `PayPal-Transmission-Id`/`-Time`/`-Cert-Url`/`-Auth-Algo`), X.509 cert + webhook ID via `VerifyOptions::verifying_material` + `webhook_id` (needs `paypal` feature) + `PayPal-Transmission-Time` (RFC 3339) replay window | ✅ |
+| SendGrid | ECDSA P-256 over the raw timestamp from `X-Twilio-Email-Event-Webhook-Timestamp` immediately concatenated with the raw body (no separator), signature in `X-Twilio-Email-Event-Webhook-Signature`, public key via `VerifyOptions::verifying_material` (needs `sendgrid` feature) + `X-Twilio-Email-Event-Webhook-Timestamp` (unix seconds) replay window | ✅ |
 | Paystack | HMAC-SHA512 over raw body, bare hex, `x-paystack-signature` (no prefix, no timestamp) | ✅ |
 | Paddle | HMAC-SHA256, hex, `Paddle-Signature` (`ts=;h1=` list, rotation-safe) + replay window | ✅ |
 | PagerDuty (v3 webhooks) | HMAC-SHA256 over raw body, hex, `v1=` prefix, `X-PagerDuty-Signature` (`v1=` rotation list, no timestamp) | ✅ |
@@ -142,7 +142,7 @@ hand-copied signing-string logic to get wrong.
 | Webflow (Site Webhooks) | HMAC-SHA256 over `{timestamp}:{raw_body}` (colon join, epoch-ms timestamp), hex, `x-webflow-signature` + `x-webflow-timestamp` (site token secret / OAuth client secret key) + replay window | ✅ |
 | X (formerly Twitter) | HMAC-SHA256 over raw body, base64, `sha256=` prefix, `x-twitter-webhooks-signature` (no timestamp; consumer secret key) | ✅ |
 | Tailscale | HMAC-SHA256 over `t.body`, hex, `Tailscale-Webhook-Signature` (`t=,v1=` list, rotation-safe) + replay window | ✅ |
-| Standard Webhooks spec (Svix, Clerk, Resend, Bird/MessageBird, GitLab 19.0+ signing tokens, OpenAI, Warp, Loops, Anthropic, Gemini, Brex, BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments, Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip, Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona, Polar, Helcim, 360Learning, Celitech, Natural, Origami, Parallel, Openlayer, Acolad, Allo, Lexe, ...) | HMAC-SHA256, `webhook-signature` or Svix-branded `svix-signature` (`v1,` base64, rotation list) + replay window | ✅ |
+| Standard Webhooks spec (Svix, Clerk, Resend, Bird/MessageBird, GitLab 19.0+ signing tokens, OpenAI, Warp, Loops, Anthropic, Gemini, Brex, BigCommerce, Lithic, incident.io, Supabase, Etsy, Sardine, Dodo Payments, Zapier, Vanta, SafetyKit, Prescience, TaskRabbit, Liveblocks, Flip, Replicate, inai, Drata, Nash, Render, Yoco, Novu, Crossmint, Daytona, Polar, Helcim, 360Learning, Celitech, Natural, Origami, Parallel, Openlayer, Acolad, Allo, Lexe, ...) | HMAC-SHA256, `webhook-signature` or Svix-branded `svix-signature` (`v1,` base64, rotation list) + `webhook-id`/`webhook-timestamp` (or `svix-id`/`svix-timestamp`) replay window | ✅ |
 | Custom | User-supplied HMAC scheme via `Provider::Custom(..)` (SHA-256/SHA-1/SHA-512, hex/base64, optional prefix + timestamp replay window) | ✅ |
 
 Some providers ship behind crate features: calling `verify()` on `PayPal`

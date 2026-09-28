@@ -3794,6 +3794,154 @@ mod tests {
         }
     }
 
+    /// The header a provider's signature is actually **read from** — the
+    /// subset of the §4.4 ambiguity list that a caller has to look up.
+    ///
+    /// Spelled out per provider rather than derived from
+    /// [`signature_header_names`] (whose first entry is *not* always the
+    /// signature: Twitch's list leads with the message id, and PayPal's and
+    /// SendGrid's are feature-gated) for two reasons. It must run in every
+    /// feature configuration, because the two tables it checks are
+    /// unconditional documentation, whereas `signature_header_names` only
+    /// exists behind `http`/`tower`/`actix`. And "first entry" is the wrong
+    /// question anyway — it asks where a *duplicate-detection scan* happens to
+    /// start, not where the signature is.
+    ///
+    /// Every constant referenced is the provider module's own, so a renamed
+    /// header fails this guard instead of leaving a stale literal in a table.
+    /// `None` for `Custom`, whose header is caller-declared and named by the
+    /// row's own text.
+    fn primary_signature_header(provider: &Provider) -> Option<&'static str> {
+        Some(match provider {
+            Provider::Adyen => adyen::SIGNATURE_HEADER,
+            Provider::Airwallex => airwallex::SIGNATURE_HEADER,
+            Provider::Bitbucket => bitbucket::SIGNATURE_HEADER,
+            Provider::Box => box_webhooks::PRIMARY_SIGNATURE_HEADER,
+            Provider::Calendly => calendly::SIGNATURE_HEADER,
+            Provider::CircleCi => circleci::SIGNATURE_HEADER,
+            Provider::Cloudflare => cloudflare::SIGNATURE_HEADER,
+            Provider::Coinbase => coinbase::SIGNATURE_HEADER,
+            Provider::Contentful => contentful::SIGNATURE_HEADER,
+            Provider::Custom(_) => return None,
+            Provider::Discord => discord::SIGNATURE_HEADER,
+            Provider::DocuSign => docusign::SIGNATURE_HEADER,
+            Provider::Dropbox => dropbox::SIGNATURE_HEADER,
+            Provider::Expo => expo::SIGNATURE_HEADER,
+            Provider::FastSpring => fastspring::SIGNATURE_HEADER,
+            Provider::Fintoc => fintoc::SIGNATURE_HEADER,
+            Provider::GitHub => github::SIGNATURE_HEADER,
+            Provider::GoCardless => gocardless::SIGNATURE_HEADER,
+            Provider::HubSpot => hubspot::SIGNATURE_HEADER,
+            Provider::Intercom => intercom::SIGNATURE_HEADER,
+            Provider::Klaviyo => klaviyo::SIGNATURE_HEADER,
+            Provider::LaunchDarkly => launchdarkly::SIGNATURE_HEADER,
+            Provider::LemonSqueezy => lemonsqueezy::SIGNATURE_HEADER,
+            Provider::Line => line::SIGNATURE_HEADER,
+            Provider::Linear => linear::SIGNATURE_HEADER,
+            Provider::Mandrill => mandrill::SIGNATURE_HEADER,
+            Provider::Meta => meta::SIGNATURE_HEADER,
+            Provider::Mollie => mollie::SIGNATURE_HEADER,
+            Provider::Mux => mux::SIGNATURE_HEADER,
+            Provider::Notion => notion::SIGNATURE_HEADER,
+            Provider::Nylas => nylas::SIGNATURE_HEADER,
+            Provider::Paddle => paddle::SIGNATURE_HEADER,
+            Provider::PagerDuty => pagerduty::SIGNATURE_HEADER,
+            // Unconditional: the header name is a documented constant of the
+            // scheme and is documented in the table whether or not the
+            // `paypal`/`sendgrid` features are compiled in — the row notes the
+            // feature separately.
+            Provider::PayPal => "PayPal-Transmission-Sig",
+            Provider::Paystack => paystack::SIGNATURE_HEADER,
+            Provider::Pusher => pusher::SIGNATURE_HEADER,
+            Provider::Razorpay => razorpay::SIGNATURE_HEADER,
+            Provider::Recharge => recharge::SIGNATURE_HEADER,
+            Provider::Ripple => ripple::SIGNATURE_HEADER,
+            Provider::SendGrid => "X-Twilio-Email-Event-Webhook-Signature",
+            Provider::Sentry => sentry::SIGNATURE_HEADER,
+            Provider::Shopify => shopify::SIGNATURE_HEADER,
+            Provider::Slack => slack::SIGNATURE_HEADER,
+            Provider::Square => square::SIGNATURE_HEADER,
+            // The Svix spelling is the documented alternative of the same field,
+            // so the standard name alone satisfies the row.
+            Provider::StandardWebhooks => standard_webhooks::SIGNATURE_HEADER,
+            Provider::Stripe => stripe::SIGNATURE_HEADER,
+            Provider::Tailscale => tailscale::SIGNATURE_HEADER,
+            Provider::Tally => tally::SIGNATURE_HEADER,
+            Provider::Twitch => twitch::SIGNATURE_HEADER,
+            Provider::Twilio => twilio::SIGNATURE_HEADER,
+            Provider::Typeform => typeform::SIGNATURE_HEADER,
+            Provider::Vercel => vercel::SIGNATURE_HEADER,
+            Provider::Webflow => webflow::SIGNATURE_HEADER,
+            Provider::WorkOS => workos::SIGNATURE_HEADER,
+            Provider::WooCommerce => woocommerce::SIGNATURE_HEADER,
+            Provider::X => x_twitter::SIGNATURE_HEADER,
+            Provider::Xero => xero::SIGNATURE_HEADER,
+            Provider::Zendesk => zendesk::SIGNATURE_HEADER,
+            Provider::Zoom => zoom::SIGNATURE_HEADER,
+        })
+    }
+
+    #[test]
+    fn provider_tables_name_the_header_the_signature_is_read_from() {
+        // The two summary tables already have two drift guards — one for
+        // coverage, one for the replay claim — but nothing checked the thing a
+        // caller opens the table to learn: *which header carries the
+        // signature*. `spec.md` §3 pins that for the spec; these tables did not,
+        // and the rows drifted. They failed in the worst possible direction,
+        // naming a *companion* header while omitting the signature one, so a
+        // reader scanning for the signature found something else:
+        //
+        //   * `Stripe` named no header at all — in the table's most prominent
+        //     row, leaving a reader no way to find the signature.
+        //   * `Discord` named `X-Signature-Timestamp` and not
+        //     `X-Signature-Ed25519`, which is worse than naming nothing: the
+        //     two differ by one suffix, and reading the row as written
+        //     suggests a shared-secret HMAC over a timestamp, obscuring the
+        //     fact that the scheme is asymmetric and keyless.
+        //   * `PayPal` and `SendGrid` had the same shape (the RFC 3339 /
+        //     unix-seconds timestamp in place of the signature header).
+        //   * The crate-doc table additionally dropped `X-Slack-Signature`
+        //     and `x-zm-signature` for their timestamp companions, so the two
+        //     tables disagreed about the same provider.
+        //
+        // Only the signature header is required, not every name in the §4.4
+        // ambiguity list: several rows legitimately describe companion headers
+        // loosely ("+ timestamp + replay window"), and requiring all 85 names
+        // across 59 rows would make them unreadable. `spec.md` §3 remains the
+        // surface that enumerates every header (and is pinned to do so by
+        // `spec_section_three_documents_every_signature_header`); the value here
+        // is only that a reader can find the signature header.
+        for (label, markdown) in [
+            ("README.md", include_str!("../../README.md")),
+            ("crate docs", include_str!("../lib.rs")),
+        ] {
+            let rows = provider_table_rows(markdown);
+            for (cell, row) in &rows {
+                if cell == "Custom" {
+                    continue;
+                }
+                let provider = provider_list()
+                    .iter()
+                    .find(|provider| brand_cell_matches(cell, &provider.to_string()))
+                    .copied();
+                let provider = provider.unwrap_or_else(|| {
+                    panic!("`{label}` table row `{cell}` matches no known provider")
+                });
+                let Some(header) = primary_signature_header(&provider) else {
+                    continue;
+                };
+                assert!(
+                    row.contains(header),
+                    "`{label}` table row `{cell}` must name the `{header}` header its \
+                     signature is read from; a reader opening the table to configure \
+                     an endpoint cannot otherwise tell which header carries the \
+                     signature (companion headers such as timestamps are not a \
+                     substitute)"
+                );
+            }
+        }
+    }
+
     #[test]
     fn fuzz_implemented_pool_covers_every_nameable_provider() {
         use std::fs;
