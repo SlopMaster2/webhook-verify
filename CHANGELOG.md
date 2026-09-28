@@ -69,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       hash: HashAlg::Sha256,
       signature_header: "X-Webhook-Sig",
       timestamp_header: None,
-      timestamp_unit: TimestampUnit::Seconds, // the new field; Seconds is 0.1.x behavior
+      timestamp_unit: TimestampUnit::Seconds, // new field; Seconds == 0.1.x
       encoding: Encoding::Hex,
       prefix: None,
       signed_string: |_headers, raw_body| raw_body.to_vec(),
