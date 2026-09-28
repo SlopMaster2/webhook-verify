@@ -3142,6 +3142,21 @@ ambiguity).
    `timestamp_header`, and if the user's `signed_string` closure reads
    additional headers, duplicates in those are **not** detected (see
    `CustomScheme` docs) — nothing in the request enumerates them.
+   `Provider::Custom`'s two declared names are the one place a *scanned* name
+   is caller-typed rather than an in-crate constant, so the "reject, never
+   degrade to a no-op" rule above applies to them directly: a name that is not
+   a valid HTTP field name (RFC 9110 §5.1) cannot be looked up and is
+   therefore reported as ambiguous on **every** request, which for a pair-table
+   caller is a stricter verdict than `verify()` itself would reach (the crate's
+   `HeaderMap` impls compare names as plain case-insensitive strings). That is
+   fail-closed and deliberate, and it is documented on
+   `CustomScheme::signature_header` rather than changed; unlike the built-in
+   providers' names it cannot be covered by
+   `signature_header_names_are_valid_http_field_names`, since
+   `Provider::Custom` is absent from `provider_list()` (it is not
+   name-constructible). The fail-closed direction is pinned by
+   `custom::tests::an_unparseable_declared_header_name_is_always_ambiguous`
+   (issue #286).
    **Provider-sent duplicate headers.** One exception to "for built-in
    providers the scan covers every header the scheme declares" is forced by a
    provider's own signing machinery rather than chosen for convenience: during
