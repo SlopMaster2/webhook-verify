@@ -4229,22 +4229,30 @@ mod tests {
         }
     }
 
-    /// The `src/providers` module stem for every provider, in module order.
+    /// The `src/providers` module stem one provider's implementation lives in.
     ///
     /// Named after each provider's `Display` brand lowercased apart from the
-    /// handful whose module name differs.
+    /// handful whose module name differs. Split out of
+    /// [`provider_module_stems`] so a test that has to go from a stem back to
+    /// the provider that owns it does not have to re-spell this map — a second
+    /// copy of the provider-to-module map is a second thing to drift.
+    fn provider_module_stem(provider: Provider) -> String {
+        match provider {
+            Provider::Box => "box_webhooks".to_string(),
+            Provider::LemonSqueezy => "lemonsqueezy".to_string(),
+            Provider::PayPal => "paypal".to_string(),
+            Provider::SendGrid => "sendgrid".to_string(),
+            Provider::StandardWebhooks => "standard_webhooks".to_string(),
+            Provider::X => "x_twitter".to_string(),
+            other => other.to_string().to_lowercase(),
+        }
+    }
+
+    /// The `src/providers` module stem for every provider, in module order.
     fn provider_module_stems() -> Vec<String> {
         let mut stems: Vec<String> = provider_list()
-            .iter()
-            .map(|provider| match provider {
-                Provider::Box => "box_webhooks".to_string(),
-                Provider::LemonSqueezy => "lemonsqueezy".to_string(),
-                Provider::PayPal => "paypal".to_string(),
-                Provider::SendGrid => "sendgrid".to_string(),
-                Provider::StandardWebhooks => "standard_webhooks".to_string(),
-                Provider::X => "x_twitter".to_string(),
-                other => other.to_string().to_lowercase(),
-            })
+            .into_iter()
+            .map(provider_module_stem)
             .collect();
         // `provider_list()` cannot name `Provider::Custom` (it is not
         // name-constructible — it needs a `CustomScheme`), but the module
@@ -4393,6 +4401,286 @@ mod tests {
         assert!(
             redeclared_offenders[0].contains("redeclares"),
             "{redeclared_offenders:?}"
+        );
+    }
+
+    /// The number of providers a piece of prose claims timestamp in
+    /// milliseconds, read from the spelled-out number that opens its "… N
+    /// providers timestamp in milliseconds" clause.
+    ///
+    /// `None` when the prose states no count, which is the case for the
+    /// `parse_millis` / `timestamp_unit` docs — they name the providers and let
+    /// the list speak for itself. Number *words* only: the clause also
+    /// contains the crate's fixed "58 built-in" total, and a reader looking at
+    /// "Six of the 58 built-in providers" is reading a count, not a total.
+    fn claimed_millisecond_provider_count(prose: &str) -> Option<usize> {
+        const NUMBER_WORDS: [(&str, usize); 10] = [
+            ("one", 1),
+            ("two", 2),
+            ("three", 3),
+            ("four", 4),
+            ("five", 5),
+            ("six", 6),
+            ("seven", 7),
+            ("eight", 8),
+            ("nine", 9),
+            ("ten", 10),
+        ];
+
+        // Bounded to one..ten deliberately: that covers any provider count this
+        // crate could reach, so a wider table would only add number words a
+        // "… providers timestamp in milliseconds" clause never contains.
+        let lower = prose.to_lowercase();
+        let mut found: Vec<(usize, usize)> = Vec::new();
+        for (word, value) in NUMBER_WORDS {
+            let mut from = 0;
+            while let Some(offset) = lower[from..].find(word) {
+                let at = from + offset;
+                from = at + word.len();
+                // A whole word on both sides, so "one" is not found inside
+                // "money" and "six" is not found inside "sixteen".
+                let starts_a_word = at == 0 || !lower.as_bytes()[at - 1].is_ascii_alphabetic();
+                let ends_a_word = lower[from..]
+                    .chars()
+                    .next()
+                    .is_none_or(|c| !c.is_ascii_alphabetic());
+                if starts_a_word && ends_a_word {
+                    found.push((at, value));
+                }
+            }
+        }
+        // Each claim is the clause its number opens, running to the next
+        // number word, so a count is never read across two claims.
+        found.sort_unstable();
+        let mut counts = Vec::new();
+        for (index, (at, value)) in found.iter().enumerate() {
+            let end = found.get(index + 1).map_or(lower.len(), |(next, _)| *next);
+            if lower[*at..end].contains("provider") {
+                counts.push(*value);
+            }
+        }
+        counts.into_iter().min()
+    }
+
+    /// Every provider that reads an epoch-milliseconds timestamp is named in
+    /// the prose that tells a caller to declare [`TimestampUnit::Millis`].
+    ///
+    /// `TimestampUnit` (issue #273) exists because the shared replay window
+    /// compares whole seconds, so a scheme's timestamp header has to declare
+    /// which unit it is in. The only thing that tells a caller which unit a
+    /// given sender uses is these hand-written lists of the millisecond
+    /// providers, and there are six of them, spread over
+    /// `src/providers/custom.rs`, `src/core/replay.rs` and `spec.md` §2. Nothing
+    /// tied them to the code: `millisecond_floors_use_the_shared_divisor`
+    /// verifies *how* each module floors, never *which* modules floor, so a
+    /// provider that adopts millisecond timestamps would ship with every one of
+    /// those lists still saying six — the same failure shape as issues #235,
+    /// #267 and #268, where a re-spelled literal silently disabled a guard.
+    ///
+    /// The reader list is derived from the modules, exactly as
+    /// `millisecond_timestamp_providers` derives it for the floor guard, so a
+    /// new millisecond-timestamp provider fails CI until the prose names it.
+    /// `custom` is excluded from both the names and the count: it floors only
+    /// once a caller configures `TimestampUnit::Millis`, so it is the mechanism
+    /// being documented here rather than a sender somebody would prototype.
+    ///
+    /// The count is checked only where the prose states one, for the same
+    /// reason only the forward direction is checked: a region that names all
+    /// seven but still says "Six" is a real defect, but a region that names
+    /// none and states no count says nothing false either. The reverse of the
+    /// name check is deliberately not asserted, matching
+    /// `context_option_field_docs_name_every_provider_that_reads_the_option`:
+    /// these regions cite providers for other reasons too — the `parse_millis`
+    /// doc pairs each with its header name, and a "whole-second provider's"
+    /// aside is not a claim to be a millisecond one.
+    #[test]
+    fn millisecond_timestamp_docs_name_every_millisecond_provider() {
+        use std::collections::BTreeSet;
+
+        /// The contiguous run of `///` / `//!` comment lines immediately above
+        /// the line containing `declaration`, joined into one string.
+        fn doc_above(source: &str, declaration: &str) -> String {
+            let is_doc = |line: &str| {
+                let trimmed = line.trim_start();
+                trimmed.starts_with("///") || trimmed.starts_with("//!")
+            };
+            let lines: Vec<&str> = source.lines().collect();
+            let at = lines
+                .iter()
+                .position(|line| line.contains(declaration))
+                .unwrap_or_else(|| {
+                    panic!("no line contains {declaration:?}, so its docs cannot be checked")
+                });
+            let start = lines[..at]
+                .iter()
+                .rposition(|line| !is_doc(line))
+                .map_or(0, |last_code| last_code + 1);
+            lines[start..at].join(" ")
+        }
+
+        /// A module's leading `//!` documentation, joined into one string.
+        fn module_doc(source: &str) -> String {
+            source
+                .lines()
+                .map_while(|line| line.trim_start().starts_with("//!").then_some(line.trim()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+
+        /// The blank-line-delimited `spec.md` paragraph containing `needle`.
+        fn spec_paragraph(spec: &str, needle: &str) -> String {
+            let lines: Vec<&str> = spec.lines().collect();
+            let at = lines
+                .iter()
+                .position(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("spec.md has no paragraph containing {needle:?}"));
+            let start = lines[..at]
+                .iter()
+                .rposition(|line| line.trim().is_empty())
+                .map_or(0, |last_blank| last_blank + 1);
+            let end = lines[at..]
+                .iter()
+                .position(|line| line.trim().is_empty())
+                .map_or(lines.len(), |first_blank| at + first_blank);
+            lines[start..end].join(" ")
+        }
+
+        let custom = include_str!("custom.rs");
+        let replay = include_str!("../core/replay.rs");
+        let spec = include_str!("../../spec.md");
+
+        // Same derivation the floor guard uses, mapped to the `Display` brand
+        // the prose has to spell.
+        let flooring: BTreeSet<String> = millisecond_timestamp_providers()
+            .iter()
+            .filter(|stem| stem.as_str() != "custom")
+            .map(|stem| {
+                provider_list()
+                    .into_iter()
+                    .find(|provider| provider_module_stem(*provider) == *stem)
+                    .unwrap_or_else(|| {
+                        panic!("{stem}.rs reads millisecond timestamps but is not a provider")
+                    })
+                    .to_string()
+            })
+            .collect();
+
+        // A vacuity guard: an empty derivation would make the naming loop
+        // assert nothing at all.
+        assert!(
+            flooring.len() > 1,
+            "expected several providers to read epoch-millisecond timestamps, but the modules \
+             yielded {flooring:?} — the `parse_millis(` scan behind \
+             `millisecond_timestamp_providers` has stopped matching, so this guard would pass \
+             without checking anything"
+        );
+
+        let regions: [(&str, String); 6] = [
+            ("src/providers/custom.rs module docs", module_doc(custom)),
+            (
+                "`TimestampUnit::Millis` docs",
+                doc_above(custom, "    Millis,"),
+            ),
+            (
+                "`CustomScheme::timestamp_unit` docs",
+                doc_above(custom, "    pub timestamp_unit: TimestampUnit,"),
+            ),
+            (
+                "core::replay `parse_millis` docs",
+                doc_above(replay, "pub(crate) fn parse_millis("),
+            ),
+            (
+                "core::replay `parse_unsigned_decimal` docs",
+                doc_above(replay, "fn parse_unsigned_decimal("),
+            ),
+            (
+                "spec.md §2 `CustomScheme` timestamp-unit requirement",
+                spec_paragraph(spec, "millisecond providers do"),
+            ),
+        ];
+
+        for (label, prose) in &regions {
+            for brand in &flooring {
+                assert!(
+                    prose.contains(brand.as_str()),
+                    "{label} does not name {brand}, whose module reads an epoch-millisecond \
+                     timestamp (`parse_millis`). A caller choosing between `TimestampUnit::Seconds` \
+                     and `TimestampUnit::Millis` from this prose would pick the wrong unit, and \
+                     every such delivery would then fail the replay window with an implausible \
+                     `skew` that reads like a `max_age` misconfiguration"
+                );
+            }
+            if let Some(claimed) = claimed_millisecond_provider_count(prose) {
+                assert_eq!(
+                    claimed,
+                    flooring.len(),
+                    "{label} says {claimed} provider(s) timestamp in milliseconds, but {} \
+                     modules call `parse_millis` ({}); the count and the list have to agree, or a \
+                     reader is told the list is exhaustive when it is not",
+                    flooring.len(),
+                    flooring.iter().cloned().collect::<Vec<_>>().join(", "),
+                );
+            }
+        }
+
+        // The readers themselves, over synthetic text: each helper has to pick
+        // the one region it is meant to pick. A helper that silently returned
+        // the whole file would make every naming assertion above vacuous.
+        let source = "\
+//! module doc
+
+/// item doc
+pub struct S {
+    /// field doc
+    pub f: u8,
+}
+";
+        assert_eq!(module_doc(source), "//! module doc");
+        assert_eq!(doc_above(source, "    pub f: u8,"), "    /// field doc");
+        // A declaration's docs stop at the last line of code above them, so
+        // the module doc is not absorbed into the item's.
+        assert_eq!(doc_above(source, "pub struct S {"), "/// item doc");
+        // A code line ending a run of comments is the only thing that
+        // separates two docs; without one they are a single region.
+        assert_eq!(
+            doc_above("/// a\n/// b\npub struct S {}", "pub struct S {"),
+            "/// a /// b"
+        );
+
+        assert_eq!(
+            claimed_millisecond_provider_count(
+                "Six of the 58 built-in providers timestamp in milliseconds (HubSpot)."
+            ),
+            Some(6)
+        );
+        assert_eq!(
+            claimed_millisecond_provider_count("exactly as the six millisecond providers do."),
+            Some(6)
+        );
+        // The "58 built-in" total is a provider count but not *this* count, and
+        // a region that names the providers without counting them states none.
+        assert_eq!(
+            claimed_millisecond_provider_count("58 built-in providers in total."),
+            None
+        );
+        assert_eq!(
+            claimed_millisecond_provider_count("as HubSpot and Webflow all do."),
+            None
+        );
+        // A number word that appears only *inside* a longer word is not a
+        // count claim, on either side of the word — and a number word outside
+        // `one..=ten` is not read at all.
+        assert_eq!(
+            claimed_millisecond_provider_count("Seventeen providers timestamp in milliseconds."),
+            None
+        );
+        assert_eq!(
+            claimed_millisecond_provider_count("the phone-provider survey"),
+            None
+        );
+        assert_eq!(
+            claimed_millisecond_provider_count("Sixteen providers timestamp in milliseconds."),
+            None
         );
     }
 
