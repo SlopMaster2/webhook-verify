@@ -656,10 +656,10 @@ impl fmt::Display for Provider {
                 if let Some(timestamp) = scheme.timestamp_header {
                     write!(f, ", timestamp header `{timestamp}`")?;
                     // Only the non-default unit is spelled out, so a seconds
-                    // scheme's rendering is unchanged from before the field
-                    // existed. A log line still distinguishes the two
-                    // configurations, which matters because picking wrong is
-                    // the footgun `TimestampUnit` exists to prevent.
+                    // scheme's rendering stays byte-identical to what it was
+                    // before the field existed. A log line still tells the
+                    // two apart, which matters because picking the wrong unit
+                    // is the footgun `TimestampUnit` exists to prevent.
                     if scheme.timestamp_unit != TimestampUnit::Seconds {
                         write!(f, ", timestamp unit {}", scheme.timestamp_unit)?;
                     }
