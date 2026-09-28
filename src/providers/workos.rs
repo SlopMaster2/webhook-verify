@@ -62,7 +62,7 @@ use crate::core::crypto::verify_hmac_sha256;
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::options::VerifyOptions;
-use crate::core::replay::{check_replay, parse_millis};
+use crate::core::replay::{MILLIS_PER_SECOND, check_replay, parse_millis};
 use crate::core::secret::Secret;
 
 /// The header carrying the combined `t` and `v1` fields.
@@ -83,9 +83,6 @@ const FIELD_SEPARATOR: char = ',';
 
 /// HMAC-SHA256 output length in bytes (what a 64-hex-char `v1` decodes to).
 const SIGNATURE_LEN_BYTES: usize = 32;
-
-/// The number of milliseconds in one second.
-const MILLIS_PER_SECOND: u64 = 1000;
 
 pub(crate) fn verify(
     headers: &dyn HeaderMap,

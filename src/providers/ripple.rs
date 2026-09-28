@@ -58,7 +58,7 @@ use crate::core::VerifyOptions;
 use crate::core::crypto::{is_all_nul_key, sha256_hexdigest, verify_hmac_sha256};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
-use crate::core::replay::{check_replay, parse_millis};
+use crate::core::replay::{MILLIS_PER_SECOND, check_replay, parse_millis};
 use crate::core::secret::Secret;
 use base64::Engine;
 
@@ -85,9 +85,6 @@ const SIGNATURE_LEN_BYTES: usize = 32;
 /// 13-digit epoch-ms "now" exceeds it while a 10-digit unix-seconds value does
 /// not. Matches the reference verifier's `if ts_int > 1_000_000_000_000`.
 const MILLIS_THRESHOLD: u64 = 1_000_000_000_000;
-
-/// Milliseconds in one second.
-const MILLIS_PER_SECOND: u64 = 1000;
 
 pub(crate) fn verify(
     headers: &dyn HeaderMap,

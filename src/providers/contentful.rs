@@ -143,7 +143,7 @@ use crate::core::VerifyOptions;
 use crate::core::crypto::verify_hmac_sha256;
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
-use crate::core::replay::{check_replay, parse_millis};
+use crate::core::replay::{MILLIS_PER_SECOND, check_replay, parse_millis};
 use crate::core::secret::Secret;
 
 /// The header carrying the HMAC-SHA256 signature (lowercase hex).
@@ -249,7 +249,7 @@ pub(crate) fn verify(
     // entirely and this check is bypassable by editing that one header — see
     // the module docs' replay caveat, which pins the behavior in both
     // directions.
-    check_replay(timestamp / 1000, options)
+    check_replay(timestamp / MILLIS_PER_SECOND, options)
 }
 
 /// Returns the HMAC key bytes: the webhook signing secret as configured, used

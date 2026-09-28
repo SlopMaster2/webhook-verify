@@ -5,6 +5,19 @@
 use crate::core::error::VerifyError;
 use crate::core::options::VerifyOptions;
 
+/// The divisor that turns a [`parse_millis`] value into the whole seconds
+/// [`check_replay`] compares against.
+///
+/// Lives here, beside the parser that produces the millisecond values, rather
+/// than as a per-provider constant: the ms→s floor is one arithmetic fact that
+/// seven provider modules had each re-spelled (five named constants and two
+/// bare `1000` literals), and a divisor that is security-relevant — a wrong one
+/// makes the replay window vacuous or rejects every delivery — should have
+/// exactly one spelling. Providers that floor must import this rather than
+/// redeclare it; `providers::tests::millisecond_floors_use_the_shared_divisor`
+/// pins that.
+pub(crate) const MILLIS_PER_SECOND: u64 = 1_000;
+
 /// Parses a timestamp header value into unix seconds.
 ///
 /// Returns a structured [`VerifyError::MalformedHeader`] for empty, negative,

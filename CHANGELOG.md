@@ -156,6 +156,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **the millisecond→second floor divisor is spelled once, in
+  `core::replay::MILLIS_PER_SECOND`**. The seven places that floor an
+  epoch-millisecond timestamp to whole seconds for `check_replay` — Airwallex,
+  Webflow, WorkOS, Ripple, and `Custom`'s `TimestampUnit::Millis` branch, plus
+  Contentful and HubSpot — each carried its own copy: five named
+  `const MILLIS_PER_SECOND: u64 = 1000;` and two bare `/ 1000` literals. All
+  seven now import the shared constant, which lives in `src/core/replay.rs`
+  beside the `parse_millis` that produces the values it divides — the same
+  "one source, many consumers" shape `CONTENTFUL_SIGNED_HEADERS_SEPARATOR`
+  already has (PR #268), and for the same reason that constant was extracted.
+
+  No behavior change: `1000` was `1000` in all seven, and every provider's
+  millisecond floor — including the sub-second-truncation boundary cases and
+  `Custom`'s millisecond replay tests — is unchanged. This is a latent-drift
+  fix, not a defect fix. The divisor is security-relevant: an unfloored
+  millisecond value compares ~5.7e10 seconds in the future, so every delivery
+  fails the window with a `skew` that reads like a `max_age` misconfiguration
+  and invites widening the tolerance until the check is vacuous — the exact
+  failure `TimestampUnit` (issue #273) was added to prevent, and why a
+  hand-copied constant in seven files was a poor place to keep it. A guard
+  (`millisecond_floors_use_the_shared_divisor`) now fails if a provider module
+  redeclares the divisor or floors with a literal, keyed on the module's own
+  `parse_millis(` call so the next millisecond-timestamp provider is covered
+  without editing a table.
+
 - **the `semver-checks` CI job is a blocking gate, and
   `constructible_struct_adds_field` requires a *minor* bump while the crate is
   pre-1.0** (issue #276). The job carried the comment "informational until the

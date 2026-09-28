@@ -86,14 +86,9 @@ use crate::core::VerifyOptions;
 use crate::core::crypto::{verify_hmac_sha1, verify_hmac_sha256, verify_hmac_sha512};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
-use crate::core::replay::{check_replay, parse_millis, parse_timestamp};
+use crate::core::replay::{MILLIS_PER_SECOND, check_replay, parse_millis, parse_timestamp};
 use crate::core::secret::Secret;
 use base64::Engine;
-
-/// Milliseconds in one second, for flooring a `TimestampUnit::Millis` header
-/// down to the whole seconds the shared replay window compares in. Same
-/// constant the built-in millisecond providers divide by.
-const MILLIS_PER_SECOND: u64 = 1000;
 
 /// HMAC hash algorithms available to a [`CustomScheme`] (`spec.md` §2.2).
 #[must_use]

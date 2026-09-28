@@ -49,7 +49,7 @@ use crate::core::VerifyOptions;
 use crate::core::crypto::verify_hmac_sha256;
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
-use crate::core::replay::{check_replay, parse_millis};
+use crate::core::replay::{MILLIS_PER_SECOND, check_replay, parse_millis};
 use crate::core::secret::Secret;
 
 /// The header carrying Webflow's hex HMAC-SHA256 signature.
@@ -63,9 +63,6 @@ pub(crate) const TIMESTAMP_HEADER: &str = "x-webflow-timestamp";
 
 /// HMAC-SHA256 output length in bytes.
 const SIGNATURE_LEN_BYTES: usize = 32;
-
-/// The number of milliseconds in one second.
-const MILLIS_PER_SECOND: u64 = 1000;
 
 pub(crate) fn verify(
     headers: &dyn HeaderMap,
