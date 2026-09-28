@@ -27,7 +27,9 @@
 //!   * ' ( )`), each other byte as `%XX` uppercase. `request_url` is passed
 //!   through the same scheme→authority→path/value split as the SDK's
 //!   `getNormalizedEncodedURI`; a caller may alternatively supply the bare
-//!   path form (`/webhooks/...`), which is used verbatim.
+//!   path form (`/webhooks/...`), which is used verbatim. A slash-less bare
+//!   reference (`?a=b`, `webhooks/cms`) is root-relative and gets the leading
+//!   `/` the SDK's `pathname` would carry, so both spellings sign the same.
 //! - Path/query encoding divergence: the two sources above do **not** agree
 //!   here, and no wire capture settles which one Contentful's signer follows
 //!   (`spec.md` §7). The SDK runs `querystring.escape` on the query and then a
@@ -380,7 +382,10 @@ fn append_signed_headers_segment(
 ///   same request target, and Contentful signs what the SDK's `new URL(...).pathname`
 ///   reports, i.e. `/`);
 /// - any `#fragment` is dropped;
-/// - a bare path (`/webhooks/...`) is used verbatim;
+/// - a bare path (`/webhooks/...`) is used verbatim — but a slash-less bare
+///   reference (`?a=b`, `#f`, `webhooks/cms`, ``) is root-relative and gets the
+///   same leading `/`, so both spellings of one request target sign
+///   identically;
 /// - if a `?query` is present, only the query portion is percent-encoded
 ///   (JavaScript `encodeURIComponent` set), with the pathname passed through
 ///   as UTF-8 bytes; with no query, nothing is re-encoded.
@@ -409,7 +414,18 @@ fn normalized_request_path(url: &str) -> String {
                 }
                 None => Cow::Borrowed("/"),
             },
-            None => Cow::Borrowed(url),
+            // No `://`, so this is the bare form: a path (`/webhooks/…`) or a
+            // query/fragment-only reference. The path it names is still
+            // root-relative — `new URL(…).pathname` always begins with `/` —
+            // so a slash-less spelling (`?a=b`, `#f`, ``) gets the same root
+            // synthesized as the full-URL branch above. Without this, the two
+            // spellings of one request target signed different strings.
+            None => {
+                let mut rooted = String::with_capacity(url.len() + 1);
+                rooted.push('/');
+                rooted.push_str(url);
+                Cow::Owned(rooted)
+            }
         }
     };
     let path_and_query: &str = match path_and_query.split_once('#') {
@@ -641,6 +657,74 @@ mod tests {
             "https://www.example.com?source=webhook&v=2",
         );
         assert_eq!(result, Ok(()));
+    }
+
+    // --- the bare form must reach the same canonical path as the full URL ---
+
+    #[test]
+    fn bare_query_only_request_url_canonicalizes_to_the_root_path() {
+        // The #216 fix synthesizes the root `/` for a full URL whose path is
+        // empty (`https://host?a=b` → `/?a%3Db`), but the bare branch skipped
+        // the same step: `?a=b` fell straight through to the `?` split with an
+        // empty pathname and signed `?a%3Db`. The two spellings of one request
+        // target therefore produced two different canonical strings, so a
+        // caller who configured the bare form got a signature Contentful never
+        // signed — every delivery mismatched. Fails closed, but it is the same
+        // authority/`?`-delimiter hole #216 closed for the full-URL spelling.
+        //
+        // The vector is not self-derived: it is the hex already pinned by
+        // `root_url_with_query_vector_verifies` for the *absolute* spelling of
+        // the same request target, so this asserts the two forms agree rather
+        // than re-encoding the code under test.
+        let signature = "72b6344cbfeaa72a18ffc9bfb490ea3e8bb5953d365b86c0194341bac7e0664d";
+        assert_eq!(
+            verify_with(
+                BODY,
+                signature,
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                "https://www.example.com?source=webhook&v=2",
+            ),
+            Ok(()),
+            "the absolute spelling still verifies"
+        );
+        assert_eq!(
+            verify_with(
+                BODY,
+                signature,
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                "?source=webhook&v=2",
+            ),
+            Ok(()),
+            "the bare spelling of the same request target must sign identically"
+        );
+    }
+
+    #[test]
+    fn empty_bare_path_request_url_canonicalizes_to_the_root_path() {
+        // The remaining slash-less bare shapes, table-pinned. Each names a
+        // path that is root-relative, so each must canonicalize to `/` (or `/`
+        // + encoded query) — never to the empty string, which would sign a
+        // zero-length path segment.
+        for (url, expected) in [
+            ("?a=b", "/?a%3Db"),
+            ("?a=/b", "/?a%3D%2Fb"),
+            ("?a=/b#frag/x", "/?a%3D%2Fb"),
+            ("#frag/x", "/"),
+            ("", "/"),
+            // A path relative to the root but written without the leading `/`:
+            // the SDK's `new URL(…).pathname` would report `/webhooks/cms`, so
+            // that is the form Contentful signed.
+            ("webhooks/cms", "/webhooks/cms"),
+            ("webhooks/cms?a=b", "/webhooks/cms?a%3Db"),
+        ] {
+            assert_eq!(
+                super::normalized_request_path(url),
+                expected,
+                "request_url {url:?}"
+            );
+        }
     }
 
     // --- issue #216: the authority ends at the first `/`, `?`, or `#` ---------
