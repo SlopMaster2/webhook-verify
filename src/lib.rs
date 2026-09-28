@@ -14,13 +14,23 @@
 //! doctests rather than only through the unit tests.
 //!
 //! ```
-//! use webhook_verify::{verify, HeaderMap, Provider, Secret, VerifyError};
+//! # #![deny(unused_imports)]
+//! use webhook_verify::{
+//!     Provider, Secret, VerifyError, ambiguous_signature_header_in, verify,
+//! };
 //!
 //! let headers: Vec<(String, String)> = vec![(
 //!     "X-Hub-Signature-256".to_string(),
 //!     "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17".to_string(),
 //! )];
 //! let raw_body = b"Hello, World!";
+//!
+//! // `verify()` reads the first value for a name and cannot see a second one,
+//! // so a proxy that appended its own value behind a real one is invisible to
+//! // it — while the pair table still holds it. Spec §4.4 obliges every caller
+//! // of `verify()` to run this check first; the `tower` and `actix` adapters
+//! // run it for you, and a caller extracting headers itself does not.
+//! assert_eq!(ambiguous_signature_header_in(Provider::GitHub, &headers), None);
 //!
 //! let result = verify(
 //!     Provider::GitHub,
@@ -45,6 +55,10 @@
 //!
 //! `raw_body` **must** be the exact bytes the provider sent — before any JSON
 //! parsing or re-serialization. Verification against anything else will fail.
+//! The check above reports the provider-spelled name of a signature header that
+//! arrived more than once with differing values; identical repeats are fine.
+//! See [`ambiguous_signature_header_in`] for what it scans, and the crate's
+//! `spec.md` §4.4 for the full contract.
 //!
 //! ## Supported providers
 //!

@@ -191,6 +191,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **both front-door examples now run the §4.4 ambiguity check** (issue #284).
+  `README.md`'s first code block and the crate docs' headline doctest are the
+  two snippets a new reader copies, and both hand `verify()` a
+  `Vec<(String, String)>` pair table — the exact shape §4.4 obliges a caller to
+  run `ambiguous_signature_header_in` on — while calling `verify()` directly.
+  That is not a documentation nit: `verify()` is a first-match lookup, so a
+  delivery carrying a real `X-Hub-Signature-256` with a forged `sha256=000…0`
+  appended behind it comes back `Ok(())` through either example, while the pair
+  table still holds the second value — which is the whole reason the pair-table
+  entry point exists (issue #282). Neither example was wrong on its own; the
+  check is documented in the `HeaderMap` trait docs, in the function's own
+  rustdoc, and in a README section. All of that is below the fold, though, and
+  a reader who copies the first snippet they read got a deployment that
+  silently accepts an ambiguous request.
+
+  Both examples now run the check before `verify()`, with a one-line pointer to
+  the longer README section — given the `### Duplicate signature headers`
+  heading the front-door comment had no name to point at. The crate-docs
+  example also drops the `HeaderMap` import it never used (the residue of the
+  check that was never added) and its doctest now carries
+  `#![deny(unused_imports)]`, so a future example importing something it does
+  not use is a compile error rather than a warning nobody reads.
+
+  A new guard (`front_door_examples_run_the_ambiguity_check_before_verify`) pins
+  each front-door example to the obligation, requiring the check to sit
+  *between* the header table and the `verify()` call — a check moved above the
+  table it scans, or below the verification it guards, teaches the same
+  acceptance — and to be a call rather than a mention, since both examples
+  explain it in a comment that names `` `verify()` `` first. Nothing pinned the
+  examples before, so dropping the check, or trimming it for brevity, shipped
+  silently. The two README guards that did exist aim elsewhere (the section's
+  `http`-feature qualifiers, and the single-value-container limit); their shared
+  anchor is now fence-aware, because a front-door fence naming the pair-table
+  entry point would otherwise have retargeted them onto the headline example.
+
+  Docs and tests only: no provider behavior change, no new dependency, no change
+  to any signature or error variant.
+
 - **the millisecond→second floor divisor is spelled once, in
   `core::replay::MILLIS_PER_SECOND`**. The seven places that floor an
   epoch-millisecond timestamp to whole seconds for `check_replay` — Airwallex,

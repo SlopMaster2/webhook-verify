@@ -2121,12 +2121,62 @@ mod tests {
         }
     }
 
+    /// Index of the README block that introduces the ambiguity check: the
+    /// paragraph a reader reads to learn what the check takes and what it
+    /// cannot take. Both README guards below anchor on it, and both previously
+    /// searched for the first block naming `ambiguous_signature_header`
+    /// anywhere in the file.
+    ///
+    /// The anchor has to exclude fenced code, because a fence can no longer
+    /// claim it: `README.md`'s first code block — the front-door example — now
+    /// names `ambiguous_signature_header_in` inside a fence of its own (issue
+    /// #284), and a search that accepted a fence would silently retarget both
+    /// guards onto the headline example and compare the wrong text. Fences are
+    /// line-based and a blank line inside one splits it into several blocks, so
+    /// "inside a fence" is tracked per block: an odd number of fence-marker
+    /// lines in a block means it opened one (the opener is the block's first
+    /// line) or closed one (the closer is its last), and nothing in between
+    /// changes the state — so the front-door snippet's own comment paragraph is
+    /// skipped along with the rest of its fence.
+    ///
+    /// Fence parity is a property of the file's structure rather than of any
+    /// wording, so this anchor survives rewording, reheading, or reordering the
+    /// prose it finds.
+    #[cfg(feature = "http")]
+    fn readme_ambiguity_prose_block(readme: &str, blocks: &[&str]) -> usize {
+        let mut offset = 0;
+        let mut inside_fence = false;
+        let mut found = None;
+        for (at, block) in blocks.iter().enumerate() {
+            let markers = readme[offset..offset + block.len()]
+                .lines()
+                .filter(|line| line.starts_with("```"))
+                .count();
+            // An odd marker count means this block either opens a fence (the
+            // opener is its first line) or closes one (the closer is its
+            // last), so it is inside a fence either way.
+            let fenced = inside_fence || markers % 2 == 1;
+            if !fenced && block.contains("ambiguous_signature_header") {
+                found = Some(at);
+                break;
+            }
+            if markers % 2 == 1 {
+                inside_fence = !inside_fence;
+            }
+            // `split("\n\n")` eats the separator, so the next block starts two
+            // bytes past this one's end.
+            offset += block.len() + 2;
+        }
+        found
+            .unwrap_or_else(|| panic!("README.md must still document `ambiguous_signature_header`"))
+    }
+
     /// The README's `ambiguous_signature_header` section, pinned to the two
     /// qualifiers that function's signature carries (issue #269).
     ///
     /// A `rust` fence in `README.md` is documentation, not a doctest — nothing
-    /// compiles it, and the crate is built without the README entirely — so
-    /// the section shipped a snippet passing a `Vec<(String, String)>` (the
+    /// compiles it, and the crate is built without the README entirely — so the
+    /// section shipped a snippet passing a `Vec<(String, String)>` (the
     /// map the README's own first example defines) to a function that takes
     /// `&::http::HeaderMap`, while never naming the `http` feature that gates
     /// it. A reader following the README top-to-bottom got a type error, or
@@ -2139,18 +2189,17 @@ mod tests {
     /// paragraphs earlier (which the README has, for the `HeaderMap` impl) is
     /// exactly the shape of prose that let the gap through, so anchoring only
     /// the file would not catch its return.
+    ///
+    /// "The section that makes the claim" is located by
+    /// [`readme_ambiguity_prose_block`], which the front-door example's fence
+    /// cannot capture.
     #[cfg(feature = "http")]
     #[test]
     fn readme_states_the_ambiguity_checks_requirements() {
         const README: &str = include_str!("../../README.md");
 
         let blocks: Vec<&str> = README.split("\n\n").collect();
-        let Some(at) = blocks
-            .iter()
-            .position(|block| block.contains("ambiguous_signature_header"))
-        else {
-            panic!("README.md must still document `ambiguous_signature_header`");
-        };
+        let at = readme_ambiguity_prose_block(README, &blocks);
         // The prose paragraph that introduces the helper, plus the whole code
         // fence after it (a fence is several blank-line-separated blocks, so
         // it is reassembled rather than taken one block at a time).
@@ -2219,12 +2268,7 @@ mod tests {
         const README: &str = include_str!("../../README.md");
 
         let blocks: Vec<&str> = README.split("\n\n").collect();
-        let Some(at) = blocks
-            .iter()
-            .position(|block| block.contains("ambiguous_signature_header"))
-        else {
-            panic!("README.md must still document `ambiguous_signature_header`");
-        };
+        let at = readme_ambiguity_prose_block(README, &blocks);
         let limit = blocks[at + 1..]
             .iter()
             .find(|block| block.contains("first-match") && block.contains("one value per name"))
@@ -2246,5 +2290,98 @@ mod tests {
              does work for them, so the limit is not read as \"nobody can do this\"; \
              found: {limit}"
         );
+    }
+
+    /// Offset of the first `verify` in `doc` that is a *call* rather than a
+    /// mention.
+    ///
+    /// Both front-door examples explain the check in a comment that names
+    /// `` `verify()` `` before running it — which is exactly the ordering the
+    /// guard below wants to distinguish a mention from the verification it
+    /// precedes, so a plain `find("verify(")` reads the comment as the call and
+    /// reports an example that already puts its check first. A mention has `)`
+    /// straight after the paren; a call has an argument.
+    fn first_verify_call(doc: &str) -> Option<usize> {
+        doc.match_indices("verify(")
+            .find_map(|(at, matched)| (!doc[at + matched.len()..].starts_with(')')).then_some(at))
+    }
+
+    /// Both front-door examples — `README.md`'s first code block and the crate
+    /// docs' headline doctest — pinned to the §4.4 obligation they each carry
+    /// (issue #284).
+    ///
+    /// They are the two snippets a new reader copies before knowing anything
+    /// else about the crate, and both hold their headers in a
+    /// `Vec<(String, String)>` pair table: exactly the shape §4.4 obliges a
+    /// caller to run `ambiguous_signature_header_in` on. `verify()` is a
+    /// first-match lookup by contract, so an example that omits the check
+    /// teaches a deployment that accepts a delivery carrying a real signature
+    /// header with a forged value appended behind it — the shape §4.4 exists
+    /// for, and one neither example's assertions can detect.
+    ///
+    /// The obligation was already stated everywhere *below* the fold (the
+    /// `HeaderMap` trait docs, the function's own rustdoc, the README's
+    /// duplicate-header section), so this is not a hole in the documentation —
+    /// it is the one place a reader meets before any of that. Nothing pinned it
+    /// there: a future edit that trims the check for brevity shipped silently,
+    /// which is how the crate docs' example came to import `HeaderMap` for an
+    /// ambiguity check it never ran (its own doctest now denies unused imports,
+    /// so that residue is a compile error rather than a warning).
+    ///
+    /// Each example is located by the first fence in its file — the front door
+    /// by construction, since nothing else precedes it — and the check is
+    /// required *between* the header table and the `verify()` call, not merely
+    /// present: a check moved above the table it scans, or below the
+    /// verification it guards, teaches the same acceptance.
+    #[test]
+    fn front_door_examples_run_the_ambiguity_check_before_verify() {
+        for (label, doc) in [
+            ("README.md", include_str!("../../README.md")),
+            ("crate docs", include_str!("../lib.rs")),
+        ] {
+            // The first fence in each file, `rust` tag or not: the crate docs'
+            // headline block is a bare ```` ``` ```` doctest, and both files put
+            // nothing before it.
+            let fence = doc
+                .find("```")
+                .unwrap_or_else(|| panic!("`{label}` must open with a runnable example"));
+            let fenced = &doc[fence..];
+            let end = fenced[3..].find("```").map_or(fenced.len(), |at| at + 3);
+            let snippet = &fenced[..end];
+
+            let table = snippet.find("let headers").unwrap_or_else(|| {
+                panic!(
+                    "`{label}`'s front-door example must build the header table it \
+                     passes to `verify()`, or there is no pair table for the §4.4 \
+                     check to scan; found: {snippet}"
+                )
+            });
+            let checked = snippet
+                .find("ambiguous_signature_header_in(")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "`{label}`'s front-door example must run \
+                         `ambiguous_signature_header_in` before trusting \
+                         `verify()`: spec §4.4 obliges every `verify()` caller to \
+                         reject a signature header that arrived more than once with \
+                         differing values, and `verify()`'s first-match lookup \
+                         cannot see the second value; found: {snippet}"
+                    )
+                });
+            let verified = first_verify_call(snippet).unwrap_or_else(|| {
+                panic!("`{label}`'s front-door example must call `verify()`; found: {snippet}")
+            });
+            assert!(
+                table < checked,
+                "`{label}`'s front-door example must build the header table before \
+                 the ambiguity check scans it; found: {snippet}"
+            );
+            assert!(
+                checked < verified,
+                "`{label}`'s front-door example must run the ambiguity check before \
+                 `verify()`, since a forged value appended behind a real one is \
+                 accepted by `verify()` alone; found: {snippet}"
+            );
+        }
     }
 }

@@ -14,12 +14,24 @@ is a small, dependency-light, audited-primitive-backed crate that does this
 once, correctly, for every major provider, behind a single API.
 
 ```rust
-use webhook_verify::{verify, Provider, Secret};
+use webhook_verify::{Provider, Secret, VerifyError, ambiguous_signature_header_in, verify};
 
 let headers: Vec<(String, String)> = vec![
     ("Stripe-Signature".to_string(), "t=1234567890,v1=abc...".to_string()),
 ];
 let raw_body = b"{\"id\": \"evt_test\"}";
+
+// A pair table keeps every header line it was handed, so this is where a
+// signature header that arrived *twice* is still visible: `verify()` reads the
+// first value only, and would happily accept a forged one appended behind a
+// real one. Reject an ambiguous request before trusting `verify()` — see
+// "Duplicate signature headers" below for both entry points.
+if let Some(header) = ambiguous_signature_header_in(Provider::Stripe, &headers) {
+    return Err(VerifyError::MalformedHeader {
+        header,
+        reason: "header present multiple times with different values",
+    });
+}
 
 let result = verify(
     Provider::Stripe,
@@ -251,6 +263,8 @@ webhook-verify = { version = "0.1", features = ["actix"] }
 
 With the `http` feature enabled, any `http::HeaderMap` (from axum, tower, or
 hyper requests) implements `HeaderMap` and can be passed to `verify()` directly.
+
+### Duplicate signature headers
 
 `HeaderMap` lookup returns only the *first* value for a name, so it cannot see a
 signature header that arrived twice. The `tower` and `actix` adapters reject
