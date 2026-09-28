@@ -4707,6 +4707,157 @@ mod tests {
         }
     }
 
+    /// Whether a provider module's implementation region reads
+    /// `VerifyOptions::field`, found by scanning for a field access `<some
+    /// receiver>.<field>`.
+    ///
+    /// The receiver is matched as a **whole token of any name**, not as the
+    /// literal identifier `options`, and that is load-bearing. Every reader in
+    /// the tree today happens to name its parameter `options`, so matching that
+    /// one word produced the same reader set — but the guard's per-field
+    /// assertions only run over the readers the scan *found*, so pinning the
+    /// name turned a rename into a silent hole: renaming `options` to `opts` in
+    /// one provider dropped that provider out of the set, and as long as some
+    /// other provider still read the option every assertion still passed. Only
+    /// `webhook_id`, read solely by `paypal.rs`, failed loudly — via the
+    /// non-emptiness check, not because of the scan. Matching any receiver
+    /// closes the hole for all five options with no second list to maintain and
+    /// no change to today's result; issue #271.
+    ///
+    /// Two shapes have to be recognized, because rustfmt introduces both:
+    ///
+    /// ```text
+    ///     let url = options.request_url.as_deref();   // on one line
+    ///     let url = options                            // receiver at line end
+    ///         .request_url                             // field on the next line
+    /// ```
+    ///
+    /// The receiver must be a whole token, so a path is not mistaken for a
+    /// read. In `VerifyOptions::request_url` the walk-back stops at the `::`,
+    /// making `VerifyOptions` the receiver — and the receiver already has a `.`
+    /// before it, so there is no field access to report.
+    ///
+    /// Comment lines are skipped outright, so prose that happens to name
+    /// `options.request_url` cannot put a module into the reader set. What
+    /// remains is an over-approximation: a *non*-`VerifyOptions` value with a
+    /// field of the same name would still count as a read. That is the safe
+    /// direction — the caller's per-field assertion then fails loudly and
+    /// names the module, instead of a provider being silently skipped, which is
+    /// the failure this function exists to make impossible.
+    fn reads_context_option_field(implementation: &str, field: &str) -> bool {
+        let is_identifier_char = |c: char| c.is_alphanumeric() || c == '_';
+
+        let needle = format!(".{field}");
+        // Whether the previous line ended in a bare identifier, so a chain
+        // split across two lines is still seen as one read.
+        let mut receiver_continues = false;
+        for line in implementation.lines() {
+            let line = line.trim();
+            if line.starts_with("//") {
+                receiver_continues = false;
+                continue;
+            }
+            if receiver_continues && line.starts_with(&needle) {
+                return true;
+            }
+            for (dot, _) in line.match_indices(&needle) {
+                // A field access needs an identifier immediately before the
+                // `.`; a bare `.field` line with no receiver is a chain
+                // continuation, already handled above.
+                if !line[..dot]
+                    .chars()
+                    .next_back()
+                    .is_some_and(is_identifier_char)
+                {
+                    continue;
+                }
+                // Walk back over the rest of that identifier: the receiver is
+                // the whole token, not the tail of a longer one, so `a.b.field`
+                // still resolves to the `b` token and its `.` boundary holds.
+                let token_start = match line[..dot]
+                    .char_indices()
+                    .rev()
+                    .find(|(_, c)| !is_identifier_char(*c))
+                {
+                    Some((after_token, _)) => after_token + 1,
+                    // Nothing but identifier characters precede it.
+                    None => 0,
+                };
+                if !line[..token_start]
+                    .chars()
+                    .next_back()
+                    .is_some_and(is_identifier_char)
+                {
+                    return true;
+                }
+            }
+            receiver_continues = line.chars().next_back().is_some_and(is_identifier_char);
+        }
+        false
+    }
+
+    /// `reads_context_option_field` is not tied to the name of the parameter
+    /// holding the [`VerifyOptions`], so a module that renames it stays in the
+    /// scan.
+    ///
+    /// Issue #271: the scan used to look for the literal token `options`, and
+    /// the comment above the caller claimed a rename "turns into a loud failure
+    /// rather than a silently skipped provider". It did not — the per-field
+    /// assertions iterate the readers the scan found, so a renamed provider
+    /// simply dropped out and the remaining reader's `assert!` still passed.
+    /// These cases pin the property the comment claims, so the two cannot
+    /// diverge again; the provider-level guard is
+    /// `context_option_field_docs_name_every_provider_that_reads_the_option`.
+    #[test]
+    fn context_option_reader_scan_is_independent_of_the_parameter_name() {
+        for receiver in ["options", "opts", "cfg", "self.options", "context"] {
+            // Same line, and the two-line chain split rustfmt produces.
+            assert!(
+                reads_context_option_field(
+                    &format!("    let url = {receiver}.request_url.as_deref();"),
+                    "request_url"
+                ),
+                "receiver `{receiver}`"
+            );
+            assert!(
+                reads_context_option_field(
+                    &format!("    let params = {receiver}\n        .form_params\n"),
+                    "form_params"
+                ),
+                "receiver `{receiver}`"
+            );
+        }
+
+        // A dotted receiver path is one token, not two: `a.b.field` is a read
+        // of `b`'s field, and the walk-back has to find the `b` boundary.
+        assert!(reads_context_option_field(
+            "    let url = self.options.request_url.clone();",
+            "request_url"
+        ));
+
+        for not_a_read in [
+            // An intra-doc link, and prose that names the access outright: both
+            // are on comment lines, which the scan skips.
+            "/// See [`VerifyOptions::request_url`] for the context.",
+            "/// Fails unless `options.request_url` is set.",
+            // The same `::` shape on real code rather than in a comment, so the
+            // whole-token walk-back is exercised on the line path too.
+            "    let url = VerifyOptions::request_url.clone();",
+            // A local binding named after the field, with no access at all.
+            "    let request_url = ctx.url.clone();",
+            // A continuation line with no receiver before it: the previous line
+            // ends in `;`, so there is nothing for `.request_url` to hang off.
+            "    let header = headers.get(NAME);\n        .request_url\n",
+            // A different option.
+            "    let method = options.request_method;",
+        ] {
+            assert!(
+                !reads_context_option_field(not_a_read, "request_url"),
+                "{not_a_read:?}"
+            );
+        }
+    }
+
     /// Every provider that reads a `VerifyOptions` context option is named in
     /// that option's own field docs.
     ///
@@ -4739,36 +4890,6 @@ mod tests {
         use std::collections::BTreeSet;
         use std::fs;
         use std::path::Path;
-
-        // `options` followed by the field, ignoring the whitespace rustfmt may
-        // insert inside the chain. The `options` must be a whole token, so an
-        // intra-doc link (`[`VerifyOptions::request_url`]`) is not mistaken
-        // for a read, and the chain may be split across two lines: every
-        // reader in the tree today binds it as a `let x = options` / `.field`
-        // pair. A module that renamed its `options` parameter would need the
-        // scan taught its new name, which the per-field assertion below turns
-        // into a loud failure rather than a silently skipped provider.
-        fn reads_field(implementation: &str, field: &str) -> bool {
-            let needle = format!(".{field}");
-            let mut chain_continued = false;
-            for line in implementation.lines() {
-                let line = line.trim();
-                if chain_continued && line.starts_with(&needle) {
-                    return true;
-                }
-                for (at, _) in line.match_indices("options") {
-                    let whole_token = !line[..at]
-                        .chars()
-                        .next_back()
-                        .is_some_and(|previous| previous.is_alphanumeric() || previous == '_');
-                    if whole_token && line[at + "options".len()..].starts_with(&needle) {
-                        return true;
-                    }
-                }
-                chain_continued = line.ends_with("options");
-            }
-            false
-        }
 
         /// The `///` block immediately above `field`'s declaration, joined back
         /// into one string.
@@ -4845,7 +4966,7 @@ mod tests {
             let doc = field_doc(options, field);
             let readers: BTreeSet<(&str, &str)> = implementations
                 .iter()
-                .filter(|(_, _, implementation)| reads_field(implementation, field))
+                .filter(|(_, _, implementation)| reads_context_option_field(implementation, field))
                 .map(|(brand, module, _)| (brand.as_str(), module.as_str()))
                 .collect();
 
