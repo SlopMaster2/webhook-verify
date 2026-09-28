@@ -196,6 +196,10 @@ pub trait HeaderMap {
 // behind the "http" feature flag. The borrowed-key map impls
 // (BTreeMap<&str,&str>, HashMap<&str,&str>) exist so static header tables
 // built from `&'static str` pairs verify without allocating owned keys.
+// Lookup is first-match-only for every impl, so none of them can satisfy
+// §4.4's ambiguity requirement on its own; the pair tables (Vec/array/slice
+// of pairs) keep repeated names, which is why §4.4 has an entry point for
+// them below.
 
 pub fn verify(
     provider: Provider,
@@ -206,9 +210,14 @@ pub fn verify(
 ) -> Result<(), VerifyError>;
 
 // The §4.4 ambiguity check, for callers who call `verify()` themselves
-// instead of going through a framework adapter (the `http` feature).
-// Returns the provider-spelled name of the signature header that is
-// duplicated with differing values, for use as
+// instead of going through a framework adapter. Two entry points, one scan:
+// the `http` feature's takes the `http::HeaderMap` every framework hands
+// out, and the unconditional one takes a name/value pair table — the
+// representation the `HeaderMap` impls above accept for callers not using
+// `http`, and the only one that keeps repeated names, so a `Vec<(String,
+// String)>` caller can run §4.4 at all (issue #282). Both return the
+// provider-spelled name of the signature header that is duplicated with
+// differing values, for use as
 // `VerifyError::MalformedHeader { header, .. }`; `None` means the request
 // is unambiguous. The `tower`/`actix` adapters call the same code path
 // internally, so this cannot drift from them.
@@ -217,6 +226,14 @@ pub fn ambiguous_signature_header(
     provider: Provider,
     headers: &::http::HeaderMap,
 ) -> Option<&'static str>;
+
+pub fn ambiguous_signature_header_in<K, V>(
+    provider: Provider,
+    headers: &[(K, V)],
+) -> Option<&'static str>
+where
+    K: AsRef<str>,
+    V: AsRef<str>;
 ```
 
 Implementation status (kept in sync with the code — do not let this drift):
@@ -487,8 +504,10 @@ the SDK and reference examples disambiguate its details.
   `x-contentful-signed-headers`, `x-contentful-timestamp`) *and* follows the
   self-describing `x-contentful-signed-headers` list into the request, so a
   header the delivery declares as signed is scanned exactly like a fixed one.
-  The same scan is available to `http`-feature callers as the public
-  `ambiguous_signature_header(provider, &headers)`, so a caller doing its own
+  The same scan is available to callers as the public
+  `ambiguous_signature_header(provider, &headers)` (an `http::HeaderMap`, the
+  `http` feature) and `ambiguous_signature_header_in(provider, &pairs)` (a
+  name/value pair table, unconditional), so a caller doing its own
   header extraction gets the identical behavior rather than a reduced one.
   A conflicting duplicate of a listed header is rejected as `MalformedHeader`
   on `x-contentful-signed-headers` — the request-controlled header that named
@@ -3091,11 +3110,20 @@ ambiguity).
    an error — never fall back to "treat as valid" behavior. The first-match
    `HeaderMap` lookup cannot see duplicates, so the check happens above
    `verify()`: the framework adapters (the `tower` and `actix` features)
-   do it automatically, and a caller driving `verify()` with an
-   `http::HeaderMap` directly calls `ambiguous_signature_header(provider,
-   &headers)` first (the `http` feature), which returns the ambiguous
+   do it automatically, and a caller driving `verify()` itself calls the
+   entry point matching how it holds headers —
+   `ambiguous_signature_header(provider, &headers)` for an `http::HeaderMap`
+   (the `http` feature) or `ambiguous_signature_header_in(provider, &pairs)`
+   for a name/value pair table (unconditional) — which returns the ambiguous
    header's name for use as `VerifyError::MalformedHeader { header, .. }`.
-   Identical
+   Both are the one scan the adapters run, so a hardening reaches all three.
+   The pair-table entry point exists because a pair table *does* keep
+   repeated names, so such a caller holds the value §4.4 needs even though
+   the `HeaderMap` impl for it returns only the first (issue #282); a
+   container that keeps one value per name (`BTreeMap`, `HashMap`) has no
+   second value to compare and is outside this requirement by construction,
+   which is the `HeaderMap` trait's documented first-match-only contract
+   rather than a gap in the check. Identical
    repeats are not ambiguous and verify normally. For built-in providers the
    scan covers every header the scheme declares. One scheme declares its
    headers in the request rather than in a constant: Contentful's

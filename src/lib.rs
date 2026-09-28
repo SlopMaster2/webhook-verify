@@ -131,12 +131,12 @@
 //!   that `HeaderMap`'s first-match-only lookup structurally cannot perform —
 //!   call it before [`verify`] when you extract headers yourself instead of
 //!   going through an adapter. (Plain text rather than an intra-doc link: this
-//!   list is always compiled, the item it names is not.)
-//!   The impl's own code is `no_std`-clean and the full test suite runs with
-//!   the crate's `std` feature off in this configuration (spec §6), catching a
-//!   `std` leak in the impl. The feature is nonetheless **std-bounded in
-//!   practice**: the `http` crate itself requires `std`, so a genuinely
-//!   std-less build cannot include it (spec §6, §7).
+//!   list is always compiled, the item it names is not.) The impl's own code is
+//!   `no_std`-clean and the full test suite runs with the crate's `std`
+//!   feature off in this configuration (spec §6), catching a `std` leak in the
+//!   impl. The feature is nonetheless **std-bounded in practice**: the `http`
+//!   crate itself requires `std`, so a genuinely std-less build cannot include
+//!   it (spec §6, §7).
 //! - `tower` — generic `tower::Layer`/`Service` middleware (works with axum
 //!   routers too; `http` is implied). The `no_std + alloc` guarantee covers
 //!   the core verification path only, so `tower` also implies `std` — the
@@ -154,6 +154,13 @@
 //!
 //! - All signature comparisons are constant-time ([`subtle::ConstantTimeEq`]).
 //! - Bodies are hashed exactly as received; never re-encoded.
+//! - A signature header that arrives twice with *differing* values is
+//!   ambiguous and must be rejected before [`verify`] is trusted (spec §4.4).
+//!   The `tower` and `actix` adapters do that for you; a caller extracting
+//!   headers itself runs [`ambiguous_signature_header`] (an `http::HeaderMap`,
+//!   `http` feature) or [`ambiguous_signature_header_in`] (a name/value pair
+//!   table, no feature required) first, because [`HeaderMap`] exposes
+//!   first-match lookup only and cannot see the second value itself.
 //! - No secret material ever appears in errors, `Debug`, or `Display` output.
 //! - An empty secret fails closed: it is not a weak key but no key at all, so
 //!   every provider keyed by it rejects it with [`VerifyError::InvalidSecret`]
@@ -204,6 +211,7 @@ pub mod tower;
 pub use crate::core::SystemClock;
 #[cfg(feature = "http")]
 pub use crate::core::adapter_utils::ambiguous_signature_header;
+pub use crate::core::adapter_utils::ambiguous_signature_header_in;
 pub use crate::core::{Clock, HeaderMap, Secret, VerifyError, VerifyOptions, VerifyingKeyMaterial};
 pub use crate::providers::{
     CustomScheme, Encoding, HashAlg, Provider, ProviderParseError, TimestampUnit, verify,

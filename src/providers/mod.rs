@@ -76,11 +76,9 @@ pub use custom::{CustomScheme, Encoding, HashAlg, TimestampUnit};
 use core::fmt;
 
 // Needed by `signature_header_names`, which the `spec.md` §4.4 ambiguity check
-// needs under the `http` feature as well as both adapters.
-#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
+// needs for every caller: under the `http` feature, under both adapters, and
+// through the pair-table entry point, which is compiled unconditionally.
 use alloc::vec;
-
-#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 use alloc::vec::Vec;
 
 // Contentful's self-describing signed-header list: the header whose *value*
@@ -97,9 +95,7 @@ use alloc::vec::Vec;
 // splits its value on the wrong character enumerates names no request carries,
 // so a separator change reaching only `contentful::verify` degrades the dynamic
 // half to a silent no-op just as thoroughly as a header rename would.
-#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 pub(crate) use contentful::SIGNED_HEADERS_HEADER as CONTENTFUL_SIGNED_HEADERS_HEADER;
-#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 pub(crate) use contentful::SIGNED_HEADERS_SEPARATOR as CONTENTFUL_SIGNED_HEADERS_SEPARATOR;
 
 use crate::core::VerifyOptions;
@@ -1215,7 +1211,6 @@ impl core::error::Error for ProviderParseError {}
 /// Returns an empty list for providers whose implementation is disabled by a
 /// feature flag; their verification fails closed with
 /// [`VerifyError::UnsupportedProvider`] regardless.
-#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
     match provider {
         Provider::Stripe => vec![stripe::SIGNATURE_HEADER],
@@ -1353,7 +1348,6 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
 /// is the provider's own, not the scan's concern) or two *distinctly named*
 /// headers with one value each (Box's `BOX-SIGNATURE-PRIMARY` /
 /// `BOX-SIGNATURE-SECONDARY`), neither of which is a duplicate at all.
-#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
 pub(crate) fn provider_sent_duplicate_headers(provider: &Provider) -> &'static [&'static str] {
     match provider {
         // Mollie's documented 24-hour signing-secret rotation window sends
@@ -1804,6 +1798,7 @@ pub(crate) fn verify_any_ref(
 mod tests {
     use super::*;
     use crate::core::error::VerifyError;
+    use crate::core::headers::is_valid_field_name;
     use crate::core::secret::Secret;
     use crate::test_helpers::clocked_at;
     #[cfg(not(feature = "std"))]
@@ -5055,38 +5050,10 @@ pub struct S {
         }
     }
 
-    /// Whether `name` is a syntactically valid HTTP field name — RFC 9110
-    /// §5.1's `field-name = token`, i.e. one or more `tchar`s from a
-    /// non-empty, delimiter-free, no-space byte set. Test helper, kept
-    /// dependency-free so the guard below runs in every configuration that
-    /// compiles `signature_header_names` (`actix` does not imply the `http`
-    /// feature, and `http`-only callers now scan too).
-    #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
-    fn is_valid_field_name(name: &str) -> bool {
-        !name.is_empty()
-            && name.bytes().all(|b| {
-                b.is_ascii_alphanumeric()
-                    || matches!(
-                        b,
-                        b'!' | b'#'
-                            | b'$'
-                            | b'%'
-                            | b'&'
-                            | b'\''
-                            | b'*'
-                            | b'+'
-                            | b'-'
-                            | b'.'
-                            | b'^'
-                            | b'_'
-                            | b'`'
-                            | b'|'
-                            | b'~'
-                    )
-            })
-    }
-
-    #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
+    // Ungated: `signature_header_names` and `is_valid_field_name` are both
+    // unconditional now (the pair-table entry point ships with no features), so
+    // this guard runs in the base `no_std` build too rather than only in the
+    // configurations that happened to compile the scan when it was written.
     #[test]
     fn signature_header_names_are_valid_http_field_names() {
         // The guard above pins *which* headers each provider's ambiguity scan
@@ -5107,9 +5074,12 @@ pub struct S {
         // directly would still pass, because the crate's own `HeaderMap` impls
         // compare header names as plain case-insensitive strings.
         //
-        // RFC 9110 §5.1 `field-name = token` is checked here directly rather
-        // than through `HeaderName::from_bytes` so the guard holds in the
-        // `actix`-only configuration too, where the `http` feature is off.
+        // RFC 9110 §5.1 `field-name = token` is checked here through the scan's
+        // *own* predicate rather than through `HeaderName::from_bytes`, so the
+        // guard and the scan cannot disagree about what a field name is, and
+        // the check holds in every configuration (the `actix`-only build has
+        // the `http` feature off, and actix pins `http` 0.2; `PairHeaders` has
+        // neither).
         for provider in provider_list() {
             for name in signature_header_names(&provider) {
                 assert!(

@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ambiguous_signature_header_in(provider, &pairs)`** (issue #282).
+  `spec.md` §4.4 obliges every caller of `verify()` to reject a request whose
+  signature header arrives more than once with differing values, and the only
+  public entry point for that took an `http::HeaderMap` behind the `http`
+  feature. A caller whose headers are a `Vec<(String, String)>` — the shape
+  the crate's own documentation and `HeaderMap` impls lead with — therefore
+  could not honor the contract at all, and not by choice: the `HeaderMap` impl
+  for a pair table is first-match-only *by design*, so the second value was
+  already gone by the time any check could look. The contract was
+  unsatisfiable for that caller rather than merely inconvenient to satisfy.
+
+  A pair table keeps every header line it was handed, repeated names included,
+  so such a caller does hold what §4.4 needs. The new function takes any
+  slice/array of name/value pairs (`&[(String, String)]`, `&[(&str, &str)]`,
+  or a `Vec` of either), needs **no feature** — neither `http` nor `std`, so it
+  compiles in the crate's `no_std + alloc` configuration — and returns the same
+  `Option<&'static str>` as the `http` entry point. Both are the *same* scan
+  (`core::adapter_utils::find_ambiguous_signature_header` over a new
+  `PairHeaders` view of the private `MultiValueHeaders` trait), so a hardening
+  reaches the `tower` adapter, the `actix` adapter, and `http::HeaderMap`
+  callers too; a parity test pins that the two entry points cannot disagree on
+  the same request. Names are matched ASCII-case-insensitively, exactly as
+  `HeaderMap` matches them for these types, and a name that is not a valid
+  HTTP field name is reported as ambiguous rather than clean (fail closed),
+  the same answer the two framework maps give.
+
+  What the new function does *not* change: a container that keeps one value
+  per name (`BTreeMap`, `HashMap`, a hand-rolled map) still cannot support the
+  check, because it has no second value to compare — a property of the
+  first-match-only `HeaderMap` contract, not of this check. The README and
+  `HeaderMap` docs said "no other `HeaderMap` impl can offer this check",
+  which is now too broad; both are narrowed to the single-value containers and
+  point a pair-table caller at the new function. Additive only, no new
+  dependency, no change to any existing item's behavior.
+
 - **`TimestampUnit` and `CustomScheme::with_timestamp_unit(_)`** (issue #273).
   `CustomScheme` could only express a **unix-seconds** timestamp header, so a
   sender in the millisecond family could not be given working replay
