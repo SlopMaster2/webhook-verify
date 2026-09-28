@@ -245,7 +245,9 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use webhook_verify::{CustomScheme, Encoding, HashAlg, Provider, Secret, VerifyOptions};
+use webhook_verify::{
+    CustomScheme, Encoding, HashAlg, Provider, Secret, TimestampUnit, VerifyOptions,
+};
 // `VerifyingKeyMaterial` is used by both the `sendgrid` and `paypal` cfg
 // blocks below. The crate re-exports it unconditionally, so gate the import
 // on either feature — gating it on `sendgrid` alone made the `paypal`-only
@@ -802,6 +804,7 @@ fuzz_target!(|data: &[u8]| {
         hash: HashAlg::Sha256,
         signature_header: "X-Slack-Signature",
         timestamp_header: Some("X-Slack-Request-Timestamp"),
+        timestamp_unit: TimestampUnit::Seconds,
         encoding: Encoding::Hex,
         prefix: Some("v0="),
         signed_string: |headers, raw_body| {
@@ -826,6 +829,7 @@ fuzz_target!(|data: &[u8]| {
         hash,
         signature_header: "X-Raw-Sig",
         timestamp_header: None,
+        timestamp_unit: TimestampUnit::Seconds,
         encoding: Encoding::Base64,
         prefix: None,
         signed_string: |_headers, raw_body| raw_body.to_vec(),
