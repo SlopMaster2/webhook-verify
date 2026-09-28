@@ -54,7 +54,7 @@ use crate::core::VerifyOptions;
 use crate::core::crypto::verify_hmac_sha256;
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
-use crate::core::replay::{check_replay, parse_millis};
+use crate::core::replay::{MILLIS_PER_SECOND, check_replay, parse_millis};
 use crate::core::secret::Secret;
 use base64::Engine;
 
@@ -125,7 +125,7 @@ pub(crate) fn verify(
     // The timestamp arrives in epoch milliseconds; drop the sub-second
     // remainder (as HubSpot's official Java reference does) before the shared
     // recency check.
-    check_replay(timestamp / 1000, options)
+    check_replay(timestamp / MILLIS_PER_SECOND, options)
 }
 
 /// Returns the HMAC key bytes: the app secret as configured, used as its

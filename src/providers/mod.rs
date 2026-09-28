@@ -4206,6 +4206,13 @@ mod tests {
 
     /// Whether `src/providers/{stem}.rs`'s implementation calls [`check_replay`].
     fn module_calls_check_replay(stem: &str) -> bool {
+        module_implementation(stem).contains("check_replay(")
+    }
+
+    /// The *implementation* half of `src/providers/{stem}.rs` — everything
+    /// before its `#[cfg(test)]` module, so a provider that exercises a helper
+    /// in its own tests does not masquerade as one whose `verify()` uses it.
+    fn module_implementation(stem: &str) -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src/providers")
             .join(format!("{stem}.rs"));
@@ -4216,11 +4223,177 @@ mod tests {
                 path.display()
             )
         });
-        let implementation = match source.find("#[cfg(test)]") {
-            Some(at) => &source[..at],
-            None => source.as_str(),
-        };
-        implementation.contains("check_replay(")
+        match source.find("#[cfg(test)]") {
+            Some(at) => source[..at].to_string(),
+            None => source,
+        }
+    }
+
+    /// The `src/providers` module stem for every provider, in module order.
+    ///
+    /// Named after each provider's `Display` brand lowercased apart from the
+    /// handful whose module name differs.
+    fn provider_module_stems() -> Vec<String> {
+        let mut stems: Vec<String> = provider_list()
+            .iter()
+            .map(|provider| match provider {
+                Provider::Box => "box_webhooks".to_string(),
+                Provider::LemonSqueezy => "lemonsqueezy".to_string(),
+                Provider::PayPal => "paypal".to_string(),
+                Provider::SendGrid => "sendgrid".to_string(),
+                Provider::StandardWebhooks => "standard_webhooks".to_string(),
+                Provider::X => "x_twitter".to_string(),
+                other => other.to_string().to_lowercase(),
+            })
+            .collect();
+        // `provider_list()` cannot name `Provider::Custom` (it is not
+        // name-constructible — it needs a `CustomScheme`), but the module
+        // floors millisecond timestamps exactly as the built-ins do once
+        // `TimestampUnit::Millis` is configured, so it belongs here by stem.
+        stems.push("custom".to_string());
+        stems
+    }
+
+    /// Every provider module that reads an epoch-*milliseconds* timestamp and
+    /// so has to floor it to whole seconds before [`check_replay`].
+    ///
+    /// Derived from the modules themselves rather than a hand-written list, so a
+    /// new millisecond-timestamp provider is covered by the floor guard below
+    /// the moment it calls [`parse_millis`], with nobody remembering to extend
+    /// a table. Read from source for the same reason as
+    /// [`module_calls_check_replay`]: a duplicated list is a list that drifts.
+    fn millisecond_timestamp_providers() -> Vec<String> {
+        provider_module_stems()
+            .into_iter()
+            .filter(|stem| module_implementation(stem).contains("parse_millis("))
+            .collect()
+    }
+
+    /// The reasons `millisecond_floors_use_the_shared_divisor` should fail, for
+    /// one provider module's implementation text.
+    fn millisecond_floor_offenders_in(stem: &str, implementation: &str) -> Vec<String> {
+        // Comments are dropped first: a module doc that *describes* the floor
+        // as `millis / 1000` is accurate prose, not a second spelling of the
+        // divisor in code, and the guards would otherwise fail on the
+        // documentation that explains them. Text up to a line's first `//` is
+        // kept, so a trailing comment cannot hide a real floor but a `//` inside
+        // a string literal only ever shortens what is scanned.
+        let code: String = implementation
+            .lines()
+            .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut offenders = Vec::new();
+        if code.contains("const MILLIS_PER_SECOND") {
+            offenders.push(format!(
+                "`src/providers/{stem}.rs` redeclares `MILLIS_PER_SECOND` instead of \
+                 importing `core::replay::MILLIS_PER_SECOND`"
+            ));
+        }
+        if code.contains("/ 1000") {
+            offenders.push(format!(
+                "`src/providers/{stem}.rs` floors with a literal `/ 1000` instead of \
+                 `MILLIS_PER_SECOND`"
+            ));
+        }
+        offenders
+    }
+
+    #[test]
+    fn millisecond_floors_use_the_shared_divisor() {
+        // A millisecond timestamp must reach `check_replay` (which compares
+        // whole seconds, spec.md §3) divided by one shared divisor,
+        // `core::replay::MILLIS_PER_SECOND`, living beside the `parse_millis`
+        // that produces the value. Getting the divisor wrong is not a cosmetic
+        // error: a millisecond value compared *without* flooring sits ~5.7e10
+        // seconds in the future, so every delivery fails the window with a
+        // `skew` that reads like a `max_age` misconfiguration and invites
+        // widening the tolerance until the check is vacuous. That is exactly
+        // the failure `TimestampUnit` (issue #273) was added to prevent.
+        //
+        // The drift this removes was real, not hypothetical: seven provider
+        // modules each had their own copy — five named `const`s and two bare
+        // `1000` literals — and only a human reading all seven kept them in
+        // agreement.
+        //
+        // Two independent shapes, because either alone is satisfiable by the
+        // wrong thing: a module may not *declare* the divisor, and a module
+        // that reads millisecond timestamps may not spell it inline at all.
+        // Both are keyed on the module's own `parse_millis(` call rather than a
+        // fixed provider list, so the next millisecond-timestamp provider is
+        // covered without editing a table.
+        let offenders: Vec<String> = millisecond_timestamp_providers()
+            .iter()
+            .flat_map(|stem| millisecond_floor_offenders_in(stem, &module_implementation(stem)))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "the millisecond→second floor must go through \
+             `core::replay::MILLIS_PER_SECOND` — {}",
+            offenders.join("; ")
+        );
+    }
+
+    #[test]
+    fn millisecond_floor_offenders_separates_agreeing_from_drifting() {
+        // The list is derived from the modules themselves, so pin that
+        // derivation: every provider that reads millisecond timestamps must be
+        // found (one silently dropping out would make the guard above vacuous
+        // for it), and nothing that reads whole-second timestamps may be swept
+        // in (which would have the guard fail on an unrelated literal).
+        let providers = millisecond_timestamp_providers();
+        for expected in [
+            "airwallex",
+            "contentful",
+            "custom",
+            "hubspot",
+            "ripple",
+            "webflow",
+            "workos",
+        ] {
+            assert!(
+                providers.iter().any(|stem| stem == expected),
+                "`{expected}.rs` reads epoch-millisecond timestamps, so the floor guard must \
+                 cover it; derived list is {providers:?}"
+            );
+        }
+        assert!(
+            !providers.iter().any(|stem| stem == "stripe"),
+            "Stripe's timestamp is whole seconds and must not be swept into the millisecond \
+             floor guard; derived list is {providers:?}"
+        );
+
+        // The reporting itself, over synthetic module text: an implementation
+        // that imports the shared constant and floors with it reports nothing,
+        // and each drift shape is reported on its own. Merely *mentioning* the
+        // constant is not a redeclaration, so the first case must stay quiet.
+        let agree = "use crate::core::replay::{MILLIS_PER_SECOND, check_replay, parse_millis};\n\
+                     fn verify() { check_replay(parse_millis(h, v)? / MILLIS_PER_SECOND, o) }";
+        assert!(millisecond_floor_offenders_in("airwallex", agree).is_empty());
+
+        // Prose that *describes* the floor is documentation, not a second
+        // spelling of the divisor in code, and must not trip the guard.
+        let documented = "//! floored to whole seconds (`millis / 1000`) before the shared check\n\
+                          /// Mirrors `MILLIS_PER_SECOND`.\n\
+                          fn verify() { check_replay(parse_millis(h, v)? / MILLIS_PER_SECOND, o) }";
+        assert!(millisecond_floor_offenders_in("airwallex", documented).is_empty());
+
+        let literal = "fn verify() { check_replay(parse_millis(h, v)? / 1000, o) }";
+        let literal_offenders = millisecond_floor_offenders_in("airwallex", literal);
+        assert_eq!(literal_offenders.len(), 1, "{literal_offenders:?}");
+        assert!(
+            literal_offenders[0].contains("/ 1000"),
+            "{literal_offenders:?}"
+        );
+
+        let redeclared = "const MILLIS_PER_SECOND: u64 = 1000;\n\
+                          fn verify() { check_replay(parse_millis(h, v)? / MILLIS_PER_SECOND, o) }";
+        let redeclared_offenders = millisecond_floor_offenders_in("airwallex", redeclared);
+        assert_eq!(redeclared_offenders.len(), 1, "{redeclared_offenders:?}");
+        assert!(
+            redeclared_offenders[0].contains("redeclares"),
+            "{redeclared_offenders:?}"
+        );
     }
 
     #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
