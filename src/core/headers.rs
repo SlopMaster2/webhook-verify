@@ -28,8 +28,12 @@ use std::collections::HashMap;
 /// duplicated signature headers before calling [`crate::verify()`]. A caller
 /// extracting headers itself gets the same check from
 /// `webhook_verify::ambiguous_signature_header` (the `http` feature, for an
-/// `http::HeaderMap`); for every other map type the caller compares the
-/// values it holds for the same name.
+/// `http::HeaderMap`) or `webhook_verify::ambiguous_signature_header_in` (no
+/// feature required, for the name/value pair tables the `Vec`/array/slice impls
+/// below accept). A container that keeps one value per name — the
+/// `HashMap`/`BTreeMap` impls below — has no second value to compare the first
+/// against, so for those the caller compares the values it holds for the same
+/// name.
 ///
 /// # `HashMap` caveat
 ///
@@ -65,9 +69,59 @@ use std::collections::HashMap;
 /// that is not visible ASCII (which `http` permits but this crate cannot
 /// treat as a signature) is reported as absent, failing closed downstream
 /// as a missing header.
+///
+/// # Why a pair table needs a separate ambiguity check
+///
+/// A `Vec<(String, String)>` *keeps* every header line it was handed,
+/// repeated names included, so a caller holding one does have the second
+/// value the `spec.md` §4.4 check needs — even though the impls above
+/// deliberately return only the first. Pass the table to
+/// [`ambiguous_signature_header_in`](crate::ambiguous_signature_header_in)
+/// (any slice/array of pairs, no feature required), not to this trait: a
+/// first-match-only accessor cannot report what the full table contains.
 pub trait HeaderMap {
     /// Case-insensitive lookup of a single header value.
     fn get(&self, name: &str) -> Option<&str>;
+}
+
+/// Whether `name` is a syntactically valid HTTP field name — RFC 9110 §5.1's
+/// `field-name = token`: one or more `tchar`s, from a fixed delimiter-free
+/// byte set.
+///
+/// Crate-internal, and dependency-free on purpose. The `spec.md` §4.4
+/// ambiguity scan looks up each name it was given in whichever header
+/// representation the caller holds, and an unparseable name can never be read
+/// back — so the scan has to be able to tell "this name is not a header name"
+/// *without* going through `http::HeaderName` / actix's equivalent, neither of
+/// which is available in every configuration (actix-web pins `http` 0.2, and
+/// the pair-table entry point ships with no features at all).
+///
+/// This is one spelling of the grammar on purpose: the scan that consumes it
+/// and the guard that audits the provider constants against it
+/// (`providers::tests::signature_header_names_are_valid_http_field_names`) must
+/// not be able to disagree about what a field name is.
+pub(crate) fn is_valid_field_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
 }
 
 impl HeaderMap for Vec<(String, String)> {

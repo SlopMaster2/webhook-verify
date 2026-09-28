@@ -5,14 +5,16 @@
 //! Changes here affect every provider and are treated as high-risk; see
 //! `spec.md` §2 for the normative contract.
 
-// Gated on `http` as well as the two adapters: the `spec.md` §4.4 ambiguity
-// check is a public entry point under `http` (see
-// [`adapter_utils::ambiguous_signature_header`]), so a caller driving
-// `verify()` with an `http::HeaderMap` can honor the contract without pulling
-// in a framework adapter. The adapter-only helpers inside the module
-// (`rejection_status`, `declared_content_length`) carry their own narrower
-// `cfg`, so nothing here becomes dead code in the `http`-only configuration.
-#[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
+// The `spec.md` §4.4 ambiguity check lives here and is public API in two
+// shapes: [`adapter_utils::ambiguous_signature_header`] for an
+// `http::HeaderMap` (the `http` feature) and
+// [`adapter_utils::ambiguous_signature_header_in`] for a name/value pair
+// table (no features at all, since the pair shape needs neither `http` nor
+// `std`). Both entry points share the one scan implementation, which is what
+// keeps a caller, the `tower` adapter and the `actix` adapter from drifting
+// apart on what counts as ambiguous — so the module is unconditional, and the
+// adapter-only helpers inside it (`rejection_status`,
+// `declared_content_length`, `KeyRing`) carry their own narrower `cfg`.
 pub(crate) mod adapter_utils;
 pub(crate) mod crypto;
 pub(crate) mod error;

@@ -255,9 +255,9 @@ hyper requests) implements `HeaderMap` and can be passed to `verify()` directly.
 `HeaderMap` lookup returns only the *first* value for a name, so it cannot see a
 signature header that arrived twice. The `tower` and `actix` adapters reject
 that case for you; if you are calling `verify()` yourself, run the same check
-first with `ambiguous_signature_header`. Two requirements come with it: it ships
-with the `http` feature, and it takes an `http::HeaderMap` (not a
-`Vec<(String, String)>`, and not any other `HeaderMap` impl):
+first with the entry point that matches how you hold your headers:
+`ambiguous_signature_header` for an `http::HeaderMap` (the `http` feature), or
+`ambiguous_signature_header_in` for a name/value pair table (no features needed):
 
 ```rust
 use webhook_verify::{Provider, Secret, VerifyError, ambiguous_signature_header, verify};
@@ -286,6 +286,36 @@ verify(
 )?;
 ```
 
+Without the `http` feature, pass the pair table you already built instead — the
+same scan, so the same answer, and no feature to enable:
+
+```rust
+use webhook_verify::{Provider, Secret, VerifyError, ambiguous_signature_header_in, verify};
+
+// A pair table keeps every header line it was handed, repeated names included,
+// so it can answer the question `verify()`'s first-match lookup cannot. A
+// framework `HeaderMap` works here too: `&[("x-hub-signature-256", "…")]` is
+// what an adapter sees, minus the names `HeaderMap` cannot represent.
+let headers: Vec<(&str, &str)> = vec![
+    ("content-type", "application/json"),
+    ("x-hub-signature-256", "sha256=6d3f1e..."),
+];
+
+if let Some(header) = ambiguous_signature_header_in(Provider::GitHub, &headers) {
+    return Err(VerifyError::MalformedHeader {
+        header,
+        reason: "header present multiple times with different values",
+    });
+}
+verify(
+    Provider::GitHub,
+    &headers,
+    b"the untouched request body",
+    &Secret::new("your GitHub webhook secret"),
+    Default::default(),
+)?;
+```
+
 It returns the provider-spelled name of the offending header, or `None` when
 the request is unambiguous — identical repeats are fine. For
 [`Provider::Contentful`](https://docs.rs/webhook-verify/latest/webhook_verify/enum.Provider.html)
@@ -294,12 +324,14 @@ header the delivery itself declares as signed is scanned too. See
 [`spec.md` §4.4](https://github.com/SlopMaster2/webhook-verify/blob/master/spec.md)
 for the full contract and the `Custom` carve-out.
 
-No other `HeaderMap` impl can offer this check, and that is a property of the
-trait rather than a gap in this one: it exposes first-match lookup only, so a
-map that keeps just one value per name has no second value to compare it
-against. If you build your own map type, compare the values you hold for the
-same signature-header name yourself, or route the request through the `tower` or
-`actix` adapter, which does exactly that.
+What cannot use this check is a container that keeps one value per name —
+`BTreeMap`, `HashMap`, or your own map type — and that is a property of the
+container rather than a gap in the check: it exposes first-match lookup only, so
+there is no second value to compare the first against. `ambiguous_signature_header_in`
+needs the pairs themselves, which a single-value map has already thrown away. If
+you hold one, compare the values you hold for the same signature-header name
+yourself, or route the request through the `tower` or `actix` adapter, which
+does exactly that.
 
 One provider is exempt, for a reason in its own signing scheme: during its
 documented 24-hour secret-rotation window

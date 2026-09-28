@@ -5,13 +5,14 @@
 //!
 //! Three kinds of item live here:
 //!
-//! * the ambiguity scan itself, compiled under the `http` feature *and* both
-//!   adapter features, because it is public API for `http`-feature callers
-//!   (see [`ambiguous_signature_header`]) as well as the adapters' internal
-//!   step;
+//! * the ambiguity scan itself, unconditional: it is public API twice over —
+//!   [`ambiguous_signature_header`] for a caller holding an `http::HeaderMap`
+//!   (the `http` feature) and [`ambiguous_signature_header_in`] for a caller
+//!   holding a name/value pair table (no features at all) — as well as the
+//!   adapters' internal step, so one implementation serves all three;
 //! * adapter-only glue ([`KeyRing`], `rejection_status`,
 //!   `declared_content_length`), which carries a narrower `cfg` so nothing is
-//!   dead code in the `http`-only configuration.
+//!   dead code when no adapter is enabled.
 
 #[cfg(any(feature = "tower", feature = "actix"))]
 use alloc::{sync::Arc, vec::Vec};
@@ -20,6 +21,7 @@ use core::fmt;
 
 #[cfg(any(feature = "tower", feature = "actix"))]
 use super::VerifyError;
+use crate::core::headers::is_valid_field_name;
 use crate::providers::{
     CONTENTFUL_SIGNED_HEADERS_HEADER, CONTENTFUL_SIGNED_HEADERS_SEPARATOR, Provider,
     provider_sent_duplicate_headers, signature_header_names,
@@ -90,6 +92,51 @@ impl MultiValueHeaders for actix_web::http::header::HeaderMap {
     fn get_first_str(&self, name: &str) -> Option<&str> {
         let key = actix_web::http::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
         self.get(&key).and_then(|value| value.to_str().ok())
+    }
+}
+
+/// A header table held as a sequence of name/value pairs, viewed through
+/// [`MultiValueHeaders`] so the one scan implementation serves it too.
+///
+/// Unlike the two framework maps, a pair table keeps *every* header line it was
+/// handed — repeated names included — so a caller who built one holds the
+/// second value the ambiguity check needs. The `HeaderMap` impls for
+/// `Vec`/array/slice-of-pairs can therefore not see a duplicate, but the
+/// caller's own table can; this view is what bridges that (issue #282).
+///
+/// Names are compared ASCII-case-insensitively, exactly as
+/// [`HeaderMap`](crate::HeaderMap) does for the same types, so the scan
+/// reaches the pairs a framework map would have reached. A name that is not a
+/// valid field name reports `None` from both methods, which
+/// [`has_conflicting_duplicates`] turns into *ambiguous* — the same fail-closed
+/// answer the framework maps give for a name they cannot parse.
+struct PairHeaders<'a, K, V>(&'a [(K, V)]);
+
+impl<K, V> MultiValueHeaders for PairHeaders<'_, K, V>
+where
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    fn get_all_bytes(&self, name: &str) -> Option<impl Iterator<Item = &[u8]>> {
+        if !is_valid_field_name(name) {
+            return None;
+        }
+        Some(
+            self.0
+                .iter()
+                .filter(|(k, _)| k.as_ref().eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.as_ref().as_bytes()),
+        )
+    }
+
+    fn get_first_str(&self, name: &str) -> Option<&str> {
+        if !is_valid_field_name(name) {
+            return None;
+        }
+        self.0
+            .iter()
+            .find(|(k, _)| k.as_ref().eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_ref())
     }
 }
 
@@ -264,6 +311,104 @@ pub fn ambiguous_signature_header(
     headers: &::http::HeaderMap,
 ) -> Option<&'static str> {
     find_ambiguous_signature_header(headers, &provider)
+}
+
+/// The `spec.md` §4.4 ambiguity check for callers holding their headers as a
+/// sequence of name/value pairs — `Vec<(String, String)>`,
+/// `Vec<(&str, &str)>`, or any slice/array of pairs (`&table[..]`), the same
+/// shapes [`HeaderMap`](crate::HeaderMap) is implemented for.
+///
+/// This is the entry point for the configurations
+/// [`ambiguous_signature_header`] cannot serve: it needs neither the `http`
+/// feature nor `std`, and it covers the header representation the crate's own
+/// documentation uses. It exists because `spec.md` §4.4 obliges every caller of
+/// [`verify()`](crate::verify()) to run the check, and `HeaderMap`'s
+/// first-match-only lookup structurally cannot do it (issue #282).
+///
+/// Both entry points run the *same* scan, so a hardening here applies to the
+/// `tower` and `actix` adapters and to `http::HeaderMap` callers too.
+///
+/// Returns `Some(header)` when `provider`'s signature headers — or, for
+/// [`Provider::Contentful`], any header its self-describing
+/// `x-contentful-signed-headers` list names — appear more than once in the
+/// table with *differing* values, and `None` otherwise. Identical repeats are
+/// not ambiguous. Names are matched ASCII-case-insensitively, the same way
+/// [`HeaderMap`](crate::HeaderMap)` matches them for these types.
+///
+/// Reject with
+/// [`VerifyError::MalformedHeader`](crate::VerifyError::MalformedHeader)
+/// carrying the returned `header`, exactly as
+/// [`ambiguous_signature_header`] documents:
+///
+/// ```
+/// use webhook_verify::{
+///     Provider, Secret, VerifyError, ambiguous_signature_header_in, verify,
+/// };
+///
+/// let headers: Vec<(String, String)> = vec![
+///     ("x-hub-signature-256".to_string(), "sha256=one".to_string()),
+///     // A proxy that appended its own value: two lines, one name, differing
+///     // bytes — exactly what §4.4 requires rejecting.
+///     ("x-hub-signature-256".to_string(), "sha256=two".to_string()),
+/// ];
+///
+/// if let Some(header) = ambiguous_signature_header_in(Provider::GitHub, &headers) {
+///     let error = VerifyError::MalformedHeader {
+///         header,
+///         reason: "header present multiple times with different values",
+///     };
+///     assert_eq!(
+///         error.to_string(),
+///         "malformed header `X-Hub-Signature-256`: \
+///          header present multiple times with different values",
+///     );
+/// } else {
+///     unreachable!("the two values differ, so the header is ambiguous");
+/// }
+///
+/// // One line for the name, plus an unrelated header: unambiguous, and this is
+/// // the table `verify()` reads.
+/// let clean: Vec<(&str, &str)> = vec![
+///     ("content-type", "application/json"),
+///     (
+///         "x-hub-signature-256",
+///         "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17",
+///     ),
+/// ];
+/// assert_eq!(ambiguous_signature_header_in(Provider::GitHub, &clean), None);
+/// assert_eq!(
+///     verify(
+///         Provider::GitHub,
+///         &clean,
+///         b"Hello, World!",
+///         &Secret::new("It's a Secret to Everybody"),
+///         Default::default(),
+///     ),
+///     Ok(()),
+/// );
+/// ```
+///
+/// A table that keeps one value per name — `BTreeMap`, `HashMap`, anything with
+/// one value per key — cannot use this: there is no second value to compare the
+/// first against, which is a property of the `HeaderMap` impl rather than of
+/// this check. The [`HeaderMap`](crate::HeaderMap) docs say the same. Route such
+/// a request through the `tower`/`actix` adapter, or compare the values you hold
+/// yourself.
+///
+/// The `Custom` carve-out and Mollie's rotation-window exemption documented on
+/// `ambiguous_signature_header` apply here unchanged — it is the same scan
+/// (plain text rather than a link: that item is behind the `http` feature and
+/// this one is not).
+#[must_use]
+pub fn ambiguous_signature_header_in<K, V>(
+    provider: Provider,
+    headers: &[(K, V)],
+) -> Option<&'static str>
+where
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    find_ambiguous_signature_header(&PairHeaders(headers), &provider)
 }
 
 /// The dynamic half of the ambiguity scan: headers the provider's scheme
@@ -1454,6 +1599,353 @@ mod tests {
         }
     }
 
+    /// The pair-table entry point (issue #282).
+    ///
+    /// `spec.md` §4.4 makes this check the caller's job for *every* `verify()`
+    /// call, but the only public entry point until now took an
+    /// `http::HeaderMap`. A caller whose headers are a `Vec<(String, String)>`
+    /// — the representation the crate's own documentation uses — could not run
+    /// it at all, and not because it was told to: the `HeaderMap` impl for a
+    /// pair table keeps the first match, so the second value was already gone
+    /// by the time any check could look. These pin that the new entry point
+    /// catches the same cases the `http` one does, and that it cannot degrade
+    /// into a silent no-op — the failure mode that would leave §4.4
+    /// unenforced for pair-table callers with the suite still green.
+    mod pair_table_entry_point {
+        use crate::ambiguous_signature_header_in;
+        // These tests are unconditional, so they are also compiled without
+        // `std`, where the standard prelude is not injected.
+        #[cfg(not(feature = "std"))]
+        use crate::test_helpers::*;
+        use crate::{CustomScheme, Encoding, HashAlg, Provider, Secret, verify};
+
+        /// GitHub's published `Hello, World!` vector
+        /// (https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
+        const GENUINE: &str =
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
+        const FORGED: &str =
+            "sha256=0000000000000000000000000000000000000000000000000000000000000000";
+        const BODY: &[u8] = b"Hello, World!";
+        const LIVE: &str = "It's a Secret to Everybody";
+
+        /// The `Vec<(String, String)>` shape the crate documents for
+        /// non-`http` callers, so the tests exercise the exact type a caller
+        /// would build rather than a convenient one.
+        fn owned() -> Vec<(String, String)> {
+            vec![("x-hub-signature-256".to_string(), GENUINE.to_string())]
+        }
+
+        #[test]
+        fn a_single_valued_delivery_is_unambiguous_and_verifies() {
+            let headers = owned();
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::GitHub, &headers),
+                None
+            );
+            assert_eq!(
+                verify(
+                    Provider::GitHub,
+                    &headers,
+                    BODY,
+                    &Secret::new(LIVE),
+                    Default::default(),
+                ),
+                Ok(()),
+            );
+        }
+
+        #[test]
+        fn a_delivery_that_verifies_is_still_reported_ambiguous_when_duplicated() {
+            // The case the entry point exists for, and the one a pair table can
+            // represent: both values are right there, in order, with nothing
+            // dropped in between. A proxy appended its own signature to the
+            // genuine one; `verify()` reads the first value and returns
+            // `Ok(())` while whatever the proxy validated upstream saw a
+            // different one. If this test ever returns `None`, the check has
+            // silently stopped working.
+            let headers = vec![
+                ("x-hub-signature-256".to_string(), GENUINE.to_string()),
+                ("x-hub-signature-256".to_string(), FORGED.to_string()),
+            ];
+
+            // Pinned so the check cannot be dismissed as redundant with
+            // verification: verification accepts this request.
+            assert_eq!(
+                verify(
+                    Provider::GitHub,
+                    &headers,
+                    BODY,
+                    &Secret::new(LIVE),
+                    Default::default(),
+                ),
+                Ok(()),
+            );
+
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::GitHub, &headers),
+                Some("X-Hub-Signature-256"),
+            );
+        }
+
+        #[test]
+        fn an_identical_duplicate_is_not_ambiguous() {
+            // Repeating the same value smuggles nothing: every reader agrees on
+            // what it is, and rejecting it would break well-behaved proxies that
+            // re-emit headers verbatim.
+            let headers = vec![
+                ("x-hub-signature-256".to_string(), GENUINE.to_string()),
+                ("x-hub-signature-256".to_string(), GENUINE.to_string()),
+            ];
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::GitHub, &headers),
+                None
+            );
+            assert_eq!(
+                verify(
+                    Provider::GitHub,
+                    &headers,
+                    BODY,
+                    &Secret::new(LIVE),
+                    Default::default(),
+                ),
+                Ok(()),
+            );
+        }
+
+        #[test]
+        fn names_are_matched_case_insensitively() {
+            // Header names are case-insensitive, so a table that spells one
+            // differently in each of two lines carries a single header with two
+            // values. Comparing the raw names instead would answer `None` and
+            // hand an attacker a case-flip past §4.4, which is why this is
+            // pinned separately from the duplicate tests above.
+            let headers = vec![
+                ("X-Hub-Signature-256", GENUINE),
+                ("x-hub-signature-256", FORGED),
+            ];
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::GitHub, &headers),
+                Some("X-Hub-Signature-256"),
+            );
+        }
+
+        #[test]
+        fn an_empty_table_has_nothing_to_be_ambiguous_about() {
+            let headers: Vec<(&str, &str)> = Vec::new();
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::GitHub, &headers),
+                None
+            );
+        }
+
+        #[test]
+        fn every_declared_header_of_a_multi_header_provider_is_scanned() {
+            // The scan is per-provider, not hard-coded to "the signature
+            // header", so a provider's list cannot silently lose one.
+            let headers = vec![
+                ("x-contentful-signature", "ab"),
+                ("x-contentful-timestamp", "1704391525001"),
+                ("x-contentful-timestamp", "1704391525002"),
+            ];
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::Contentful, &headers),
+                Some("x-contentful-timestamp"),
+            );
+        }
+
+        #[test]
+        fn contentfuls_dynamic_half_reaches_the_pair_table_entry_point() {
+            // Contentful folds the headers named by
+            // `x-contentful-signed-headers` into the signed string, so a
+            // conflicting duplicate of one of *those* is as ambiguous as a
+            // duplicate of the signature header. Reported against the list
+            // header: the request-controlled header that named the value, and
+            // the only name available as the `&'static str` `MalformedHeader`
+            // carries.
+            let headers = vec![
+                ("x-contentful-signature", "ab"),
+                (
+                    "x-contentful-signed-headers",
+                    "content-type,x-contentful-timestamp",
+                ),
+                ("content-type", "application/json"),
+                ("content-type", "text/plain"),
+            ];
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::Contentful, &headers),
+                Some("x-contentful-signed-headers"),
+            );
+        }
+
+        #[test]
+        fn a_listed_name_the_request_cannot_spell_fails_closed() {
+            // The dynamic scan cannot enumerate the values of a name it is not
+            // allowed to spell, so "cannot tell" has to read as ambiguous
+            // rather than clean. A list element containing a space is not a
+            // valid field name (RFC 9110: `field-name = token`), and no
+            // request can carry such a header — so the honest answer is
+            // "ambiguous", exactly as it is for the two framework maps.
+            let headers = vec![
+                ("x-contentful-signature", "ab"),
+                ("x-contentful-signed-headers", "x contentful topic"),
+            ];
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::Contentful, &headers),
+                Some("x-contentful-signed-headers"),
+            );
+        }
+
+        #[test]
+        fn mollies_rotation_window_exemption_applies_here_too() {
+            // One scan, so one exemption: Mollie documents two `X-Mollie-Signature`
+            // lines with different values during a signing-secret rotation, and
+            // rejecting the provider's own shape would make that window unusable
+            // for pair-table callers too.
+            let headers = vec![
+                ("x-mollie-signature", "first"),
+                ("x-mollie-signature", "second"),
+            ];
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::Mollie, &headers),
+                None
+            );
+
+            // Scoped to Mollie: the same shape is still ambiguous for a provider
+            // that never sends it.
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::GitHub, &headers),
+                None,
+            );
+            let other: Vec<(&str, &str)> = vec![
+                ("x-slack-signature", "first"),
+                ("x-slack-signature", "second"),
+            ];
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::Slack, &other),
+                Some("X-Slack-Signature"),
+            );
+        }
+
+        #[test]
+        fn a_custom_scheme_scans_exactly_its_two_declared_headers() {
+            fn body_only(_headers: &dyn crate::HeaderMap, raw_body: &[u8]) -> alloc::vec::Vec<u8> {
+                raw_body.to_vec()
+            }
+            let scheme =
+                CustomScheme::new(HashAlg::Sha256, "x-webhook-sig", Encoding::Hex, body_only)
+                    .with_timestamp_header("x-webhook-ts");
+            let custom = Provider::Custom(scheme);
+
+            for conflicting in ["x-webhook-sig", "x-webhook-ts"] {
+                let headers = vec![
+                    ("x-webhook-sig", "ab"),
+                    ("x-webhook-ts", "1"),
+                    (conflicting, "2"),
+                ];
+                assert_eq!(
+                    ambiguous_signature_header_in(custom, &headers),
+                    Some(conflicting),
+                    "{conflicting} is a declared header and must be scanned",
+                );
+            }
+
+            // A third header the closure never reads is irrelevant, and the
+            // honest answer is "cannot tell" — the scan cannot know which
+            // headers a `signed_string` closure reads, so it does not pretend to.
+            let headers = vec![
+                ("x-webhook-sig", "ab"),
+                ("x-unrelated", "1"),
+                ("x-unrelated", "2"),
+            ];
+            assert_eq!(ambiguous_signature_header_in(custom, &headers), None);
+        }
+
+        #[cfg(not(feature = "paypal"))]
+        #[test]
+        fn a_provider_disabled_by_a_feature_flag_has_no_headers_to_scan() {
+            // A feature-gated provider's headers are unknown to this build, so
+            // there is nothing to enumerate and nothing to reject here;
+            // `verify()` fails the request closed with `UnsupportedProvider`
+            // instead. Pinned so turning a provider's feature *on* is what makes
+            // its headers scannable — and so a future change cannot start
+            // rejecting requests for a provider this build cannot verify at all.
+            let headers = vec![
+                ("paypal-transmission-id", "one"),
+                ("paypal-transmission-id", "two"),
+            ];
+            assert_eq!(
+                ambiguous_signature_header_in(Provider::PayPal, &headers),
+                None
+            );
+        }
+
+        /// The two entry points must not be able to disagree: same request,
+        /// same provider, same answer. A pair table and an `http::HeaderMap`
+        /// can both carry the duplicate, and a hardening that reached only one
+        /// of them would be a silent hole for the other.
+        #[cfg(feature = "http")]
+        #[test]
+        fn it_agrees_with_the_http_entry_point_on_the_same_request() {
+            use crate::ambiguous_signature_header;
+
+            let cases: &[(&[(&str, &str)], bool)] = &[
+                (&[("x-hub-signature-256", GENUINE)], false),
+                (
+                    &[
+                        ("x-hub-signature-256", GENUINE),
+                        ("x-hub-signature-256", FORGED),
+                    ],
+                    true,
+                ),
+                (
+                    &[
+                        ("x-hub-signature-256", GENUINE),
+                        ("x-hub-signature-256", GENUINE),
+                    ],
+                    false,
+                ),
+                (
+                    &[
+                        ("X-Hub-Signature-256", GENUINE),
+                        ("x-hub-signature-256", FORGED),
+                    ],
+                    true,
+                ),
+                (&[], false),
+            ];
+
+            for (pairs, expected_ambiguous) in cases {
+                // `from_bytes`, not `from_static`: one case deliberately carries
+                // an upper-case name, and `from_static` panics on anything but a
+                // lower-case name. A bare `panic!` rather than `expect` because
+                // the crate denies `unwrap`/`expect` outright.
+                let mut map = ::http::HeaderMap::new();
+                for (name, value) in *pairs {
+                    let parsed = match ::http::HeaderName::from_bytes(name.as_bytes()) {
+                        Ok(name) => name,
+                        Err(_) => panic!("fixture header name is not valid: {name}"),
+                    };
+                    map.append(parsed, ::http::HeaderValue::from_static(value));
+                }
+                let expected = if *expected_ambiguous {
+                    Some("X-Hub-Signature-256")
+                } else {
+                    None
+                };
+                assert_eq!(
+                    ambiguous_signature_header_in(Provider::GitHub, pairs),
+                    expected,
+                    "pair table {pairs:?} disagreed with the http entry point",
+                );
+                assert_eq!(
+                    ambiguous_signature_header(Provider::GitHub, &map),
+                    expected,
+                    "http entry point disagreed with the pair table for {pairs:?}",
+                );
+            }
+        }
+    }
+
     /// The dynamic scan must not carry its own copy of Contentful's list
     /// separator (issue #267).
     ///
@@ -1706,16 +2198,24 @@ mod tests {
         );
     }
 
-    /// The honest limit the same section owes a caller whose map is not an
-    /// `http::HeaderMap`.
+    /// The honest limit the same section owes a caller holding a container
+    /// that keeps one value per name.
     ///
-    /// `HeaderMap` is first-match-only by design (`spec.md` §4.4), so no other
-    /// impl *can* support the scan: a map holding one value per name has no
-    /// second value to compare against. The README pointed at the helper
-    /// without saying so, which reads as "this is how every caller does it".
+    /// `HeaderMap` is first-match-only by design (`spec.md` §4.4), so no
+    /// *single-value* container *can* support the scan: a map holding one value
+    /// per name has no second value to compare against. That is still a real
+    /// limit and the README has to keep saying it — but it is narrower than
+    /// "no other `HeaderMap` impl", which stopped being true when
+    /// `ambiguous_signature_header_in` gave pair tables a way in (#282). A pair
+    /// table keeps repeated names, so it can answer the question; only the
+    /// one-value container cannot. This guard finds the paragraph by that
+    /// narrower subject rather than by the first "first-match" string after the
+    /// intro, which is no longer unique: the pair-table snippet legitimately
+    /// mentions first-match lookup to explain why the table is not the same as
+    /// what `verify()` saw.
     #[cfg(feature = "http")]
     #[test]
-    fn readme_states_why_other_map_types_cannot_use_the_ambiguity_check() {
+    fn readme_states_why_a_single_value_map_cannot_use_the_ambiguity_check() {
         const README: &str = include_str!("../../README.md");
 
         let blocks: Vec<&str> = README.split("\n\n").collect();
@@ -1727,18 +2227,23 @@ mod tests {
         };
         let limit = blocks[at + 1..]
             .iter()
-            .find(|block| block.contains("first-match"))
+            .find(|block| block.contains("first-match") && block.contains("one value per name"))
             .unwrap_or_else(|| {
                 panic!(
-                    "README.md must explain that the `HeaderMap` trait's \
-                     first-match-only lookup is why no other map type can \
-                     support the ambiguity check"
+                    "README.md must explain that a container keeping one value per name \
+                     cannot support the ambiguity check, because the `HeaderMap` trait's \
+                     first-match-only lookup leaves no second value to compare"
                 )
             });
         assert!(
             limit.contains("compare the values you hold"),
-            "that explanation must say what a caller with another map type \
-             does instead — compare the values it holds for the same name — \
+            "that explanation must say what a caller with such a map does instead — \
+             compare the values it holds for the same name — found: {limit}"
+        );
+        assert!(
+            limit.contains("ambiguous_signature_header_in"),
+            "the same paragraph must point a pair-table caller at the entry point that \
+             does work for them, so the limit is not read as \"nobody can do this\"; \
              found: {limit}"
         );
     }
