@@ -3333,7 +3333,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   statement of the same rule in `core::crypto::is_all_nul_key` is unchanged.
   Documentation only.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-09-08
 
-Initial release (in progress). See [Unreleased](#unreleased) for the
-full feature set targeting v0.1.
+Initial release, published to crates.io on 2026-09-08. See
+[Unreleased](#unreleased) for the changes since then, which target v0.2.0
+(the current `version` in `Cargo.toml`).
