@@ -4022,6 +4022,93 @@ mod tests {
         (exact, offenders)
     }
 
+    /// The `//` run directly above the vacuity-floor assertion in
+    /// `provider_variant_docs_spell_their_own_headers_the_way_the_code_does`,
+    /// as joined comment text. `None` when the assertion, or a comment above
+    /// it, is not there to be read.
+    ///
+    /// The region is located from the assertion rather than from the claim's
+    /// wording on purpose: reading the whole file would find this guard's own
+    /// synthetic comments — or, if the real one is deleted, *only* those — and
+    /// report a count that still verifies, which is the vacuous pass this guard
+    /// exists to prevent. The needle carries a leading newline for the same
+    /// reason `line_test_vector_provenance_comment`'s does: so this helper's
+    /// own copy of it cannot be the thing that matches.
+    fn vacuity_floor_comment(source: &str) -> Option<String> {
+        const NEEDLE: &str = "\n            named * 2 >= provider_list().len(),";
+        let before_assertion = &source[..source.find(NEEDLE)?];
+
+        // Walk back over the contiguous comment run directly above the
+        // assertion. `str::Lines` is not a `DoubleEndedIterator` under `core`,
+        // so the scan is over a collected, index-addressable list.
+        let mut lines: Vec<&str> = before_assertion.lines().collect();
+        // The needle starts at the newline that ends the `assert!(` line, so
+        // that line arrives unterminated. It is the start of the assertion
+        // rather than part of the run, and leaving it in would stop the walk
+        // below before it read anything.
+        if let Some(last) = lines.last() {
+            if !last.trim_start().starts_with("//") {
+                lines.pop();
+            }
+        }
+        let mut start = None;
+        for index in (0..lines.len()).rev() {
+            let trimmed = lines[index].trim();
+            if trimmed.starts_with("//") {
+                start = Some(index);
+            } else if !trimmed.is_empty() {
+                break;
+            }
+        }
+        let start = start?;
+        Some(
+            lines[start..]
+                .iter()
+                // Drop the `//` marker so a reported claim reads as prose, not
+                // as source lines glued together.
+                .map(|line| line.trim().trim_start_matches("//").trim())
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    }
+
+    /// The `N` out of `M` count in a vacuity-floor comment, as `(N, M)`.
+    /// `None` when the comment does not state one.
+    ///
+    /// A missing or unreadable sentence is a failure the caller must report,
+    /// not a silent pass: a guard whose own account of *how much it actually
+    /// checks* is deleted, reworded, or made wrong leaves the rest of the suite
+    /// just as green as a lying one did. The measurement it is checked against
+    /// is otherwise untested prose, the same shape as the comments
+    /// `line_test_vector_provenance_comment` (issue #307) and
+    /// `std_feature_comment` (`src/core/error.rs`, issue #262) read back out
+    /// for their own claims.
+    fn named_header_doc_count_claim(comment: &str) -> Option<(usize, usize)> {
+        // Anchored on the fixed tail of the sentence, so the read is tied to
+        // the claim's wording rather than to a bare number that could match any
+        // digit in the comment.
+        const TAIL: &str = " variants name at least one of their own headers";
+        let before_tail = &comment[..comment.find(TAIL)?];
+        // "... 52 of the 58 <TAIL>" — digits are read backwards off the tail,
+        // one field at a time, each bounded by a non-digit so `58` cannot
+        // swallow the `52` and a stray number earlier in the comment cannot
+        // stand in for either.
+        let (before_total, total) = trailing_digits(before_tail)?;
+        let (_, named) = trailing_digits(before_total.strip_suffix(" of the ")?)?;
+        Some((named.parse().ok()?, total.parse().ok()?))
+    }
+
+    /// The maximal run of ASCII digits ending `text`, and everything before it.
+    ///
+    /// `None` when `text` does not end in a digit, so a claim read that ran off
+    /// the end of a sentence cannot borrow the next word.
+    fn trailing_digits(text: &str) -> Option<(&str, &str)> {
+        let start = text
+            .rfind(|character: char| !character.is_ascii_digit())
+            .map_or(0, |at| at + 1);
+        (start < text.len()).then_some((&text[..start], &text[start..]))
+    }
+
     #[test]
     fn provider_variant_docs_spell_their_own_headers_the_way_the_code_does() {
         // `Provider::Shopify`'s doc named the header `X-Shopify-Hmac-SHA256`
@@ -4083,9 +4170,9 @@ mod tests {
              {offenders:?}"
         );
 
-        // Vacuity floor. 52 of the 58 variants name at least one of their own
-        // headers today, so a derivation that stopped finding them fails here
-        // instead of reporting a clean run over an empty set.
+        // Vacuity floor. 53 of the 58 variants name at least one of their own headers today,
+        // so a derivation that stopped finding them fails here instead of reporting a clean
+        // run over an empty set.
         assert!(
             named * 2 >= provider_list().len(),
             "only {named} of the {} variant docs name one of their own headers, so this guard \
@@ -4093,6 +4180,31 @@ mod tests {
              `declared_header_constants` derivation reads the same as docs that lost their header \
              names",
             provider_list().len()
+        );
+
+        // The count in the sentence above, checked against the derivation it
+        // reports on. The floor above is deliberately loose, so it stayed green
+        // while the sentence read 52 and the docs measured 53: a `//` comment is
+        // neither built nor tested, and this comment is the only place a
+        // maintainer can see how much of the enum the guard really covers. The
+        // five that name none are `Twilio`, `Discord`, `PayPal`, `SendGrid` and
+        // `StandardWebhooks` — all five confirmed by hand against their modules'
+        // declared headers, not by re-running this test.
+        let comment = match vacuity_floor_comment(include_str!("mod.rs")) {
+            Some(found) => found,
+            None => panic!(
+                "this guard's vacuity-floor assertion must be directly below a `//` comment, and \
+                 the claim in it is read back out of this file so neither a wrong number nor a \
+                 deleted sentence can pass unnoticed"
+            ),
+        };
+        assert_eq!(
+            named_header_doc_count_claim(&comment),
+            Some((named, provider_list().len())),
+            "the vacuity-floor comment above must state this guard's own count, \"N of the M \
+             variants name at least one of their own headers\"; it said 52 of the 58 while the \
+             docs measured 53, and it is read back out of this file so neither a wrong number nor \
+             a reworded sentence can pass unnoticed"
         );
 
         // The comparison itself, over synthetic text: the shipped defect is
@@ -4126,6 +4238,62 @@ mod tests {
             "the report must name both the spelling in the doc and the one the code declares: \
              {drifted:?}"
         );
+
+        // The claim reader, over synthetic comments. Without these the read
+        // above could stop matching the shipped sentence and report a mismatch
+        // that reads as a wrong count, or — worse — the assertion could be
+        // deleted along with a comment reworded into a shape it no longer
+        // finds, leaving the sentence unchecked with nothing failing.
+        for (text, claim) in [
+            // The shipped sentence, with the rest of the comment following it.
+            (
+                "// Vacuity floor. 53 of the 58 variants name at least one of their own headers \
+                 today,\n// so a derivation that stopped finding them fails here.",
+                Some((53, 58)),
+            ),
+            // A zero count and a fully-covering count both read, so a future
+            // enum that loses or gains coverage is not silently mis-read as a
+            // missing sentence.
+            (
+                "// 0 of the 58 variants name at least one of their own headers today.",
+                Some((0, 58)),
+            ),
+            (
+                "// 58 of the 58 variants name at least one of their own headers today.",
+                Some((58, 58)),
+            ),
+            // Absent, reworded, and truncated: none of these may borrow a digit
+            // from a neighbouring field, an earlier number in the comment, or
+            // the next word.
+            (
+                "// 53 of the 58 variants mention their own headers today.",
+                None,
+            ),
+            (
+                "// 53 of the variants name at least one of their own headers.",
+                None,
+            ),
+            (
+                "// of the 58 variants name at least one of their own headers.",
+                None,
+            ),
+            (
+                "// 53 of the 58 variants name at least one of their own.",
+                None,
+            ),
+            // A bare number elsewhere in the comment must not stand in for the
+            // count, which is why the read is anchored on the fixed tail.
+            (
+                "// 42 unrelated digits, then prose that never states the claim.",
+                None,
+            ),
+        ] {
+            assert_eq!(
+                named_header_doc_count_claim(text),
+                claim,
+                "synthetic comment: {text:?}"
+            );
+        }
     }
 
     /// The provenance comment `src/providers/line.rs` places immediately above
