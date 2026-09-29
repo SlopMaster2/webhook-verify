@@ -255,7 +255,8 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
 /// Reject with
 /// [`VerifyError::MalformedHeader`](crate::VerifyError::MalformedHeader)
 /// carrying the returned `header` and a `reason` of your choosing — the
-/// adapters use "header present multiple times with different values". Call it
+/// adapters use [`VerifyError::AMBIGUOUS_HEADER_REASON`], which is the
+/// exported spelling of that one string. Call it
 /// *before* [`verify()`](crate::verify()):
 ///
 /// ```
@@ -279,7 +280,7 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
 /// if let Some(header) = ambiguous_signature_header(Provider::GitHub, &headers) {
 ///     let error = VerifyError::MalformedHeader {
 ///         header,
-///         reason: "header present multiple times with different values",
+///         reason: VerifyError::AMBIGUOUS_HEADER_REASON,
 ///     };
 ///     assert_eq!(
 ///         error.to_string(),
@@ -344,7 +345,7 @@ pub fn ambiguous_signature_header(
 /// shapes [`HeaderMap`](crate::HeaderMap) is implemented for.
 ///
 /// This is the entry point for the configurations
-/// [`ambiguous_signature_header`] cannot serve: it needs neither the `http`
+/// `ambiguous_signature_header` cannot serve: it needs neither the `http`
 /// feature nor `std`, and it covers the header representation the crate's own
 /// documentation uses. It exists because `spec.md` §4.4 obliges every caller of
 /// [`verify()`](crate::verify()) to run the check, and `HeaderMap`'s
@@ -362,8 +363,9 @@ pub fn ambiguous_signature_header(
 ///
 /// Reject with
 /// [`VerifyError::MalformedHeader`](crate::VerifyError::MalformedHeader)
-/// carrying the returned `header`, exactly as
-/// [`ambiguous_signature_header`] documents:
+/// carrying the returned `header`, exactly as `ambiguous_signature_header`
+/// documents (plain text rather than a link: that item is behind the `http`
+/// feature and this one is not):
 ///
 /// ```
 /// use webhook_verify::{
@@ -380,7 +382,7 @@ pub fn ambiguous_signature_header(
 /// if let Some(header) = ambiguous_signature_header_in(Provider::GitHub, &headers) {
 ///     let error = VerifyError::MalformedHeader {
 ///         header,
-///         reason: "header present multiple times with different values",
+///         reason: VerifyError::AMBIGUOUS_HEADER_REASON,
 ///     };
 ///     assert_eq!(
 ///         error.to_string(),
@@ -1607,13 +1609,13 @@ mod tests {
                     // error can be built after the request is gone.
                     let error = VerifyError::MalformedHeader {
                         header,
-                        reason: "header present multiple times with different values",
+                        reason: VerifyError::AMBIGUOUS_HEADER_REASON,
                     };
                     assert_eq!(
                         error,
                         VerifyError::MalformedHeader {
                             header: "X-Hub-Signature-256",
-                            reason: "header present multiple times with different values",
+                            reason: VerifyError::AMBIGUOUS_HEADER_REASON,
                         },
                     );
                 }

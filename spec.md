@@ -3138,6 +3138,15 @@ ambiguity).
    for a name/value pair table (unconditional) — which returns the ambiguous
    header's name for use as `VerifyError::MalformedHeader { header, .. }`.
    Both are the one scan the adapters run, so a hardening reaches all three.
+   The `reason` §4.4 fixes for that rejection is
+   `VerifyError::AMBIGUOUS_HEADER_REASON`, a public constant: a manual caller
+   hand-building the `MalformedHeader` has no way to be checked against the
+   adapters' wording, so the one string lives beside the variant it fills
+   rather than being typed at each site (any caller-chosen `reason` is
+   equally valid; the constant is the shared spelling, not a restriction).
+   `error::tests::the_ambiguity_rejection_reason_has_one_code_spelling` reads
+   `src/tower.rs` and `src/actix.rs` and requires both to reference it, so the
+   adapters cannot drift back to a private literal.
    The pair-table entry point exists because a pair table *does* keep
    repeated names, so such a caller holds the value §4.4 needs even though
    the `HeaderMap` impl for it returns only the first (issue #282); a
@@ -3492,7 +3501,15 @@ A provider implementation is not mergeable until it has:
   intra-doc link is caught before merge instead of silently degrading the
   user-facing docs. (docs.rs itself builds with `-D warnings`, so a broken link
   still fails the docs.rs build; shipped as the `doc` CI job,
-  `.github/workflows/ci.yml`.)
+  `.github/workflows/ci.yml`.) The same job also runs
+  `cargo doc --no-default-features --no-deps` under the same flag, because
+  `--all-features` structurally cannot see a link that only breaks when a
+  feature-gated item is *absent*: an intra-doc link to a
+  feature-gated function resolves with that feature on and fails as
+  `unresolved link` with it off, which is the configuration a `no_std` or
+  framework-free reader is reading. Links from unconditionally-compiled doc
+  contexts to a feature-gated item are therefore spelled as plain text, the
+  convention `ambiguous_signature_header_in`'s own docs already state.
 - `cargo fuzz build` (build-only in normal CI; timed fuzz runs in a
   scheduled nightly job).
 - A grep-based CI backstop (`secret-leak-grep`) that fails the build if any

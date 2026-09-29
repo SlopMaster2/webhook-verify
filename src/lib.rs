@@ -174,7 +174,7 @@
 //! - A signature header that arrives twice with *differing* values is
 //!   ambiguous and must be rejected before [`verify`] is trusted (spec §4.4).
 //!   The `tower` and `actix` adapters do that for you; a caller extracting
-//!   headers itself runs [`ambiguous_signature_header`] (an `http::HeaderMap`,
+//!   headers itself runs `ambiguous_signature_header` (an `http::HeaderMap`,
 //!   `http` feature) or [`ambiguous_signature_header_in`] (a name/value pair
 //!   table, no feature required) first, because [`HeaderMap`] exposes
 //!   first-match lookup only and cannot see the second value itself.

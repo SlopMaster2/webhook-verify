@@ -48,6 +48,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --all-features --no-deps
+      # `--all-features` alone cannot see a link that only breaks when a
+      # feature-gated item is *absent*: `ambiguous_signature_header` is behind
+      # `http`, and three doc links to it from non-`http` doc contexts resolved
+      # fine here while failing with `unresolved link` under
+      # `--no-default-features`. Since docs.rs builds the default feature set,
+      # a user reading a non-default configuration's docs would hit the broken
+      # link, so the minimum configuration is documented with the same
+      # `-D warnings` bar.
+      - run: cargo doc --no-default-features --no-deps
 
   clippy:
     name: clippy (-D warnings)

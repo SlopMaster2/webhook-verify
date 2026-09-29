@@ -367,7 +367,7 @@ where
         {
             let response = rejection_response::<ResB>(&VerifyError::MalformedHeader {
                 header,
-                reason: "header present multiple times with different values",
+                reason: VerifyError::AMBIGUOUS_HEADER_REASON,
             });
             return Box::pin(async { Ok(response) });
         }

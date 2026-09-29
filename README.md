@@ -29,7 +29,7 @@ let raw_body = b"{\"id\": \"evt_test\"}";
 if let Some(header) = ambiguous_signature_header_in(Provider::Stripe, &headers) {
     return Err(VerifyError::MalformedHeader {
         header,
-        reason: "header present multiple times with different values",
+        reason: VerifyError::AMBIGUOUS_HEADER_REASON,
     });
 }
 
@@ -288,7 +288,7 @@ headers.insert(
 if let Some(header) = ambiguous_signature_header(Provider::GitHub, &headers) {
     return Err(VerifyError::MalformedHeader {
         header,
-        reason: "header present multiple times with different values",
+        reason: VerifyError::AMBIGUOUS_HEADER_REASON,
     });
 }
 verify(
@@ -318,7 +318,7 @@ let headers: Vec<(&str, &str)> = vec![
 if let Some(header) = ambiguous_signature_header_in(Provider::GitHub, &headers) {
     return Err(VerifyError::MalformedHeader {
         header,
-        reason: "header present multiple times with different values",
+        reason: VerifyError::AMBIGUOUS_HEADER_REASON,
     });
 }
 verify(
@@ -331,7 +331,10 @@ verify(
 ```
 
 It returns the provider-spelled name of the offending header, or `None` when
-the request is unambiguous — identical repeats are fine. For
+the request is unambiguous — identical repeats are fine.
+`VerifyError::AMBIGUOUS_HEADER_REASON` is the exported spelling of the `reason`
+the adapters themselves emit, so the examples above and the adapters cannot
+drift apart; any `reason` of your choosing is equally valid. For
 [`Provider::Contentful`](https://docs.rs/webhook-verify/latest/webhook_verify/enum.Provider.html)
 it also follows the self-describing `x-contentful-signed-headers` list, so a
 header the delivery itself declares as signed is scanned too. See

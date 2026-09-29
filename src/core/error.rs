@@ -73,6 +73,59 @@ pub enum VerifyError {
     },
 }
 
+impl VerifyError {
+    /// The [`VerifyError::MalformedHeader`] `reason` both framework adapters
+    /// use when they reject a request whose signature header arrived more than
+    /// once with differing values (`spec.md` §4.4).
+    ///
+    /// A caller driving [`verify()`](crate::verify()) itself performs the same
+    /// check through `ambiguous_signature_header` or
+    /// `ambiguous_signature_header_in` and then has to build the rejection by
+    /// hand, so this is the crate's one spelling of the only `reason` §4.4
+    /// fixes. It is exported as a
+    /// constant rather than folded into a constructor because the `reason`
+    /// field is deliberately caller-writable ([`VerifyError`] is
+    /// `#[non_exhaustive]`, and the granularity of its variants is
+    /// intentional) — a constant gives one audited string without taking the
+    /// choice away.
+    ///
+    /// It lives here, next to the variant it fills, rather than in
+    /// `core::adapter_utils` next to the scan: the two adapters and the scan
+    /// are feature-gated in different combinations, but `VerifyError` is not,
+    /// so this is the one spelling both gated adapters and every ungated
+    /// caller can reach.
+    ///
+    /// ```
+    /// use webhook_verify::{
+    ///     Provider, VerifyError, ambiguous_signature_header_in,
+    /// };
+    ///
+    /// let headers: Vec<(&str, &str)> = vec![
+    ///     ("x-hub-signature-256", "sha256=one"),
+    ///     // A proxy appended its own value behind the real one: §4.4 requires
+    ///     // rejecting this rather than verifying whichever value a
+    ///     // first-match lookup happens to return.
+    ///     ("x-hub-signature-256", "sha256=two"),
+    /// ];
+    ///
+    /// if let Some(header) = ambiguous_signature_header_in(Provider::GitHub, &headers) {
+    ///     let error = VerifyError::MalformedHeader {
+    ///         header,
+    ///         reason: VerifyError::AMBIGUOUS_HEADER_REASON,
+    ///     };
+    ///     assert_eq!(
+    ///         error.to_string(),
+    ///         "malformed header `X-Hub-Signature-256`: \
+    ///          header present multiple times with different values",
+    ///     );
+    /// } else {
+    ///     unreachable!("the two values differ, so the header is ambiguous");
+    /// }
+    /// ```
+    pub const AMBIGUOUS_HEADER_REASON: &'static str =
+        "header present multiple times with different values";
+}
+
 impl fmt::Display for VerifyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -113,6 +166,82 @@ mod tests {
     use super::VerifyError;
     use alloc::boxed::Box;
     use core::time::Duration;
+
+    /// The §4.4 rejection `reason` has exactly one code spelling.
+    ///
+    /// `spec.md` §4.4 fixes *one* `reason` for the duplicate-signature-header
+    /// rejection, and it is the string both framework adapters emit. Before
+    /// [`VerifyError::AMBIGUOUS_HEADER_REASON`] it was hand-typed at every
+    /// site that fills the field — the two adapters, two doc examples, a test,
+    /// and three README snippets — which is the exact shape of the
+    /// single-sourcing hazard `replay::MILLIS_PER_SECOND` and
+    /// `contentful::SIGNED_HEADERS_SEPARATOR` exist to avoid: a wording change
+    /// applied to one copy leaves the others emitting a different message for
+    /// the same condition, and nothing fails.
+    ///
+    /// This reads the sources rather than trusting review, and skips doc
+    /// comments so the two `ambiguous_signature_header*` examples can keep
+    /// asserting the *rendered* `Display` output in plain text — that
+    /// assertion is the thing worth keeping literal, because it is what pins
+    /// the constant's value rather than merely re-stating it.
+    ///
+    /// Deliberately **not** `#[cfg(feature = "std")]`: it reads the sources
+    /// through `include_str!` (resolved at compile time), so it costs nothing
+    /// and covers the same ground in the `test-nostd` runs of `spec.md` §6.
+    #[test]
+    fn the_ambiguity_rejection_reason_has_one_code_spelling() {
+        const REASON: &str = VerifyError::AMBIGUOUS_HEADER_REASON;
+
+        // The constant must still be the string §4.4 and the README's
+        // examples document, and must still render through `Display`.
+        assert_eq!(
+            REASON,
+            "header present multiple times with different values"
+        );
+        assert_eq!(
+            VerifyError::MalformedHeader {
+                header: "X-Hub-Signature-256",
+                reason: REASON,
+            }
+            .to_string(),
+            "malformed header `X-Hub-Signature-256`: \
+             header present multiple times with different values",
+        );
+
+        for (name, source) in [
+            ("src/tower.rs", include_str!("../tower.rs")),
+            ("src/actix.rs", include_str!("../actix.rs")),
+        ] {
+            // Only the code is scanned: strip `///` doc lines and `//` comments
+            // so the doc examples' plain-text `Display` assertions (which are
+            // *meant* to be literal) do not read as a second spelling.
+            let code: String = source
+                .lines()
+                .filter(|line| {
+                    let line = line.trim_start();
+                    !line.starts_with("//")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                !code.contains(REASON),
+                "{name} must use VerifyError::AMBIGUOUS_HEADER_REASON, \
+                 not a second hand-typed copy of the §4.4 rejection reason"
+            );
+        }
+
+        // ... and both must actually reference the constant, so "no literal"
+        // cannot be satisfied by deleting the ambiguity check outright.
+        for (name, source) in [
+            ("src/tower.rs", include_str!("../tower.rs")),
+            ("src/actix.rs", include_str!("../actix.rs")),
+        ] {
+            assert!(
+                source.contains("VerifyError::AMBIGUOUS_HEADER_REASON"),
+                "{name} must fill the §4.4 rejection reason from the shared constant",
+            );
+        }
+    }
 
     /// Deliberately **not** `#[cfg(feature = "std")]`.
     ///

@@ -369,7 +369,7 @@ impl FromRequest for VerifiedBody {
             return Box::pin(ready(Err(WebhookVerificationError(Rejection::Verify(
                 VerifyError::MalformedHeader {
                     header,
-                    reason: "header present multiple times with different values",
+                    reason: VerifyError::AMBIGUOUS_HEADER_REASON,
                 },
             )))));
         }
