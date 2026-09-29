@@ -385,6 +385,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`src/providers/custom.rs` stated that a `CustomScheme` timestamp is parsed
+  *after* the signature, which is the opposite of what the code does** (issue
+  #315). The comment above the timestamp-header lookup read *"Its value is
+  parsed after the signature, same parse order as the built-ins"* — but `verify`
+  parses the value (`parse_timestamp` / `parse_millis`) before it calls
+  `verify_hmac_*`, and the built-ins it claims to match do the same: all header
+  parsing happens up front and only `check_replay` is deferred past the
+  comparison (`spec.md` §3, and the `verify_any` aggregation record in §2.1,
+  which is built on exactly that split).
+
+  The two halves are easy to conflate because they are genuinely different
+  steps: parsing the timestamp is *unconditional and up front*, while the
+  tolerance check is *conditional and last*. The comment named the wrong one,
+  and it named it in the sentence whose whole point was the up-front lookup —
+  so a reader following it would conclude that a request carrying both a forged
+  signature and an unparseable timestamp reports `SignatureMismatch`, when it
+  reports `MalformedHeader` on the timestamp header instead. That distinction is
+  the one `spec.md` §2.1 asks callers to rely on for separating
+  malformed-request noise from active-attack signals, so getting it backwards in
+  the one place a custom-scheme author would look is worth correcting.
+
+  The implementation is **correct** and is unchanged; only the comment was
+  wrong. It was also unpinned: `malformed_timestamps_error_distinctly` supplies
+  a *valid* signature in every case, and
+  `malformed_signature_plus_missing_timestamp_reports_missing_header` stops at
+  the header *lookup*, so nothing in the suite distinguished "parse before
+  compare" from "compare before parse".
+  `custom::tests::malformed_timestamp_outranks_a_well_formed_forged_signature`
+  pins the order with a signature that is well-formed and merely *wrong* — the
+  shape that reports `SignatureMismatch` on its own, and therefore the shape
+  that makes the two possible orders produce different errors. Confirmed
+  load-bearing by mutation: deferring the timestamp parse past the comparison
+  fails it.
+
+  Documentation and tests only: no API change, no verification-behavior change,
+  no new dependency.
+
 - **`src/providers/sentry.rs` justified signing the raw body with an unsourced
   guess, and the real reason is different** (issue #309). The module doc read
   *"the docs' reference snippet signs the exact request payload

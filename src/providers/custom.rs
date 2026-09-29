@@ -482,8 +482,13 @@ pub(crate) fn verify(
 
     // The timestamp header is fetched up front so a missing one is reported
     // as such even when the signature would also have failed — matching how
-    // built-in timestamped schemes report. Its value is parsed after the
-    // signature, same parse order as the built-ins.
+    // built-in timestamped schemes report. Its value is parsed below, still
+    // *before* the signature comparison: every built-in timestamped provider
+    // does the same (all header parsing up front, `check_replay` only after a
+    // signature verifies, `spec.md` §3), so an unparseable timestamp is
+    // reported as a malformed header rather than as a forged signature. Only
+    // the tolerance check is deferred. Pinned by
+    // `tests::malformed_timestamp_outranks_a_well_formed_forged_signature`.
     let timestamp_raw = match scheme.timestamp_header {
         Some(timestamp_header) => Some((
             timestamp_header,
@@ -1118,6 +1123,58 @@ mod tests {
             result,
             Err(VerifyError::MissingHeader {
                 header: ts_scheme::TS_HEADER
+            })
+        );
+    }
+
+    /// The timestamp is *parsed* before the signature is compared, even
+    /// though the replay *window* is checked after — the same split every
+    /// built-in timestamped provider uses (§3), where all header parsing
+    /// happens up front so a request that cannot be parsed is reported as
+    /// such rather than as a forgery.
+    ///
+    /// The forged signature here is well-formed (right prefix, right hex
+    /// length) so that only its *value* is wrong: it is what
+    /// `SignatureMismatch` reports on its own, which is what makes the two
+    /// assertions below distinguish the two possible orders.
+    #[test]
+    fn malformed_timestamp_outranks_a_well_formed_forged_signature() {
+        let forged = format!("sha256={}", "0".repeat(64));
+
+        // Only the signature is wrong: the forged digest is reported.
+        let mismatched = verify_custom(
+            &ts_scheme_config(),
+            &[
+                (ts_scheme::HEADER.to_string(), forged.clone()),
+                (
+                    ts_scheme::TS_HEADER.to_string(),
+                    ts_scheme::TIMESTAMP.to_string(),
+                ),
+            ],
+            ts_scheme::PING_BODY,
+            ts_scheme::SECRET,
+            clocked_at(ts_scheme::TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(mismatched, Err(VerifyError::SignatureMismatch));
+
+        // Same forged signature, now alongside an unparseable timestamp: the
+        // timestamp parse still runs first, so the request is reported as
+        // malformed rather than as a mismatch.
+        let malformed = verify_custom(
+            &ts_scheme_config(),
+            &[
+                (ts_scheme::HEADER.to_string(), forged),
+                (ts_scheme::TS_HEADER.to_string(), "not-a-number".to_string()),
+            ],
+            ts_scheme::PING_BODY,
+            ts_scheme::SECRET,
+            clocked_at(ts_scheme::TIMESTAMP, Some(Duration::from_secs(300))),
+        );
+        assert_eq!(
+            malformed,
+            Err(VerifyError::MalformedHeader {
+                header: ts_scheme::TS_HEADER,
+                reason: "timestamp is not a valid unix timestamp",
             })
         );
     }
