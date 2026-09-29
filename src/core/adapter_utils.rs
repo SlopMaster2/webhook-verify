@@ -2409,4 +2409,108 @@ mod tests {
             );
         }
     }
+
+    /// The count of code (non-comment) lines in the fuzz target that call
+    /// `ambiguous_signature_header_in`. Whole-line `//` comments and trailing
+    /// `// …` comments are dropped first, for the reason the fuzz target's own
+    /// prose makes unavoidable: every comment describing this scan names the
+    /// function it is describing, so a raw line count would be satisfied by
+    /// prose alone. A `//` inside a string literal would be mis-trimmed; the
+    /// fuzz target has none, and this is a floor check over a repo-internal
+    /// file, not a parser. Test-only helper over the target's source text.
+    fn fuzz_ambiguity_scan_call_hits(target: &str) -> usize {
+        target
+            .lines()
+            .filter(|line| {
+                let line = line.trim_start();
+                !line.starts_with("//")
+                    && match line.find("//") {
+                        Some(at) => &line[..at],
+                        None => line,
+                    }
+                    .contains("ambiguous_signature_header_in(")
+            })
+            .count()
+    }
+
+    /// The §4.4 ambiguity scan is driven from the shared fuzz target
+    /// (issue #296).
+    ///
+    /// `spec.md` §5.6 asks for a "no panic, no timeout" guarantee on each
+    /// provider's header-parsing path, and `src/providers/mod.rs` guards pin
+    /// the target's `IMPLEMENTED` pool to all 58 providers. This scan was the
+    /// one public entry point the pool's reachability did not imply: it is not
+    /// on the `verify()` path at all, so every `attempt`/`attempt_any` call
+    /// walked past it, and nothing in the target's source mentioned it.
+    ///
+    /// It matters more than its size suggests. `dynamically_named_ambiguity`
+    /// splits and trims `x-contentful-signed-headers` — a header the *request*
+    /// controls — and then duplicate-checks each name, which is the only
+    /// place in the crate where attacker-supplied text steers the choice of
+    /// headers to look up. Every unit test for it is a hand-written table of
+    /// well-formed names, so the arbitrary-input case was untested. And
+    /// `spec.md` §4.4 obliges every caller of `verify()` to run this check,
+    /// with the hand-extraction path the crate's own front-door example uses
+    /// as the recommended integration — a panic in it would be a remote DoS on
+    /// a documented deployment, not on an internal one.
+    ///
+    /// The pair-table overload is the one required: it is the representation
+    /// the target already builds, it needs no features, and the `http`-
+    /// feature overload funnels into the same
+    /// `find_ambiguous_signature_header`. A floor of one rather than an exact
+    /// count — what matters is that the scan is driven, and a second call site
+    /// (say, per slice shape like `attempt_any`'s three) is a gain, not drift.
+    ///
+    /// `fuzz/` is excluded from the crates.io tarball (`Cargo.toml`
+    /// `exclude`), so in a packaged checkout the file does not exist and the
+    /// guard is skipped — it is a repo-internal test, not part of the shipped
+    /// crate's contract.
+    #[test]
+    fn fuzz_target_drives_the_ambiguity_scan() {
+        use std::fs;
+        use std::path::Path;
+
+        let target = {
+            let path =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/fuzz_targets/parse_and_verify.rs");
+            match fs::read_to_string(path) {
+                Ok(src) => src,
+                // `fuzz/` not present (e.g. the publish tarball): nothing to
+                // guard against here, and the crate's own tests must not fail
+                // on a file it does not ship.
+                Err(_) => return,
+            }
+        };
+
+        let hits = fuzz_ambiguity_scan_call_hits(&target);
+        assert!(
+            hits > 0,
+            "fuzz target must call `ambiguous_signature_header_in` — the spec.md §4.4 \
+             ambiguity scan is a public entry point that parses the request-controlled \
+             `x-contentful-signed-headers` list, it is not on the `verify()` path the \
+             rest of the target drives, and spec.md §5.6 asks for a no-panic/no-timeout \
+             guarantee over exactly that kind of input"
+        );
+    }
+
+    /// The positive side of [`fuzz_ambiguity_scan_call_hits`]: a real call
+    /// counts, a whole-line comment does not, a trailing comment does not, and
+    /// the count is a floor rather than an exact total.
+    ///
+    /// Written as string literals rather than `format!` so it builds under
+    /// `--no-default-features`, where this module is `no_std` and the
+    /// `format!` macro is not in scope.
+    #[test]
+    fn fuzz_ambiguity_scan_call_hits_ignores_prose() {
+        let real = "    let _ = ambiguous_signature_header_in(provider, &headers);";
+        let whole_line_comment = "    // fuzz target must call ambiguous_signature_header_in( here";
+        let trailing_comment = "    attempt(provider); // calls ambiguous_signature_header_in(";
+        let two_calls = "\
+    let _ = ambiguous_signature_header_in(provider, &headers);
+    let _ = ambiguous_signature_header_in(provider, &headers);";
+        assert_eq!(fuzz_ambiguity_scan_call_hits(real), 1);
+        assert_eq!(fuzz_ambiguity_scan_call_hits(whole_line_comment), 0);
+        assert_eq!(fuzz_ambiguity_scan_call_hits(trailing_comment), 0);
+        assert_eq!(fuzz_ambiguity_scan_call_hits(two_calls), 2);
+    }
 }

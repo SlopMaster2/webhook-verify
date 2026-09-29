@@ -256,6 +256,7 @@
 use libfuzzer_sys::fuzz_target;
 use webhook_verify::{
     CustomScheme, Encoding, HashAlg, Provider, Secret, TimestampUnit, VerifyOptions,
+    ambiguous_signature_header_in,
 };
 // `VerifyingKeyMaterial` is used by both the `sendgrid` and `paypal` cfg
 // blocks below. The crate re-exports it unconditionally, so gate the import
@@ -597,6 +598,32 @@ fn attempt_any(
     options: &VerifyOptions,
 ) {
     let _ = webhook_verify::verify_any(provider, headers, body, secrets, options.clone());
+}
+
+/// Drives the `spec.md` §4.4 ambiguity scan for the header representation this
+/// target already builds.
+///
+/// [`webhook_verify::ambiguous_signature_header_in`] is not a thin wrapper
+/// around `verify()`: it takes the `Vec<(String, String)>` parsed above
+/// (exactly the shape it documents) and runs a scan of its own — an
+/// ASCII-case-insensitive filter over the pair table, each name gated on
+/// `is_valid_field_name`, and for `Provider::Contentful` a split of the
+/// **request-controlled** `x-contentful-signed-headers` list on `,` with each
+/// element trimmed and duplicate-checked.
+///
+/// That makes it the one public entry point driven by request input rather
+/// than by the secret or the body, and `spec.md` §4.4 obliges every caller of
+/// `verify()` to run it, so a panic here would be a remote DoS on the
+/// documented hand-extraction path rather than on an internal one. Every unit
+/// test for it is a hand-written table of well-formed names; the split/trim
+/// over arbitrary bytes is what the target exists for (issue #296).
+///
+/// The `http`-feature overload is deliberately not driven: it funnels into the
+/// same `find_ambiguous_signature_header`, so this reaches the shared logic,
+/// and enabling an `http` feature on the fuzz crate would widen its build for
+/// no extra coverage.
+fn attempt_ambiguity_scan(provider: Provider, headers: &[(String, String)]) {
+    let _ = ambiguous_signature_header_in(provider, headers);
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -1697,6 +1724,12 @@ fuzz_target!(|data: &[u8]| {
             &arbitrary_secret,
             &url_scoped_options,
         );
+        // The §4.4 ambiguity scan every caller of `verify()` is obliged to run
+        // (issue #296). It reads the same request bytes through its own path,
+        // including Contentful's self-describing signed-header list, and the
+        // `contentful-signed-delivery` seed below already reaches the dynamic
+        // half with a well-formed list.
+        attempt_ambiguity_scan(provider, &headers);
     }
 
     // `verify_any` (cross-secret rotation) is public API wrapping the same

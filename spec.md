@@ -3399,7 +3399,14 @@ A provider implementation is not mergeable until it has:
    path is fuzzed through the same target with empty, garbage-then-well-formed,
    and all-garbage secret slices so its error-aggregation loop (per-secret
    `InvalidSecret` tracking, `SignatureMismatch` aggregation, structural-error
-   short-circuit) gets the same guarantee.
+   short-circuit) gets the same guarantee. The §4.4 ambiguity check
+   (`ambiguous_signature_header_in`) is driven from the same target for every
+   provider: it is not on the `verify()` path the rest of the target walks, and
+   `dynamically_named_ambiguity` splits the *request-controlled*
+   `x-contentful-signed-headers` list and then duplicate-checks each name it
+   yields, so it is the one place where attacker-supplied text picks which
+   headers get looked up. Pinned by `fuzz_target_drives_the_ambiguity_scan` in
+   `src/core/adapter_utils.rs` (issue #296).
 7. **Constant-time assertion** where feasible: a `dudect`-style statistical
    timing test on the comparison step, run in CI as a non-blocking
    (informational) job. *Implemented (2026-09): `constant_time_comparison` in
