@@ -385,6 +385,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`src/providers/sentry.rs` justified signing the raw body with an unsourced
+  guess, and the real reason is different** (issue #309). The module doc read
+  *"the docs' reference snippet signs the exact request payload
+  (`request.body`, `JSON.stringify`ed only to hand the parser an object)"* —
+  which is the crate author's inference about a snippet that, read literally,
+  contradicts the implementation. `spec.md` §3 already cited the source that
+  settles it, Sentry's own reference implementation
+  (<https://github.com/getsentry/integration-platform-example>, linked from the
+  docs page), but the module doc did not, and that inference does not survive
+  checking it against the linked repository.
+
+  The load-bearing reason raw bytes are required is that **Sentry sends an
+  empty body on some deliveries**. `backend-py/.../verify_sentry_signature.py`
+  signs `request.get_data()` and says so — *"Sentry sends an empty body (i.e.
+  `b''`) with a Content-Type of `application/json` for some requests"* — and
+  `backend-ts/.../verifySentrySignature.ts` patches the same single case back
+  (`return stringifiedBody === '{}' ? '' : stringifiedBody`). A
+  re-serialization turns `b""` into `{}`, and those are distinguishable HMAC
+  inputs, so a re-serializing verifier rejects exactly those deliveries. Both
+  references converge on the empty body; only the raw bytes give that answer.
+
+  The implementation is **correct** and is unchanged: it already signs
+  `raw_body` verbatim. What was wrong is that the only stated reason for doing
+  so could not be verified, which is the failure mode `AGENTS.md` §2.3 exists to
+  eliminate — a contributor reading the module doc sees an apparent
+  `JSON.stringify`/raw contradiction, looks up the cited page, and finds the
+  recorded resolution unsupported.
+
+  The divergence was also **unpinned**. `boundary_bodies_verify` asserted the
+  empty body *accepts*; nothing asserted that the empty-body signature does
+  **not** verify against `{}`, so an implementation that re-serialized would
+  have passed the suite for that case.
+  `sentry::tests::empty_body_is_not_a_re_serialization` pins both halves, and
+  was confirmed load-bearing by mutation (mapping `b""` → `{}` in the
+  implementation fails it).
+
+  The same investigation turned up the legacy `sentry-app-signature` header:
+  both reference implementations accept either spelling, each flagged in their
+  source as a *"HACK … for legacy reasons … we hope to migrate away from"*.
+  Only the documented `Sentry-Hook-Signature` is read, which is the conservative
+  choice — both are HMACs over the same body under the same key, so accepting
+  the second would widen what verifies without changing what is signed, and
+  `spec.md` §5.3 prefers the stricter reading. It is now documented so the
+  omission is not later "fixed" as a bug.
+
+  Documentation and tests only: no API change, no verification-behavior change,
+  no new dependency.
+
 - **`Provider::Shopify`'s doc named the header `X-Shopify-Hmac-SHA256`; the
   constant the code reads is `X-Shopify-Hmac-Sha256`** (issue #302).
   Documentation only, with no behavioral change and none possible: HTTP header
