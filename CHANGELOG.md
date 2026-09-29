@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`VerifyError::AMBIGUOUS_HEADER_REASON`**. `spec.md` §4.4 obliges every
+  caller of `verify()` to reject a request whose signature header arrived more
+  than once with differing values, and it fixes a single `reason` for that
+  rejection — the string both framework adapters emit. Before this constant
+  existed that string was hand-typed at every site that fills the field: the
+  `tower` and `actix` adapters, both `ambiguous_signature_header*` doc
+  examples, a test, and three README snippets. That is the same
+  single-sourcing hazard `replay::MILLIS_PER_SECOND` and
+  `contentful::SIGNED_HEADERS_SEPARATOR` already exist to avoid — a wording
+  change applied to one copy leaves the others emitting a different message for
+  the same condition, and nothing fails. Worse, a *manual* caller (§4.4's
+  documented path, with no adapter in the request) had no symbol to reference at
+  all and so could not be checked against the adapters' wording even in
+  principle.
+
+  It is a public associated constant rather than a constructor because the
+  `reason` field stays caller-writable — `VerifyError` is `#[non_exhaustive]`
+  and the granularity of its variants is intentional (spec §2.1) — so the
+  constant supplies one audited string without taking the choice away. It lives
+  beside the variant it fills rather than in `core::adapter_utils`, since the
+  two adapters and the scan are feature-gated in different combinations but
+  `VerifyError` is not: one spelling reachable from every configuration,
+  including a `no_std + alloc` build with no feature enabled.
+
+  Additive only: no existing item's behavior changes, no new dependency, and
+  the two adapters produce byte-identical errors to before.
+  `error::tests::the_ambiguity_rejection_reason_has_one_code_spelling` reads
+  `src/tower.rs` and `src/actix.rs` and requires both to reference the constant
+  and neither to hold a second copy of the literal, so the drift the change
+  removes cannot come back unnoticed.
+
+- **Four intra-doc links that only broke with the `http` feature off.** The
+  `doc` CI job built with `--all-features`, which structurally cannot see a
+  link that breaks only when a feature-gated item is *absent*: three doc links
+  to the `http`-gated `ambiguous_signature_header` from unconditionally
+  compiled contexts resolved cleanly there and failed as `unresolved link`
+  under `cargo doc --no-default-features`. Spelled as plain text instead —
+  the convention `ambiguous_signature_header_in`'s own docs already state two
+  paragraphs below the first of them, and which the other two had not
+  followed. The `doc` job now also runs `cargo doc --no-default-features
+  --no-deps` under the same `-D warnings` bar, so the class cannot return:
+  docs.rs builds the default feature set, so a `no_std` or framework-free
+  reader was the one hitting these.
+
 - **`ambiguous_signature_header_in(provider, &pairs)`** (issue #282).
   `spec.md` §4.4 obliges every caller of `verify()` to reject a request whose
   signature header arrives more than once with differing values, and the only
