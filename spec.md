@@ -537,6 +537,15 @@ the SDK and reference examples disambiguate its details.
   spellings of one request target sign identically (issue #290). Without it the
   bare form signed a zero-length — or unrooted — path that Contentful never
   signed, so the failure direction is a false *reject* of a legitimate delivery.
+  A `://` only introduces an authority when nothing that can delimit a path,
+  query, or fragment precedes it: a URI scheme cannot contain `/`, `?`, or `#`
+  (RFC 3986 §3.1), so a `://` following one of those is path data. Without
+  that distinction a bare reference that merely *contains* `://` —
+  `redirect/https://example.com/hook`, `webhooks/cms?u=https://example.com` —
+  was read as `scheme://authority` and signed a different string than the
+  `/`-prefixed spelling of the same target, dropping everything before the
+  presumed authority (issue #301; again a false reject, and `request_url` is
+  operator-supplied, not attacker-controlled).
 - Path/query encoding — **unsettled divergence between the two cited sources**
   (issue #231; §7). The docs' pseudo-code encodes the query once; the
   reference SDK's `getNormalizedEncodedURI` applies `querystring.escape`

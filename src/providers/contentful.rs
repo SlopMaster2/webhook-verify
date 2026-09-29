@@ -385,7 +385,10 @@ fn append_signed_headers_segment(
 /// - a bare path (`/webhooks/...`) is used verbatim — but a slash-less bare
 ///   reference (`?a=b`, `#f`, `webhooks/cms`, ``) is root-relative and gets the
 ///   same leading `/`, so both spellings of one request target sign
-///   identically;
+///   identically. This holds even when the bare reference *contains* `://`
+///   (`redirect/https://example.com/hook`): a URI scheme cannot contain a `/`,
+///   `?`, or `#`, so a `://` following one is path data, not the delimiter
+///   that introduces an authority;
 /// - if a `?query` is present, only the query portion is percent-encoded
 ///   (JavaScript `encodeURIComponent` set), with the pathname passed through
 ///   as UTF-8 bytes; with no query, nothing is re-encoded.
@@ -404,17 +407,32 @@ fn normalized_request_path(url: &str) -> String {
             // follow. Searching for `/` alone would mis-read a `/` inside
             // either of those as the path start, dropping the query or signing
             // part of the fragment.
-            Some((_, rest)) => match rest.find(['/', '?', '#']) {
-                Some(i) if rest.as_bytes()[i] == b'/' => Cow::Borrowed(&rest[i..]),
-                Some(i) => {
-                    let mut rooted = String::with_capacity(rest.len() - i + 1);
-                    rooted.push('/');
-                    rooted.push_str(&rest[i..]);
-                    Cow::Owned(rooted)
+            //
+            // The guard is what makes this the *full-URL* arm rather than a
+            // bare-reference one: a URI scheme cannot contain `/`, `?`, or `#`
+            // (RFC 3986 §3.1), so a `://` that follows one of those is path
+            // data, not the delimiter introducing an authority. Without it a
+            // bare reference that merely *contains* `://` —
+            // `redirect/https://example.com/hook`, `?u=https://example.com` —
+            // was read as `scheme://authority`, silently dropping everything
+            // before the presumed authority (down to the bare root `/` for
+            // the query-only shape) and so signing a different string than
+            // the `/`-prefixed spelling of the same request target
+            // (issue #301).
+            Some((scheme, rest)) if !scheme.contains(['/', '?', '#']) => {
+                match rest.find(['/', '?', '#']) {
+                    Some(i) if rest.as_bytes()[i] == b'/' => Cow::Borrowed(&rest[i..]),
+                    Some(i) => {
+                        let mut rooted = String::with_capacity(rest.len() - i + 1);
+                        rooted.push('/');
+                        rooted.push_str(&rest[i..]);
+                        Cow::Owned(rooted)
+                    }
+                    None => Cow::Borrowed("/"),
                 }
-                None => Cow::Borrowed("/"),
-            },
-            // No `://` *and* no leading `/` — a `/`-prefixed path is already
+            }
+            // Neither a `://` that introduces an authority (no delimiter
+            // before it) *nor* a leading `/` — a `/`-prefixed path is already
             // borrowed verbatim above — so this is a slash-less bare
             // reference: a query/fragment-only one (`?a=b`, `#f`, ``) or a
             // root-relative path written without its leading slash
@@ -422,7 +440,7 @@ fn normalized_request_path(url: &str) -> String {
             // since `new URL(…).pathname` always begins with `/`, so the same
             // root is synthesized as in the full-URL branch above. Without it
             // the two spellings of one request target signed different strings.
-            None => {
+            _ => {
                 let mut rooted = String::with_capacity(url.len() + 1);
                 rooted.push('/');
                 rooted.push_str(url);
@@ -871,6 +889,23 @@ mod tests {
             ),
             // A `#` inside a query is a literal, not a fragment delimiter.
             ("/hook?a=b%23c", "/hook?a%3Db%2523c"),
+            // The slash-less spelling of each bare path above is
+            // root-relative and normalizes to exactly the same string, `://`
+            // included: a URI scheme cannot contain a `/`, `?`, or `#`
+            // (RFC 3986 §3.1), so a `://` after one is path data, not the
+            // delimiter that introduces an authority (issue #301). The
+            // query-only shape is the sharpest of these — read as
+            // `scheme://authority` it collapsed to the bare root `/`.
+            ("webhooks/x?a=/b", "/webhooks/x?a%3D%2Fb"),
+            (
+                "redirect/https://example.com/hook",
+                "/redirect/https://example.com/hook",
+            ),
+            (
+                "webhooks/cms?u=https://example.com",
+                "/webhooks/cms?u%3Dhttps%3A%2F%2Fexample.com",
+            ),
+            ("?u=https://example.com", "/?u%3Dhttps%3A%2F%2Fexample.com"),
         ] {
             assert_eq!(
                 super::normalized_request_path(url),
@@ -917,6 +952,27 @@ mod tests {
             clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
             METHOD,
             "/redirect/https://example.com/hook",
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    /// The slash-less spelling of the bare path above must sign the *same*
+    /// string, so the frozen signature verifies unchanged (issue #301).
+    ///
+    /// `spec.md` §3 requires that "both spellings of one request target sign
+    /// identically", and the `://` in this path is path data, not a scheme
+    /// delimiter: a URI scheme cannot contain `/`, so a `://` that follows a
+    /// `/` cannot be the one that introduces an authority. Reaching the
+    /// full-URL arm anyway stripped everything before it and signed
+    /// `/example.com/hook` — a false *reject* of a legitimate delivery.
+    #[test]
+    fn slashless_bare_path_containing_scheme_delimiter_signs_identically() {
+        let result = verify_with(
+            BODY,
+            "feebede21c3f5baaf07d2dcd4c6afb620a259599ecdcd03c1d668463032e6ba2",
+            clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+            METHOD,
+            "redirect/https://example.com/hook",
         );
         assert_eq!(result, Ok(()));
     }
