@@ -4108,6 +4108,13 @@ mod tests {
         );
         assert!(quiet.is_empty(), "{quiet:?}");
 
+        let (exact, quiet) = header_spelling_offenders(
+            "Shopify (base64-encoded HMAC-SHA256 over the raw body).",
+            &["X-Shopify-Hmac-Sha256"],
+        );
+        assert_eq!(exact, 0, "a doc that names no header checks nothing");
+        assert!(quiet.is_empty(), "{quiet:?}");
+
         let (_, drifted) = header_spelling_offenders(
             "Shopify (`X-Shopify-Hmac-SHA256`, base64) and Intercom's `X-Hub-Signature`.",
             &["X-Shopify-Hmac-Sha256"],
