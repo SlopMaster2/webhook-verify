@@ -4128,6 +4128,182 @@ mod tests {
         );
     }
 
+    /// The provenance comment `src/providers/line.rs` places immediately above
+    /// the first `const` in its test module, as `(1-based first line, joined
+    /// comment text)`. `None` when no comment block precedes that `const`.
+    fn line_test_vector_provenance_comment(source: &str) -> Option<(usize, String)> {
+        let test_module = source.find("#[cfg(test)]")?;
+        let after = &source[test_module..];
+        let first_const = after.find("\n    const ")? + 1;
+        let before_const = &after[..first_const];
+
+        // Walk back over the contiguous comment run directly above the `const`.
+        // `str::Lines` is not a `DoubleEndedIterator` under `core`, so the
+        // scan is over a collected, index-addressable list.
+        let lines: Vec<&str> = before_const.lines().collect();
+        let mut start = None;
+        for index in (0..lines.len()).rev() {
+            let trimmed = lines[index].trim();
+            if trimmed.starts_with("//") {
+                start = Some(index);
+            } else if !trimmed.is_empty() {
+                break;
+            }
+        }
+        let start = start?;
+        let comment = lines[start..]
+            .iter()
+            // Drop the `//` marker so a reported claim reads as prose, not as
+            // source lines glued together.
+            .map(|line| line.trim().trim_start_matches("//").trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        // `test_module` is a byte offset at a line start, so the `const`'s
+        // module-relative line indices are `source`'s, offset by the lines
+        // before the test module.
+        let first_line = source[..test_module].lines().count() + 1 + start;
+        Some((first_line, comment))
+    }
+
+    /// `line.rs` claimed its docs example was "the only official vector in this
+    /// crate that needs no local construction". It is not, on two counts: the
+    /// claim is mislabelled — `line.rs`'s happy-path `SIGNATURE` and both
+    /// boundary vectors *are* locally constructed, and only the separate
+    /// `OFFICIAL_*` triple is LINE's own published example — and it is not
+    /// unique, since GitHub's, Mux's, Slack's and Adyen's primary vectors are
+    /// likewise their own providers' published triples, used as published.
+    ///
+    /// Nothing verifies a test module's provenance comment, so a claim like this
+    /// one survives every other guard in this file: the rest read module
+    /// *behavior* (which headers are scanned, how timestamps are floored) or
+    /// doc surfaces that name a header or a provider, and none of them reads a
+    /// module's account of where its own test values came from. It is a
+    /// provenance claim, so it is checked where it is written.
+    #[test]
+    fn line_test_vector_provenance_does_not_claim_a_crate_wide_exclusive_vector() {
+        let source = include_str!("line.rs");
+        let (line, comment) = match line_test_vector_provenance_comment(source) {
+            Some(found) => found,
+            None => panic!(
+                "src/providers/line.rs's test module must document its vectors above the first \
+                 `const`; with the comment removed this guard reads nothing and a crate-wide \
+                 exclusivity claim could be reintroduced undetected"
+            ),
+        };
+
+        // Both halves are required. A module-scoped "the only" is true and stays
+        // quiet (LINE publishes one docs example, and this crate carries one
+        // module per provider), and so is a crate-scoped sentence that asserts
+        // no uniqueness. The shipped claim has both, split across two lines,
+        // which is why this reads the joined comment rather than single lines.
+        assert!(
+            !comment_reads_as_crate_wide_exclusive(&comment),
+            "src/providers/line.rs:{line} claims its test vector is unique in this crate: \
+             {comment:?} — GitHub's, Mux's, Slack's and Adyen's primary vectors are their own \
+             providers' published triples too, used as published, and line.rs's own \
+             `SIGNATURE`/boundary vectors are locally constructed"
+        );
+
+        // The half of the claim that is true, pinned here rather than left to
+        // `line.rs`'s own test: LINE's published example verifies through the
+        // public entry point with nothing computed at test time. Adyen's and
+        // Slack's (equally provider-published, and the two remaining
+        // counterexamples) are pinned by their own modules'
+        // `official_vector_verifies`; their vectors carry multi-hundred-byte
+        // bodies, so they are not duplicated here.
+        assert_eq!(
+            verify(
+                Provider::Line,
+                &[(
+                    "x-line-signature",
+                    "GhRKmvmHys4Pi8DxkF4+EayaH0OqtJtaZxgTD9fMDLs=",
+                )],
+                br#"{"destination":"U8e742f61d673b39c7fff3cecb7536ef0","events":[]}"#,
+                &Secret::new("8c570fa6dd201bb328f1c1eac23a96d8"),
+                Default::default(),
+            ),
+            Ok(()),
+            "LINE's own published example must keep verifying: it is the one provider-published \
+             vector this guard does rest on"
+        );
+
+        // ... and the refutation, the same way: Mux's own published test vector
+        // (`Mux.Webhooks.TestUtils.generate_signature("payload",
+        // "SuperSecret123")`) verifies as published, with no local construction
+        // and no locally computed value anywhere in this test.
+        assert_eq!(
+            verify(
+                Provider::Mux,
+                &[(
+                    "Mux-Signature",
+                    "t=1591664030,v1=e43496b6aae982c4c2fd6f8e92935f1d90216f1f64d56024e72390acfb988272",
+                )],
+                b"payload",
+                &Secret::new("SuperSecret123"),
+                clocked_at(1_591_664_030, Some(Duration::from_secs(300))),
+            ),
+            Ok(()),
+            "Mux publishes a byte-exact vector of its own, so line.rs's vector is never the only \
+             one in this crate that needs no local construction"
+        );
+
+        // The derivation itself, over synthetic comment blocks: a module-scoped
+        // "only" is not flagged, and a crate-scoped sentence that claims no
+        // uniqueness is not flagged. Without these the joined-comment read
+        // could silently stop matching and the real run would pass vacuously.
+        for (text, flagged) in [
+            (
+                "docs example — the only official vector this module carries, used as published",
+                false,
+            ),
+            (
+                "every provider in this crate re-checks its own OFFICIAL_* triple",
+                false,
+            ),
+            (
+                "the only official vector in this crate that needs no local construction",
+                true,
+            ),
+            (
+                "the crate's sole docs-published vector needs no local construction",
+                true,
+            ),
+            // An "only" that opens a clause, and a marker that only appears
+            // inside a longer word: both must still be read, or the derivation
+            // is narrower than the claim it guards.
+            (
+                "only the OFFICIAL_* triple in this crate is the provider's own example",
+                true,
+            ),
+            ("the crate's console-shaped word is not a marker", false),
+        ] {
+            assert_eq!(
+                comment_reads_as_crate_wide_exclusive(text),
+                flagged,
+                "synthetic comment: {text:?}"
+            );
+        }
+    }
+
+    /// Whether a joined provenance comment asserts that something is unique in
+    /// the crate rather than in its own module. Split out from the assertion
+    /// above so the synthetic cases below exercise the same read the real run
+    /// does.
+    fn comment_reads_as_crate_wide_exclusive(comment: &str) -> bool {
+        // Token-wise on the exclusivity marker, substring-wise on the scope
+        // phrase. A plain `contains("sole ")` would also match inside "console
+        // ", and a plain `contains("the only")` would miss an "only" that opens
+        // a clause — the shipped claim's marker happens to sit mid-sentence, so
+        // a narrower read than either would have shipped the defect.
+        const EXCLUSIVE: [&str; 3] = ["only", "unique", "sole"];
+        let lower = comment.to_ascii_lowercase();
+        let exclusive = lower
+            .split(|character: char| !character.is_ascii_alphanumeric())
+            .any(|token| EXCLUSIVE.contains(&token));
+        let crate_wide = lower.contains("this crate") || lower.contains("the crate");
+        exclusive && crate_wide
+    }
+
     #[test]
     fn fuzz_implemented_pool_covers_every_nameable_provider() {
         use std::fs;
