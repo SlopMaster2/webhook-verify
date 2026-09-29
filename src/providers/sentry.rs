@@ -5,9 +5,7 @@
 //! "Verifying the Signature"):
 //!
 //! - Header: `Sentry-Hook-Signature: <hex_hmac>`
-//! - Signed string: the raw request body bytes, unmodified — the docs'
-//!   reference snippet signs the exact request payload (`request.body`,
-//!   `JSON.stringify`ed only to hand the parser an object)
+//! - Signed string: the raw request body bytes, unmodified
 //! - Algorithm: HMAC-SHA256 keyed with the webhook's *Client Secret* as its
 //!   UTF-8 bytes, **hex**-encoded (the docs' `crypto.createHmac("sha256",
 //!   secret) ... digest("hex")`), no `sha256=` prefix, no timestamp
@@ -15,6 +13,55 @@
 //! The signing key is the "Client Secret" shown on the Sentry
 //! `sentry.io/settings/<org>/apps/<app>/` page for the integration, not an
 //! organization auth token.
+//!
+//! # Why the raw body, and not a re-serialization
+//!
+//! The docs page's JavaScript snippet reads
+//! `hmac.update(JSON.stringify(request.body), "utf8")`, which looks like it
+//! signs a re-serialization. It does not — and the reason is in Sentry's own
+//! reference implementation
+//! (<https://github.com/getsentry/integration-platform-example>, linked from
+//! that page), not inferable from the snippet.
+//!
+//! `backend-py/src/api/middleware/verify_sentry_signature.py` signs
+//! `request.get_data()` and says why in a comment:
+//!
+//! ```text
+//! HACK: We need to use the raw request body since Flask will throw a 400 Bad
+//! Request if we try to use request.json. This is because Sentry sends an
+//! empty body (i.e. b'') with a Content-Type of application/json for some
+//! requests.
+//! ```
+//!
+//! Sentry sends an **empty body** on some deliveries, and any
+//! re-serialization turns `b""` into `{}` — a signature over the empty body
+//! does not verify against `{}`, so a re-serializing verifier rejects those
+//! deliveries outright. The TypeScript reference implementation in the same
+//! repository confirms it by patching exactly that one case back:
+//!
+//! ```js
+//! // HACK: This is necessary since express.json() converts the empty request
+//! // body to {}
+//! return stringifiedBody === '{}' ? '' : stringifiedBody;
+//! ```
+//!
+//! That `{}` → `''` patch is the whole reason the raw-bytes reading is the
+//! intended one: both implementations converge on the empty body, and only
+//! the raw bytes give that answer. `empty_body_is_not_a_re_serialization` pins
+//! the divergence (the two inputs are distinguishable HMAC inputs), so an
+//! implementation that "corrected" this to match the snippet literally would
+//! fail rather than silently reject real deliveries.
+//!
+//! # The legacy `sentry-app-signature` header
+//!
+//! Both reference implementations accept *either* `sentry-hook-signature` or
+//! a legacy `sentry-app-signature`, each flagged in its source as a
+//! "HACK … for legacy reasons … we hope to migrate away from in the future".
+//! Only the former is documented on the webhook page, and it is the only one
+//! read here. That is deliberate: both are HMACs over the same body under the
+//! same key, so accepting the second would widen what verifies without
+//! changing what is signed, and `spec.md` §5.3 prefers the stricter reading.
+//! Recorded here so the omission is not later mistaken for a bug.
 //!
 //! # Replay protection
 //!
@@ -111,7 +158,11 @@ mod tests {
     /// exactly the documented recipe (see module and spec docs on
     /// provenance).
     const SIGNATURE: &str = "e51fc0e3a08e58a9b33eca67da7ab4e66b0628403d02d95bec5e48b0e2768189";
-    /// Locally constructed over an empty body (boundary case).
+    /// Locally constructed over an empty body. Not a generic boundary case:
+    /// Sentry sends `b""` on some deliveries, and this is the vector the
+    /// reference implementations' empty-body handling turns on — see the
+    /// module doc's *Why the raw body* section and
+    /// `empty_body_is_not_a_re_serialization`.
     const EMPTY_BODY_SIGNATURE: &str =
         "31d3051e52836aae655a933a152d0324d4d6e520469b3665ad4c8ccde9729e15";
     /// Locally constructed over `"héllo, 🦀 world!"` (unicode boundary case).
@@ -146,6 +197,33 @@ mod tests {
         assert_eq!(
             verify_with("héllo, 🦀 world!".as_bytes(), UNICODE_BODY_SIGNATURE),
             Ok(())
+        );
+    }
+
+    /// The empty body is the case that makes "sign the raw body" load-bearing
+    /// rather than a stylistic choice, and it is the one the module doc's
+    /// *Why the raw body* section rests on. Sentry sends `b""` on some
+    /// deliveries, and a verifier that re-serializes turns that into `{}` —
+    /// so the signature Sentry computes over the empty body would not verify.
+    ///
+    /// `boundary_bodies_verify` only shows the empty body *accepts*. This
+    /// pins the other half: the two spellings are distinguishable HMAC inputs,
+    /// so an implementation that re-serialized (`b""` → `{}`, exactly the
+    /// substitution the docs' `JSON.stringify` snippet performs) would fail
+    /// the negative assertion here and could not pass this suite silently.
+    ///
+    /// `31d3051e…` is the HMAC of the empty body and `e6093385…` that of
+    /// `{}` under the test secret — distinct, so the assertion below is about
+    /// the construction rather than about a constant that happens to differ.
+    #[test]
+    fn empty_body_is_not_a_re_serialization() {
+        assert_eq!(verify_with(b"", EMPTY_BODY_SIGNATURE), Ok(()));
+        assert_eq!(
+            verify_with(b"{}", EMPTY_BODY_SIGNATURE),
+            Err(VerifyError::SignatureMismatch),
+            "the empty-body signature must not cover the `{{}}` a re-serialization \
+             would produce, or every empty-body delivery Sentry sends would be \
+             rejected (see the module doc's *Why the raw body* section)"
         );
     }
 

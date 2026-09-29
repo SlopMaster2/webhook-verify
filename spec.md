@@ -1670,14 +1670,31 @@ example repository referenced from that page
 - Header: `Sentry-Hook-Signature: <hex_hmac>` — a bare lowercase hex digest,
   no `sha256=` prefix and no timestamp; same shape as Dropbox, Razorpay, and
   Lemon Squeezy.
-- Signed string: raw body bytes, unmodified. Sentry's docs sign the exact
-  received payload (the reference snippet HMACs the raw JSON request body;
-  re-serializing it would change the bytes and fail verification).
+- Signed string: raw body bytes, unmodified. This is settled by the reference
+  implementation, not by the docs page's JavaScript snippet — which reads
+  `hmac.update(JSON.stringify(request.body), "utf8")` and looks like it signs a
+  re-serialization. It does not. The Python reference reads
+  `request.get_data()` with the comment *"We need to use the raw request body
+  since Flask will throw a 400 Bad Request if we try to use `request.json`.
+  This is because Sentry sends an empty body (i.e. `b''`) with a Content-Type
+  of `application/json` for some requests"*, and the TypeScript reference
+  patches the same one case back (`return stringifiedBody === '{}' ? '' :
+  stringifiedBody`). **Sentry sends an empty body on some deliveries**, and a
+  re-serialization turns `b""` into `{}` — two distinguishable HMAC inputs, so
+  a re-serializing verifier rejects those deliveries outright. Both references
+  converge on the empty body; only the raw bytes give that answer.
 - Algorithm: HMAC-SHA256, hex-encoded. Key: the integration's **Client
   Secret** as its UTF-8 bytes (the secret shown on the
   `sentry.io/settings/<org>/apps/<app>/` page, **not** an organization auth
   token), matching the docs' construction `createHmac("sha256", secret) ...
   digest("hex")`.
+- Both reference implementations accept *either* `sentry-hook-signature` or a
+  legacy `sentry-app-signature`, each flagged in their source as a "HACK … for
+  legacy reasons … we hope to migrate away from in the future". Only the
+  former is documented, and it is the only one read: both are HMACs over the
+  same body under the same key, so accepting the second would widen what
+  verifies without changing what is signed, and §5.3 prefers the stricter
+  reading.
 - No timestamp in the signature scheme (`max_age` has no effect), mirroring
   GitHub/Shopify/Dropbox/Linear. Sentry delivers an unsigned
   `Sentry-Hook-Timestamp` header, which is not part of the signature and so
@@ -1686,8 +1703,11 @@ example repository referenced from that page
   reference code but publish no byte-exact example signature, so the
   implementation is validated against locally constructed, deterministic
   vectors over exactly the documented construction (cross-checked across
-  OpenSSL and Python's `hashlib`). Replace them if Sentry ever publishes fixed
-  vectors.
+  OpenSSL and Python's `hashlib`). The empty-body vector is the one the
+  reference implementations' `b""` handling turns on, and
+  `sentry::tests::empty_body_is_not_a_re_serialization` pins that it does not
+  cover the `{}` a re-serialization would produce. Replace them if Sentry ever
+  publishes fixed vectors.
 
 ### Xero
 
