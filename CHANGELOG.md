@@ -341,6 +341,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Provider::Shopify`'s doc named the header `X-Shopify-Hmac-SHA256`; the
+  constant the code reads is `X-Shopify-Hmac-Sha256`** (issue #302).
+  Documentation only, with no behavioral change and none possible: HTTP header
+  lookup is ASCII-case-insensitive, so both spellings resolve to the same
+  field. The `Provider` variant docs are one of six surfaces that state a
+  provider's header, and this was the only one of them that disagreed —
+  `shopify.rs`'s module and function docs, `README.md`, the crate docs, and
+  `spec.md` §3 (which records the casing as matching Shopify's own docs) all
+  read `X-Shopify-Hmac-Sha256`, as does the `SIGNATURE_HEADER` constant that
+  `verify()` looks the header up by.
+
+  The variant doc is prose a reader copies a `HeaderName` out of, so the
+  existing drift guards — which cross-check `README.md`, the crate docs, and
+  `spec.md` against the provider constants — do not cover it, which is how the
+  one spelling in the repo drifted away from the other five.
+  `provider_variant_docs_spell_their_own_headers_the_way_the_code_does` in
+  `src/providers/mod.rs` closes that gap: for every variant it reads the header
+  names that provider's own module declares (source-derived, the same
+  `declared_header_constants` the §4.4 scan guard uses) and fails the build if
+  the doc spells one with different casing. The scope is deliberately the
+  defect's own class — a cross-provider mention (`Provider::Expo`'s "the same
+  shape as Intercom's `X-Hub-Signature`") and a backticked span that is not a
+  header at all (`test-webhook`, a key name) both stay quiet, and a doc that
+  names no header is not required to start naming one.
+
+  No API change, no provider behavior change, no new dependency.
+
 - **Contentful: a slash-less bare `request_url` that merely *contains* `://` was
   read as `scheme://authority` and signed a different string than its
   `/`-prefixed spelling** (issue #301). `normalized_request_path` dispatches on
