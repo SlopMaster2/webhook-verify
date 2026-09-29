@@ -341,6 +341,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Contentful: a slash-less bare `request_url` that merely *contains* `://` was
+  read as `scheme://authority` and signed a different string than its
+  `/`-prefixed spelling** (issue #301). `normalized_request_path` dispatches on
+  `url.split_once("://")`, and its only earlier guard is
+  `url.starts_with('/')` — so a bare reference whose `://` came *after* a `/`
+  reached the full-URL arm and had its authority stripped:
+
+      /redirect/https://example.com/hook   ->  /redirect/https://example.com/hook   (correct)
+       redirect/https://example.com/hook   ->  /example.com/hook                    (wrong)
+        webhooks/https://example.com/hook  ->  /example.com/hook                    (wrong)
+         webhooks/cms?u=https://example.com ->  /                                   (worst)
+          ?u=https://example.com           ->  /                                   (worst)
+
+  A URI scheme cannot contain a `/`, `?`, or `#` (RFC 3986 §3.1), so a `://`
+  following one of those is path data, not the delimiter introducing an
+  authority. The `Some` arm now carries that guard, so such values fall through
+  to the slash-less bare-reference arm, which synthesizes the leading `/` the
+  SDK's `new URL(…).pathname` would carry. Everything before the presumed
+  authority is preserved, and the two spellings of one request target sign
+  identically again — the invariant `spec.md` §3 states twice.
+
+  The failure direction is a **false reject** (`SignatureMismatch`), not a forged
+  acceptance, and `request_url` is operator-supplied context
+  (`VerifyOptions::request_url`), not attacker-controlled. Fails closed
+  throughout, as before.
+
+  This is the third fix to this function and the same class as the two before it
+  — #216 (a `/` inside a query/fragment mistaken for the path start) and #290
+  (the slash-less bare spelling never reached the root synthesis) — each of
+  which covered only the `/`-prefixed spelling and left this shape untested. The
+  regression vector is not self-derived: the hex is the one already pinned for
+  the *absolute* spelling of the same request target, so the test asserts the
+  two forms agree instead of re-encoding the code under test. The truncated
+  shapes above are table-pinned alongside it, including the two that collapsed
+  to the bare root `/`. `spec.md` §3 records the rule; no API change, no new
+  dependency.
+
 - **`verify_hmac_sha256`'s doc claimed a wrong-length signature compares unequal
   in constant time; `subtle` short-circuits on length** (issue #294). The doc
   read "Signature length mismatches also simply compare unequal in constant
