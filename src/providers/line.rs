@@ -114,12 +114,15 @@ mod tests {
     use crate::verify;
     use std::time::Duration;
 
-    // Vectors: the primary vector is the byte-exact example from LINE's own
-    // docs (openssl command and signature both published there) — the only
-    // official vector in this crate that needs no local construction. The
-    // boundary vectors are locally constructed over the documented raw-body
-    // base64 construction and cross-checked against both OpenSSL and Python's
-    // `hmac` module (independent implementations).
+    // Vectors: `SECRET`, `BODY` and every derived `*_SIGNATURE` below are
+    // locally constructed over LINE's documented raw-body base64 construction
+    // and cross-checked against both OpenSSL and Python's `hmac` module
+    // (independent implementations). The separate `OFFICIAL_*` triple is
+    // LINE's own published example, byte-exact from its docs (openssl command
+    // and signature both on that page), so it needs no local construction —
+    // but several other providers' primary vectors are likewise their own
+    // published triples used as published (GitHub, Mux, Slack, Adyen), so that
+    // is a per-module distinction and never a property of just this one.
     const SECRET: &str = "a3e7f1c4d9b2a8f5e6c3d1b4a7e9f2c8";
 
     /// A realistic Messaging API delivery (the exact bytes the platform
