@@ -5192,7 +5192,9 @@ pub struct S {
 
             for name in &exempt {
                 assert!(
-                    declared.iter().any(|(_, declared_name)| *declared_name == *name),
+                    declared
+                        .iter()
+                        .any(|(_, declared_name)| *declared_name == *name),
                     "`{provider}` is exempt from the ambiguity scan for `{name:?}`, but \
                      `src/providers/{stem}.rs` no longer declares that header — the exemption \
                      now exempts nothing and the reason recorded for it no longer applies"
