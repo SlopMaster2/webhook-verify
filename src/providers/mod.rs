@@ -210,7 +210,7 @@ pub enum Provider {
     /// byte-exact confirmation-webhook example, used here as the primary test
     /// vector.
     Line,
-    /// Shopify (`X-Shopify-Hmac-SHA256`, base64-encoded HMAC-SHA256).
+    /// Shopify (`X-Shopify-Hmac-Sha256`, base64-encoded HMAC-SHA256).
     Shopify,
     /// Slack (`X-Slack-Signature`, `v0=` scheme with timestamp).
     Slack,
@@ -3935,6 +3935,190 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The doc block on every `Provider` enum variant, as `(variant
+    /// identifier, doc text)`, in declaration order.
+    ///
+    /// Read out of this module's own source so the guard cannot check a
+    /// variant that no longer exists, and so a doc comment is checked where it
+    /// is written rather than through a second copy of it. Only the `pub enum
+    /// Provider { … }` block is walked: doc lines accumulate until the variant
+    /// declaration they document, which is what lets a doc be any number of
+    /// lines long.
+    fn provider_variant_docs(this: &str) -> Vec<(String, String)> {
+        let mut variants = Vec::new();
+        let mut doc: Vec<&str> = Vec::new();
+        let mut in_enum = false;
+        for line in this.lines() {
+            if !in_enum {
+                in_enum = line.trim_end() == "pub enum Provider {";
+                continue;
+            }
+            let line = line.trim();
+            if line == "}" {
+                break;
+            }
+            if let Some(text) = line.strip_prefix("///") {
+                doc.push(text.trim());
+                continue;
+            }
+            // A blank line or an attribute carries no doc text, so it belongs
+            // to neither the variant above nor the one below it.
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            // `Name,` or `Name(Scheme),`; the payload of a tuple variant is
+            // not part of the identifier the guards key on.
+            let name = line
+                .split_once('(')
+                .map_or(line, |(name, _)| name)
+                .trim_end_matches(',');
+            variants.push((String::from(name), doc.join(" ")));
+            doc.clear();
+        }
+        assert!(
+            in_enum,
+            "this module must keep its `pub enum Provider` declaration for the guards below"
+        );
+        variants
+    }
+
+    /// `Provider::{ident}`'s doc text, panicking when the enum no longer
+    /// declares that variant — the shape every other guard in this module
+    /// already assumes of `provider_list()`.
+    fn provider_variant_doc(ident: &str) -> String {
+        let variants = provider_variant_docs(include_str!("mod.rs"));
+        let Some((_, doc)) = variants.iter().find(|(name, _)| name == ident) else {
+            panic!("`Provider::{ident}` must be declared in this module's enum");
+        };
+        doc.clone()
+    }
+
+    /// Every header in `declared` that `doc` spells with different casing,
+    /// phrased for the failure message, plus the number of backticked header
+    /// names `doc` spells exactly as the code declares them.
+    ///
+    /// Split out over caller-supplied text so the extraction can be exercised
+    /// over a synthetic doc as well as the real ones — the caller-supplied
+    /// shape is what keeps the real run from passing vacuously, since a parser
+    /// that stopped extracting spans would report nothing for any provider.
+    fn header_spelling_offenders(doc: &str, declared: &[&str]) -> (usize, Vec<String>) {
+        let mut exact = 0;
+        let mut offenders = Vec::new();
+        // Odd-indexed chunks are the text *between* backticks, i.e. the code
+        // spans a reader copies a header name out of.
+        for span in doc.split('`').skip(1).step_by(2) {
+            for header in declared {
+                if span == *header {
+                    exact += 1;
+                } else if span.eq_ignore_ascii_case(header) {
+                    offenders.push(format!(
+                        "`{span}` where the implementation declares `{header}`"
+                    ));
+                }
+            }
+        }
+        (exact, offenders)
+    }
+
+    #[test]
+    fn provider_variant_docs_spell_their_own_headers_the_way_the_code_does() {
+        // `Provider::Shopify`'s doc named the header `X-Shopify-Hmac-SHA256`
+        // while `shopify::SIGNATURE_HEADER` — the name the code looks up, and
+        // the name every other spelling in the repo uses (`shopify.rs`'s module
+        // and function docs, `README.md`, the crate docs, and `spec.md` §3,
+        // which notes it "matches the casing in Shopify's own docs") reads
+        // `X-Shopify-Hmac-Sha256`. The two resolve to the same field: HTTP
+        // header lookup is ASCII-case-insensitive, so the failure direction is
+        // a documentation defect, not a wrong answer. It is still worth a
+        // build failure, because the doc is the prose a reader copies a
+        // `HeaderName` out of, and it is the only one of the six surfaces that
+        // disagreed — the existing guards cross-check `README.md`, the crate
+        // docs and `spec.md` against the provider constants and never the
+        // variant docs, which is how this one drifted past them.
+        //
+        // Only the provider's *own* declared headers are checked, and only for
+        // casing. A doc legitimately names another provider's header to say a
+        // scheme shares a shape with it (`Provider::Expo`'s "the same shape as
+        // Intercom's `X-Hub-Signature`"), and a backticked span that is not a
+        // header at all (`test-webhook`, a key name) is not this guard's
+        // business; both stay quiet. That is the same rule
+        // `provider_tables_name_the_header_the_signature_is_read_from` applies
+        // to the summary tables, extended from "does the row name the header"
+        // to "does it name it the way the code does".
+        let mut offenders: Vec<String> = Vec::new();
+        let mut named = 0usize;
+        for provider in provider_list() {
+            let ident = format!("{provider:?}");
+            let doc = provider_variant_doc(&ident);
+            let stem = provider_module_stem(provider);
+            let implementation = module_implementation(&stem);
+            let declared: Vec<&str> = declared_header_constants(&implementation)
+                .into_iter()
+                .map(|(_, name)| name)
+                .collect();
+            assert!(
+                !declared.is_empty(),
+                "`src/providers/{stem}.rs` declares no `*_HEADER: &str` constant in its \
+                 implementation, so this guard checks nothing for `{provider}` — either the \
+                 constants lost their `_HEADER` suffix or the module reads header names in a \
+                 shape the derivation does not follow"
+            );
+            let (exact, wrong) = header_spelling_offenders(&doc, &declared);
+            if exact > 0 {
+                named += 1;
+            }
+            offenders.extend(
+                wrong
+                    .into_iter()
+                    .map(|wrong| format!("`Provider::{ident}`'s doc names {wrong}")),
+            );
+        }
+        assert!(
+            offenders.is_empty(),
+            "a `Provider` variant doc must spell a header exactly as its module declares it — \
+             lookup is case-insensitive, so a different casing verifies identically, but it is \
+             the spelling a reader copies and the one every other surface in the repo uses: \
+             {offenders:?}"
+        );
+
+        // Vacuity floor. 52 of the 58 variants name at least one of their own
+        // headers today, so a derivation that stopped finding them fails here
+        // instead of reporting a clean run over an empty set.
+        assert!(
+            named * 2 >= provider_list().len(),
+            "only {named} of the {} variant docs name one of their own headers, so this guard \
+             has almost nothing to compare — a broken `provider_variant_docs` or \
+             `declared_header_constants` derivation reads the same as docs that lost their header \
+             names",
+            provider_list().len()
+        );
+
+        // The comparison itself, over synthetic text: the shipped defect is
+        // reported, an exact mention is not, a header the provider does not
+        // declare is not, and a doc that names no header at all is not.
+        let (exact, quiet) = header_spelling_offenders(
+            "Shopify (`X-Shopify-Hmac-Sha256`, base64) and Intercom's `X-Hub-Signature`.",
+            &["X-Shopify-Hmac-Sha256"],
+        );
+        assert_eq!(
+            exact, 1,
+            "an exact mention must count as checked, not as drift"
+        );
+        assert!(quiet.is_empty(), "{quiet:?}");
+
+        let (_, drifted) = header_spelling_offenders(
+            "Shopify (`X-Shopify-Hmac-SHA256`, base64) and Intercom's `X-Hub-Signature`.",
+            &["X-Shopify-Hmac-Sha256"],
+        );
+        assert_eq!(drifted.len(), 1, "{drifted:?}");
+        assert!(
+            drifted[0].contains("`X-Shopify-Hmac-SHA256`")
+                && drifted[0].contains("`X-Shopify-Hmac-Sha256`"),
+            "the report must name both the spelling in the doc and the one the code declares: \
+             {drifted:?}"
+        );
     }
 
     #[test]
