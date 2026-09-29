@@ -3137,7 +3137,18 @@ ambiguity).
    which is the `HeaderMap` trait's documented first-match-only contract
    rather than a gap in the check. Identical
    repeats are not ambiguous and verify normally. For built-in providers the
-   scan covers every header the scheme declares. One scheme declares its
+   scan covers every header the scheme declares. That claim is pinned from the
+   provider modules' own source, not from a hand-written table, by
+   `providers::tests::every_declared_provider_header_is_scanned_for_ambiguity`:
+   it reads each `src/providers/<name>.rs` implementation, takes every
+   `*_HEADER: &str` constant it declares, and requires each one to be in
+   `signature_header_names` for that provider, so a provider that grows a
+   timestamp, a per-delivery id, or an algorithm tag folded into the signed
+   string has to join the scan in the same change or the build fails. A header
+   a provider *declares* without *signing* is out of scope rather than a gap —
+   the scan is scoped to the scheme's headers, and Klaviyo's
+   `Klaviyo-Webhook-Id` is the one such constant today (it is not part of the
+   signed string; see the Klaviyo row of §3). One scheme declares its
    headers in the request rather than in a constant: Contentful's
    `x-contentful-signed-headers` list is **self-describing**, so the adapters
    parse the list and scan the headers it names alongside the three fixed

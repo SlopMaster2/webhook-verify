@@ -5050,6 +5050,170 @@ pub struct S {
         }
     }
 
+    /// The header names `src/providers/{stem}.rs` declares, as
+    /// `(constant, header name)`, read from the module's own implementation
+    /// text ([`module_implementation`]).
+    ///
+    /// Source-derived for the reason [`millisecond_timestamp_providers`] is: a
+    /// duplicated list is a list that drifts, and a guard over a *table* can
+    /// only catch a table that disagrees with the code, not code that both the
+    /// table and the guard forgot. Three shapes are deliberately not matched:
+    ///
+    /// - Anything that is not a `&str` — `contentful::SIGNED_HEADERS_SEPARATOR`
+    ///   is a `char`, and the millisecond helpers declare `u64`/`usize`.
+    /// - Anything whose name does not end in `_HEADER`: `SIGNATURE_PREFIX`,
+    ///   `SCHEME`, and `SECRET_PREFIX` are scheme vocabulary, and adding one to
+    ///   the scan list would be a name no header map could even look up.
+    /// - Test-module constants, which are excluded for free — they live after
+    ///   the `#[cfg(test)]` cut, and several (`DOCS_EXAMPLE_HEADER` and
+    ///   friends) carry a header *value* rather than a name.
+    fn declared_header_constants(implementation: &str) -> Vec<(&str, &str)> {
+        implementation
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let declaration = line
+                    .strip_prefix("pub(crate) const ")
+                    .or_else(|| line.strip_prefix("pub const "))
+                    .or_else(|| line.strip_prefix("const "))?;
+                let (constant, rest) = declaration.split_once(": &str = \"")?;
+                if !constant.ends_with("_HEADER") {
+                    return None;
+                }
+                let (name, tail) = rest.split_once('"')?;
+                // Require the closing quote to end the declaration, so a line
+                // that merely *mentions* a `&str` constant cannot be mistaken
+                // for one.
+                if !tail.trim_start().starts_with(';') {
+                    return None;
+                }
+                Some((constant, name))
+            })
+            .collect()
+    }
+
+    /// Header names `provider` declares but deliberately keeps out of the
+    /// §4.4 ambiguity scan, each with a reason recorded in the match arm.
+    ///
+    /// Security-relevant in the same way as
+    /// [`provider_sent_duplicate_headers`]: a name here is one the scan never
+    /// inspects. So the list is asserted in both directions by
+    /// `every_declared_provider_header_is_scanned_for_ambiguity` below —
+    /// without the stale-entry check, a renamed constant would leave an
+    /// exemption that exempts nothing, which is the failure mode a reviewer
+    /// would never notice.
+    fn declared_headers_outside_the_scan(provider: &Provider) -> &'static [&'static str] {
+        match provider {
+            // Klaviyo's `Klaviyo-Webhook-Id` is **not signing material**.
+            // Klaviyo directs integrators to compare it against the body's
+            // `meta.klaviyo_webhook_id` *after* verification, which needs the
+            // body deserialized — a non-goal for this crate (`spec.md` §1, and
+            // the Klaviyo row of §3). The constant is `pub` so a caller can
+            // spell that pair check, and `verify()` never reads the header, so
+            // there is no first-match lookup for a duplicate to hide from.
+            // §4.4 requires the scan to cover "every header the *scheme*
+            // declares", and this header is not part of the signed string, so
+            // scanning it would be inert at best.
+            Provider::Klaviyo => &[klaviyo::WEBHOOK_ID_HEADER],
+            _ => &[],
+        }
+    }
+
+    // Ungated, like `signature_header_names_are_valid_http_field_names` below:
+    // this reads only module sources and `signature_header_names`, both
+    // unconditional, so it runs in the base `no_std` build too.
+    #[test]
+    fn every_declared_provider_header_is_scanned_for_ambiguity() {
+        use std::collections::BTreeSet;
+
+        // `signature_header_names_cover_every_provider_header` above pins the
+        // scan list to a hand-written table, so it catches a *list* that
+        // disagrees with the table. What it cannot catch is a table and a list
+        // that agree with each other and both forget a header the
+        // implementation reads — which is precisely the state a new signing
+        // header is added in. This guard closes that hole by reading the
+        // constant each module declares instead of a table, so the §4.4 claim
+        // it defends ("for built-in providers the scan covers every header the
+        // scheme declares") fails the build the moment a provider grows a
+        // timestamp, a per-delivery id, or an algorithm tag that the scan list
+        // does not follow. Nothing else in the suite notices that gap: the
+        // provider still verifies correctly, because the duplicate is a
+        // smuggling vector rather than a wrong signature.
+        let mut checked = 0usize;
+        for provider in provider_list() {
+            // `paypal.rs`/`sendgrid.rs` are compiled out without their feature
+            // and their scan lists are empty by design (`UnsupportedProvider`
+            // fails closed before a header is read), so there is nothing to
+            // compare in that configuration. `Provider::Custom` is not in
+            // `provider_list()` at all — it is not name-constructible, and its
+            // two scanned names are caller-typed rather than in-crate
+            // constants, so there is no declaration to derive them from.
+            let compiled_in = match provider {
+                Provider::PayPal => cfg!(feature = "paypal"),
+                Provider::SendGrid => cfg!(feature = "sendgrid"),
+                _ => true,
+            };
+            if !compiled_in {
+                continue;
+            }
+
+            let stem = provider_module_stem(provider);
+            let implementation = module_implementation(&stem);
+            let declared = declared_header_constants(&implementation);
+            assert!(
+                !declared.is_empty(),
+                "`src/providers/{stem}.rs` declares no `*_HEADER: &str` constant in its \
+                 implementation, so this guard checks nothing for `{provider}` — either the \
+                 constants lost their `_HEADER` suffix or the module reads header names in a \
+                 shape the derivation does not follow"
+            );
+
+            let scan: BTreeSet<&str> = signature_header_names(&provider)
+                .into_iter()
+                .collect::<BTreeSet<&str>>();
+            let exempt: BTreeSet<&str> = declared_headers_outside_the_scan(&provider)
+                .iter()
+                .copied()
+                .collect::<BTreeSet<&str>>();
+
+            for &(constant, name) in &declared {
+                if exempt.contains(name) {
+                    continue;
+                }
+                assert!(
+                    scan.contains(name),
+                    "`src/providers/{stem}.rs` declares `{constant}` = `{name}`, but \
+                     `signature_header_names` does not list it — the §4.4 ambiguity scan \
+                     would ignore a conflicting duplicate of a header `{provider}` reads, so \
+                     add it to `signature_header_names` (spec.md §4.4)"
+                );
+                checked += 1;
+            }
+
+            for name in &exempt {
+                assert!(
+                    declared.iter().any(|(_, declared_name)| *declared_name == *name),
+                    "`{provider}` is exempt from the ambiguity scan for `{name:?}`, but \
+                     `src/providers/{stem}.rs` no longer declares that header — the exemption \
+                     now exempts nothing and the reason recorded for it no longer applies"
+                );
+            }
+        }
+
+        // Vacuity guard: the count must rise with every header a provider
+        // grows, so a derivation that quietly stops matching declarations
+        // fails the build instead of passing over an empty set. One per
+        // provider is the floor the count can never drop below without a
+        // provider actually losing a header.
+        assert!(
+            checked >= provider_list().len(),
+            "expected at least one scanned header per provider, but only {checked} \
+             declarations were matched across {} providers — the `declared_header_constants` \
+             derivation has stopped matching",
+            provider_list().len()
+        );
+    }
+
     // Ungated: `signature_header_names` and `is_valid_field_name` are both
     // unconditional now (the pair-table entry point ships with no features), so
     // this guard runs in the base `no_std` build too rather than only in the
