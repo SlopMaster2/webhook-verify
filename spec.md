@@ -3436,8 +3436,9 @@ A provider implementation is not mergeable until it has:
    Both adapters turn that list into a `HeaderName` via
    `HeaderName::from_bytes`, and an unparseable name there is
    **indistinguishable from a smuggled duplicate** —
-   `MultiValueHeaders::get_all_bytes` returns `None`, and
-   `conflicting_signature_header` reports the header as ambiguous
+   `MultiValueHeaders::get_all_bytes` returns `None`, so
+   `has_conflicting_duplicates` treats the name as a duplicate and
+   `find_ambiguous_signature_header` reports the header as ambiguous
    (§4.4), so a single typo'd constant would make the adapters reject
    *every* delivery for that provider with a body-less 400. `verify()`
    called directly would still pass, since the crate's own `HeaderMap`

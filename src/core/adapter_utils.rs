@@ -2513,4 +2513,45 @@ mod tests {
         assert_eq!(fuzz_ambiguity_scan_call_hits(trailing_comment), 0);
         assert_eq!(fuzz_ambiguity_scan_call_hits(two_calls), 2);
     }
+
+    /// `spec.md` §5.8 describes the fail-closed adapter path by naming the
+    /// functions that implement it, and it had drifted: it named
+    /// `conflicting_signature_header`, a per-adapter helper removed when the
+    /// duplicate scan was unified into this module, so the normative contract
+    /// pointed readers at a symbol that does not exist. The live path is
+    /// `has_conflicting_duplicates` returning `true` for an unparseable name
+    /// and `find_ambiguous_signature_header` reporting it. This pins the
+    /// §5.8 prose to those symbols so the paragraph that explains *why* a
+    /// typo'd header constant fails closed keeps naming the code that does it.
+    ///
+    /// `spec.md` and the code must not drift (`AGENTS.md` §6); every other
+    /// hand-maintained surface here has a guard, and §5.8's own implementation
+    /// note already pins the two provider tests that exercise the behavior.
+    #[test]
+    fn spec_five_eight_names_the_live_ambiguity_scan() {
+        let spec = include_str!("../../spec.md");
+        let Some(start) = spec.find("**Adapter-visible header names are valid HTTP field names**")
+        else {
+            panic!("spec.md §5.8 must keep its heading");
+        };
+        let Some(end) = spec[start..].find("\n---") else {
+            panic!("spec.md §5.8 must be followed by a horizontal rule");
+        };
+        let item = &spec[start..start + end];
+        assert!(
+            item.contains("find_ambiguous_signature_header"),
+            "spec.md §5.8 must name `find_ambiguous_signature_header`, the live \
+             ambiguity-scan entry point"
+        );
+        assert!(
+            item.contains("has_conflicting_duplicates"),
+            "spec.md §5.8 must name `has_conflicting_duplicates`, the predicate \
+             that treats an unparseable scan name as a duplicate"
+        );
+        assert!(
+            !item.contains("conflicting_signature_header"),
+            "spec.md §5.8 must not name `conflicting_signature_header`; it was \
+             removed when the scan was unified into `core::adapter_utils`"
+        );
+    }
 }
