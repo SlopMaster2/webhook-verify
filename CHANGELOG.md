@@ -425,6 +425,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An oversized body returned `400 Bad Request`, not the documented `413
+  Payload Too Large` — and every `with_max_body_size` above 256 KiB was
+  dead configuration.** The actix adapter buffers with `web::Bytes`, which is
+  not an unbounded reader: actix-web bounds it by `PayloadConfig::limit` (256
+  KiB by default) and applies that bound *before* the crate sees the body, as
+  a `Content-Length` pre-check and again in the stream accumulator. An
+  over-cap extraction fails with `PayloadError::Overflow`, which actix-web
+  itself classifies as `413`. The adapter threw that classification away —
+  `Err(_) => Rejection::BodyRead`, and `BodyRead` maps to `400`.
+
+  Measured through `VerifiedBody` (actix-web 4.12.1):
+
+  | `with_max_body_size` | body bytes | status |
+  |---|---|---|
+  | 1 KiB | 307,200 | `413` (the crate's own pre-buffer guard fires first) |
+  | 1 MiB | 307,200 | `400` before this fix, `413` after |
+  | 1 MiB | 262,145 | `400` before this fix, `413` after |
+  | 1 MiB | 262,144 | `401` — reaches signature verification, both before and after |
+  | none | 307,200 | `400` before this fix, `413` after |
+
+  The last two rows are the sharp end: the ceiling is 262,144 bytes
+  **whatever the crate is configured for**, and it applied even with no limit
+  configured at all. So the DoS hardening the docs promise answered `400` —
+  a status that reads as "your request was malformed", not "your body was too
+  big" — and a limit above 256 KiB, having been accepted and documented, could
+  never be enforced.
+
+  `classify_body_read_failure` (`src/actix.rs`) now keeps actix-web's own
+  classification: an extraction failure whose status is `413` becomes
+  `Rejection::BodyTooLarge`, everything else stays `BodyRead`. Keyed off the
+  status rather than a downcast, so actix-web stays authoritative and a future
+  `413` extraction failure needs no change here. The status codes for every
+  other path are unchanged, no new dependency is added, and rejection bodies
+  remain empty (#332).
+
+  Three tests pin the framework's cap from both sides, at 262,144/262,145:
+  one byte over is `413` even with the *configured* limit set four times
+  higher (so the `413` can only come from the framework bound), exactly at the
+  cap reaches verification and fails there as `401` (so the first test cannot
+  be passing at some other boundary), and the same over-cap request sent
+  chunked — which skips the `Content-Length` pre-check and exercises the
+  stream accumulator — is `413` too.
+
+  The docs also now state the bound rather than leaving callers to discover
+  it: the module's body-limit section, `with_max_body_size`, and the README
+  all spell out that the effective limit is
+  `min(with_max_body_size, PayloadConfig::limit)`, that a configured value
+  above 256 KiB raises nothing until the app raises `PayloadConfig` itself
+  (`App::app_data(web::PayloadConfig::new(limit))`), and that the 256 KiB cap
+  applies even with no `with_max_body_size` at all.
+  `Rejection::BodyRead`'s doc said it was reached only on a transport-level
+  failure such as a mid-stream disconnect — which, before this change, was
+  false for the most common way to reach it.
+
 - **The actix adapter returned a *non-empty* body for every rejection, against
   three separate documented claims.** `src/actix.rs` did not override
   `ResponseError::error_response`, on the strength of a comment asserting that

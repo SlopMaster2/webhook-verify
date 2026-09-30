@@ -530,6 +530,15 @@ server-side logs (`Display`/`Debug` on `WebhookVerificationError`). A guard
 is intentionally not provided: guards run before the body is read, but
 verification requires those bytes.
 
+The actix adapter has one limit the tower one does not: `web::Bytes` is
+itself capped by actix-web's `PayloadConfig` at 256 KiB by default, and
+actix-web applies that cap before this crate sees the body. The effective
+limit is therefore `min(with_max_body_size, PayloadConfig::limit)` — a
+`with_max_body_size` above 256 KiB raises nothing until the app raises that
+too (`App::app_data(web::PayloadConfig::new(limit))`), and with no
+`with_max_body_size` at all the 256 KiB cap still applies. Either way an
+over-cap body is a `413`, not a `400`.
+
 > ⚠️ **Raw body required.** All frameworks buffer and re-parse JSON by
 > default, which changes byte-for-byte content (key ordering, whitespace).
 > The tower adapter and actix extractor capture the exact bytes off the wire
