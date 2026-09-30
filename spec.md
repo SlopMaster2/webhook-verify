@@ -347,7 +347,7 @@ pub struct CustomScheme {
     pub signature_header: &'static str,
     pub timestamp_header: Option<&'static str>,
     pub timestamp_unit: TimestampUnit, // Seconds (default) | Millis
-    pub encoding: Encoding,            // Hex | Base64
+    pub encoding: Encoding,            // Hex | Base64 | Base64Url | Base64NoPad
     pub prefix: Option<&'static str>,  // e.g. "sha256=" or "v0="
     pub signed_string: fn(&dyn HeaderMap, &[u8]) -> Vec<u8>,
 }
@@ -390,6 +390,20 @@ implausible `skew`, which reads like a tolerance misconfiguration and invites
 widening `max_age` (which would make the check permanently vacuous). The
 field makes that footgun a compile-time declaration instead. The unit is inert
 when `timestamp_header` is `None`, since no replay check runs.
+
+**Encoding requirement.** `Encoding` names one exact decoder, not a family of
+acceptable spellings: `Hex` (either case), `Base64` (RFC 4648 §4 alphabet,
+canonical padding required), `Base64Url` (RFC 4648 §5 alphabet, canonical
+padding required), and `Base64NoPad` (RFC 4648 §4 alphabet, padding omitted). A
+value the configured variant cannot decode fails closed with `BadEncoding`, and
+a variant must **not** fall back to another engine — the scheme is the caller's
+declaration of the sender's wire format, so accepting a sibling spelling would
+verify a delivery under a configuration nobody asked for. The one cell of the
+alphabet × padding matrix no variant names is URL-safe *and* unpadded
+(`URL_SAFE_NO_PAD`); adding it is a purely additive follow-up, and until then a
+scheme needing it has no in-crate expression. Every decoded signature must still
+match the scheme's digest length exactly, as `BadEncoding` requires, so no
+engine's trailing-bit slack can admit a shorter or longer signature.
 
 **Replay-check caveat.** Setting `timestamp_header` runs the shared replay
 window (`|now - t| <= max_age`) against the header value, but the check only
