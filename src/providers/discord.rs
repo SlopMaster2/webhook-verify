@@ -11,14 +11,18 @@
 //! - Algorithm: Ed25519 detached signature verification against the
 //!   application's **public key** from the Developer Portal, hex-encoded
 //!
-//! # Security model difference from every other provider here
+//! # Security model
 //!
 //! [`Secret`] does **not** hold a shared HMAC key for this provider. It holds
 //! the hex-encoded 32-byte Ed25519 *public* key Discord shows on your
 //! application's page in the Developer Portal. Verification is therefore not
 //! proof that the sender holds a secret you also possess — it is proof the
-//! payload was signed by the corresponding private key held by Discord. An
-//! invalid or malformed public key fails closed with
+//! payload was signed by the corresponding private key held by Discord. SendGrid
+//! and PayPal are this crate's other two public-key schemes; unlike Discord,
+//! both take their key material from [`VerifyOptions::verifying_material`] and
+//! ignore `Secret` entirely.
+//!
+//! An invalid or malformed public key fails closed with
 //! [`VerifyError::InvalidSecret`], as does a key that is a valid point but of
 //! *low order* (see [`decode_public_key`]): those forge signatures outright, so
 //! accepting one would hand any caller an "authenticated" webhook. Signature

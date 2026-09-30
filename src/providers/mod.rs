@@ -7271,6 +7271,90 @@ pub struct S {
         }
     }
 
+    /// The providers that ignore [`Secret`] name each other in their own
+    /// `# Security model` prose.
+    ///
+    /// The claim under test is *negative* — "no other provider here does this" —
+    /// which is why no existing guard could see it drift. Every other prose
+    /// guard pins a positive name list derived from the code
+    /// ([`context_option_field_docs_name_every_provider_that_reads_the_option`],
+    /// [`millisecond_timestamp_docs_name_every_millisecond_provider`], …); this
+    /// shape asserts that a list does **not** exist, so a broken derivation
+    /// makes it pass silently. Discord's module doc headed its section
+    /// "Security model difference from every other provider here" while
+    /// `uses_secret` excluded two providers, and SendGrid's doc said "Like
+    /// Discord" without naming PayPal — a reader consulting the section to
+    /// decide whether `Secret` is load-bearing for a scheme got the wrong
+    /// answer from both.
+    ///
+    /// [`uses_secret_excludes_exactly_the_asymmetric_providers`] pins the code
+    /// side of that same fact; this guard pins the prose side, and derives the
+    /// set from `uses_secret` so a fourth public-key scheme is covered the next
+    /// time one is added.
+    ///
+    /// Only members of the set are checked, and only for naming the *other*
+    /// members. Discord holds its public key in `Secret`, so it is not in the
+    /// set and its doc is not forced to enumerate peers; a reader opening a
+    /// Discord doc has no use for a list of the two providers that take their
+    /// key material somewhere else entirely.
+    #[test]
+    fn public_key_module_docs_name_their_peers() {
+        use std::fs;
+        use std::path::Path;
+
+        /// A module's leading `//!` documentation, joined into one string.
+        fn module_doc(source: &str) -> String {
+            source
+                .lines()
+                .map_while(|line| line.trim_start().starts_with("//!").then_some(line.trim()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+
+        let public_key: Vec<(String, String)> = provider_list()
+            .into_iter()
+            .filter(|provider| !uses_secret(*provider))
+            .map(|provider| (provider.to_string(), provider_module_stem(provider)))
+            .collect();
+
+        // A vacuity guard: with at most one member, "every peer is named"
+        // asserts nothing at all, and a scan that silently stopped matching
+        // would leave this test green.
+        assert!(
+            public_key.len() > 1,
+            "expected several providers to ignore `Secret` in favour of caller-supplied key \
+             material, but `uses_secret` excluded {:?} — this guard has nothing to check, so \
+             either a provider's treatment of `Secret` changed or `provider_list` has stopped \
+             covering it",
+            public_key
+                .iter()
+                .map(|(brand, _)| brand.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        let providers_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/providers");
+        for (brand, module) in &public_key {
+            let source = fs::read_to_string(providers_dir.join(format!("{module}.rs")))
+                .unwrap_or_else(|error| {
+                    panic!("{brand}'s module {module}.rs could not be read: {error}")
+                });
+            let doc = module_doc(&source);
+            for (peer, _) in &public_key {
+                if peer == brand {
+                    continue;
+                }
+                assert!(
+                    doc.contains(peer.as_str()),
+                    "providers/{module}.rs ignores `Secret` and so shares the public-key \
+                     security model with {peer}, but its module docs never name {peer}; the \
+                     `# Security model` section is where a reader decides whether `Secret` is \
+                     load-bearing for a scheme, so a half-named peer list — or an unqualified \
+                     \"differs from every other provider\" — points them at the wrong model"
+                );
+            }
+        }
+    }
+
     /// Every name-constructible [`Provider`] variant, in declaration order.
     ///
     /// The single source of truth for the provider-bookkeeping tests: both the
