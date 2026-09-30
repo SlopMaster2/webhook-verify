@@ -635,7 +635,15 @@ pub(crate) fn rejection_status(error: &VerifyError) -> u16 {
 #[cfg(test)]
 mod tests {
     #[cfg(any(feature = "tower", feature = "actix"))]
-    use super::{KeyRing, declared_content_length, rejection_status};
+    use super::{KeyRing, rejection_status};
+    // The helper itself is available to either adapter, but its tests here
+    // build an `http` 1.x `HeaderMap`, so they are `http`-gated as well. The
+    // `actix` feature does not enable `http` (actix carries its own 0.2 header
+    // types), which is why this import needs the narrower gate than its
+    // siblings above: with `--features actix` it was unused, and nothing in CI
+    // built that combination (issue #335).
+    #[cfg(all(feature = "http", any(feature = "tower", feature = "actix")))]
+    use super::declared_content_length;
     #[cfg(any(feature = "tower", feature = "actix"))]
     use crate::VerifyError;
     #[cfg(all(not(feature = "std"), any(feature = "tower", feature = "actix")))]

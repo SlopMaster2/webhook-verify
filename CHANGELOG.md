@@ -425,6 +425,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `actix` and `tower` feature combinations without `sendgrid`/`paypal`
+  warned on three items, and no CI job built either combination** (#335). The
+  `clippy` job ran `--all-features`, where all three are used, so the warnings
+  were invisible: `declared_content_length` was imported unconditionally in
+  `core::adapter_utils`'s test module although its only tests there are
+  `http`-gated (the `actix` feature does not enable `http` — it carries its own
+  0.2 header types), `clocked_at` was imported unconditionally in `tower.rs`'s
+  test module although its only use is in the `paypal`-gated vector, and
+  `every_declared_provider_header_is_scanned_for_ambiguity`'s feature-gated
+  `match` on `Provider` tripped clippy's `match_like_matches_macro` as soon as
+  `cfg!` collapsed both arms to `false` — that is, in *every* build without
+  both `sendgrid` and `paypal`.
+
+  The imports now carry the same gate as their callers, the `match` becomes a
+  pair of per-provider tests with the same per-variant semantics, and the
+  `clippy` job runs a `["--all-features", "--features actix", "--features
+  tower"]` matrix so the adapter-only configurations are held to the same
+  `-D warnings --all-targets` bar as the rest. A lint gate that only ever sees
+  one feature configuration cannot catch this class, and `adapter_utils.rs` is
+  exactly the kind of shared file — one test helper used by one adapter's tests
+  and not the other's — where a future edit can break a configuration no job
+  builds.
+
+  Test-only imports, a lint-level rewrite of one `match`, and CI configuration.
+  No verification, adapter, or public API behavior changes; `--all-features`
+  output is byte-identical.
+
 - **Nine prose sites attached a provider's signature encoding to the HMAC key
   instead of to the digest** (#336). The `spec.md` §3 entry for X (formerly
   Twitter) described its construction as "HMAC-SHA256 keyed with the **consumer

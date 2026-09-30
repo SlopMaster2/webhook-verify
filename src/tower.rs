@@ -447,7 +447,12 @@ mod tests {
     use crate::core::adapter_utils::has_conflicting_duplicates;
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
-    use crate::test_helpers::{FixedClock, clocked_at, epoch};
+    use crate::test_helpers::{FixedClock, epoch};
+    // Only the PayPal vector sets a clock, and that test is `paypal`-gated;
+    // importing this unconditionally made `--features tower` (no `paypal`)
+    // warn, and no CI job built that combination (issue #335).
+    #[cfg(feature = "paypal")]
+    use crate::test_helpers::clocked_at;
     use ::http_body_util::Full;
     use ::tower::ServiceExt;
     use futures_executor::block_on;

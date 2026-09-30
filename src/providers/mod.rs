@@ -6178,11 +6178,17 @@ pub struct S {
             // `provider_list()` at all — it is not name-constructible, and its
             // two scanned names are caller-typed rather than in-crate
             // constants, so there is no declaration to derive them from.
-            let compiled_in = match provider {
-                Provider::PayPal => cfg!(feature = "paypal"),
-                Provider::SendGrid => cfg!(feature = "sendgrid"),
-                _ => true,
-            };
+            // Two feature-gated providers, one feature each, so this reads as
+            // two independent tests rather than a match on `provider`: the
+            // match form collapsed to a literal `match` once `cfg!` expanded
+            // both arms to `false`, and clippy's `match_like_matches_macro`
+            // fired on any build without `sendgrid`/`paypal` — including
+            // `--features actix` and `--features tower`, the two adapter
+            // configurations CI did not build (issue #335). The rewrite keeps
+            // the same per-provider semantics: a variant is compiled in unless
+            // it is the feature-gated one whose feature is off.
+            let compiled_in = (provider != Provider::PayPal || cfg!(feature = "paypal"))
+                && (provider != Provider::SendGrid || cfg!(feature = "sendgrid"));
             if !compiled_in {
                 continue;
             }
