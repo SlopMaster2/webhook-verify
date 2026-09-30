@@ -49,6 +49,15 @@
 //!   signature work — the buffered allocation may still exceed the limit for
 //!   bodies sent without a length (`Transfer-Encoding: chunked`).
 //!
+//!   This limit is *not* the only bound in play. The extractor this adapter
+//!   buffers with, `web::Bytes`, is itself capped by actix-web's
+//!   `PayloadConfig` at 256 KiB by default, and actix-web applies that cap
+//!   before the crate sees the body. The effective limit is therefore
+//!   `min(with_max_body_size, PayloadConfig::limit)`; a configured limit above
+//!   256 KiB is unreachable until the app raises `PayloadConfig` itself
+//!   (`App::app_data(web::PayloadConfig::new(limit))`). Whichever bound
+//!   rejects first answers `413`.
+//!
 //! # Status codes
 //!
 //! Identical to the tower adapter:
@@ -229,6 +238,12 @@ impl WebhookConfig {
     /// applies unless a custom [`actix_web::web::PayloadConfig`] is
     /// registered).
     ///
+    /// The effective limit is `min(max, PayloadConfig::limit)`, so setting a
+    /// value **above** 256 KiB (actix-web's default `PayloadConfig` bound)
+    /// raises nothing until the app raises that too —
+    /// `App::app_data(web::PayloadConfig::new(limit))`. Whichever bound
+    /// rejects first answers `413`.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -295,8 +310,13 @@ impl std::ops::Deref for VerifiedBody {
 enum Rejection {
     /// Verification failed with the structured error.
     Verify(VerifyError),
-    /// The body could not be read to completion (transport-level failure,
-    /// e.g. client disconnect mid-stream). Carries no detail by design.
+    /// The body could not be read to completion. Carries no detail by design.
+    ///
+    /// Not only a transport-level failure such as a mid-stream disconnect:
+    /// `web::Bytes` also fails this way for a body actix-web's own
+    /// `PayloadConfig` refuses, but that case is classified as
+    /// [`Rejection::BodyTooLarge`] first (see [`classify_body_read_failure`]),
+    /// so what reaches here is a genuine read failure.
     BodyRead,
     /// The body exceeds the configured [`WebhookConfig::with_max_body_size`]
     /// limit (DoS hardening); rejected before any signature work.
@@ -363,6 +383,38 @@ impl ResponseError for WebhookVerificationError {
 
 type ExtractFuture = Pin<Box<dyn Future<Output = Result<VerifiedBody, WebhookVerificationError>>>>;
 
+/// Classifies a failed body extraction into the right [`Rejection`].
+///
+/// `web::Bytes` is **not** an unbounded reader, which this adapter has to
+/// account for rather than report around. It is bounded by actix-web's own
+/// `PayloadConfig`, 256 KiB by default, and that bound is applied *before*
+/// the crate sees the body — as a `Content-Length` pre-check, and again in
+/// the stream accumulator. An over-cap extraction fails with
+/// `PayloadError::Overflow`, which actix-web already classifies as `413
+/// Payload Too Large`.
+///
+/// Collapsing every extraction failure to [`Rejection::BodyRead`] therefore
+/// both contradicted the module's status table (a body over the cap is a
+/// `413`, per the docs) and mislabelled the most common way to land there: an
+/// ordinary oversized request, not the mid-stream disconnect `BodyRead` is
+/// documented for. It also made
+/// [`WebhookConfig::with_max_body_size`] silently inert above 256 KiB —
+/// actix-web rejects such a body first, at a status the crate had already
+/// decided not to honour.
+///
+/// Keyed off the status rather than a downcast so actix-web's own
+/// classification stays authoritative and the crate picks up any future
+/// `413` extraction failure without a change here; the concrete cause is not
+/// logged, so this adds no detail to the wire response either way (#332 keeps
+/// that bodiless).
+fn classify_body_read_failure(error: &actix_web::Error) -> Rejection {
+    if error.as_response_error().status_code() == StatusCode::PAYLOAD_TOO_LARGE {
+        Rejection::BodyTooLarge
+    } else {
+        Rejection::BodyRead
+    }
+}
+
 impl FromRequest for VerifiedBody {
     type Error = WebhookVerificationError;
     type Future = ExtractFuture;
@@ -415,7 +467,9 @@ impl FromRequest for VerifiedBody {
             // and what the handler receives (spec.md §4.2).
             let raw_body = match Bytes::from_request(&req, &mut payload).await {
                 Ok(bytes) => bytes,
-                Err(_) => return Err(WebhookVerificationError(Rejection::BodyRead)),
+                Err(error) => {
+                    return Err(WebhookVerificationError(classify_body_read_failure(&error)));
+                }
             };
 
             // DoS hardening: reject oversized bodies before any signature
@@ -1528,6 +1582,90 @@ mod tests {
         let res = aw_test::call_service(&unconfigured, req).await;
         assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(aw_test::read_body(res).await, Bytes::new());
+    }
+
+    // --- the body-size ceiling actix-web imposes underneath the crate's -------
+
+    /// `web::Bytes` is bounded by actix-web's own `PayloadConfig`, and the
+    /// adapter has to agree with that bound rather than report around it.
+    ///
+    /// `WebhookConfig::with_max_body_size` is a DoS guard the docs promise
+    /// will answer `413 Payload Too Large`. But `web::Bytes` is not an
+    /// unbounded reader: actix-web caps it at `PayloadConfig::limit` (256 KiB
+    /// by default) and applies that cap *before* this crate sees the body —
+    /// as a `Content-Length` pre-check, and again in the stream accumulator.
+    /// An over-cap extraction fails with `PayloadError::Overflow`, which
+    /// actix-web itself classifies as `413`.
+    ///
+    /// So the crate's own limit is not the only one in play, and it is not
+    /// always the binding one: a limit above 256 KiB is unreachable, because
+    /// actix-web rejects the body first. These tests pin the boundary from
+    /// both sides — one byte over the framework cap must be `413` even though
+    /// the *configured* limit is far higher, and exactly at the cap must fall
+    /// through to verification (proving the cap, not the configured limit,
+    /// is what stops it).
+    const ACTIX_PAYLOAD_CAP: usize = 262_144;
+
+    /// App whose configured limit sits deliberately *above* actix-web's own
+    /// cap, so the framework's bound is the one under test.
+    macro_rules! app_with_limit_above_actix_cap {
+        () => {
+            aw_test::init_service(
+                App::new()
+                    .app_data(
+                        WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                            .with_max_body_size(ACTIX_PAYLOAD_CAP * 4),
+                    )
+                    .route("/", web::post().to(echo_len)),
+            )
+            .await
+        };
+    }
+
+    #[actix_web::test]
+    async fn body_one_byte_over_the_actix_payload_cap_is_payload_too_large() {
+        // The signature cannot possibly match a body this large, so a `413`
+        // here can only come from the size guard — and it must be `413`, not
+        // the `400` that an unclassified extraction failure produces.
+        let app = app_with_limit_above_actix_cap!();
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Hub-Signature-256", GITHUB_SIGNATURE))
+            .set_payload(Bytes::from(vec![b'a'; ACTIX_PAYLOAD_CAP + 1]))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[actix_web::test]
+    async fn body_exactly_at_the_actix_payload_cap_reaches_verification() {
+        // One byte below the cap: neither guard fires, so the request gets as
+        // far as the signature check and fails there (`401`). Without this the
+        // test above could not tell "correctly classified as 413" from "rejected
+        // at some other boundary one byte earlier".
+        let app = app_with_limit_above_actix_cap!();
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Hub-Signature-256", GITHUB_SIGNATURE))
+            .set_payload(Bytes::from(vec![b'a'; ACTIX_PAYLOAD_CAP]))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[actix_web::test]
+    async fn chunked_body_over_the_actix_payload_cap_is_payload_too_large() {
+        // Same cap, reached through the stream accumulator rather than the
+        // `Content-Length` pre-check: a chunked request declares no length, so
+        // the module docs' "the buffered allocation may still exceed the limit
+        // for bodies sent without a length" case is the one an attacker
+        // reaches, and it must be classified the same way.
+        let app = app_with_limit_above_actix_cap!();
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Hub-Signature-256", GITHUB_SIGNATURE))
+            .insert_header(("transfer-encoding", "chunked"))
+            .set_payload(Bytes::from(vec![b'a'; ACTIX_PAYLOAD_CAP + 1]))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     // --- unit-level checks ----------------------------------------------------
