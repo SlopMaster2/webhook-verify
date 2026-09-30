@@ -120,7 +120,7 @@ hand-copied signing-string logic to get wrong.
 | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp replay window | ✅ |
 | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` | ✅ |
 | Discord | Ed25519 (public-key), no shared secret: `X-Signature-Ed25519` + `X-Signature-Timestamp` (unix seconds) replay window | ✅ |
-| PayPal | RSASSA-PKCS1-v1_5 SHA-256 over `transmission_id|time|webhook_id|crc32(body)`, `PayPal-Transmission-Sig` (plus `PayPal-Transmission-Id`/`-Time`/`-Cert-Url`/`-Auth-Algo`), X.509 cert + webhook ID via `VerifyOptions::verifying_material` + `webhook_id` (needs `paypal` feature) + `PayPal-Transmission-Time` (RFC 3339) replay window | ✅ |
+| PayPal | RSASSA-PKCS1-v1_5 SHA-256 over `{transmission_id}\|{transmission_time}\|{webhook_id}\|{crc32}`, `PayPal-Transmission-Sig` (plus `PayPal-Transmission-Id`/`-Time`/`-Cert-Url`/`-Auth-Algo`), X.509 cert + webhook ID via `VerifyOptions::verifying_material` + `webhook_id` (needs `paypal` feature) + `PayPal-Transmission-Time` (RFC 3339) replay window | ✅ |
 | SendGrid | ECDSA P-256 over the raw timestamp from `X-Twilio-Email-Event-Webhook-Timestamp` immediately concatenated with the raw body (no separator), signature in `X-Twilio-Email-Event-Webhook-Signature`, public key via `VerifyOptions::verifying_material` (needs `sendgrid` feature) + `X-Twilio-Email-Event-Webhook-Timestamp` (unix seconds) replay window | ✅ |
 | Paystack | HMAC-SHA512 over raw body, bare hex, `x-paystack-signature` (no prefix, no timestamp) | ✅ |
 | Paddle | HMAC-SHA256, hex, `Paddle-Signature` (`ts=;h1=` list, rotation-safe) + replay window | ✅ |
