@@ -524,8 +524,11 @@ rejected with `400` before verification (spec §4.4, with the one provider-sent
 exception noted above). Failure statuses match
 the tower table above, including `413 Payload Too Large` for bodies that
 exceed `WebhookConfig::with_max_body_size(bytes)` (DoS hardening; unlimited
-by default). A guard is intentionally not provided: guards run
-before the body is read, but verification requires those bytes.
+by default), and rejection bodies are empty in both adapters — the status
+carries the signal, and the structured `VerifyError` behind it stays in your
+server-side logs (`Display`/`Debug` on `WebhookVerificationError`). A guard
+is intentionally not provided: guards run before the body is read, but
+verification requires those bytes.
 
 > ⚠️ **Raw body required.** All frameworks buffer and re-parse JSON by
 > default, which changes byte-for-byte content (key ordering, whitespace).
