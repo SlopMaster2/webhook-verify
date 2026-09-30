@@ -141,14 +141,53 @@ impl HashAlg {
 }
 
 /// Wire encoding of the signature in its header (`spec.md` §2.2).
+///
+/// Each variant names one exact decoder — an alphabet, and whether canonical
+/// padding is required. That exactness is the point: the variants do *not*
+/// blur into "accept anything base64ish", so a scheme configured with the
+/// wrong one rejects the delivery as
+/// [`VerifyError::BadEncoding`] rather than verifying it under a
+/// configuration the caller did not ask for. Each variant's docs name the
+/// cell it does not cover, and the one uncovered cell — URL-safe *and*
+/// unpadded — is called out on [`Encoding::Base64NoPad`].
+///
+/// No built-in provider needs any variant beyond [`Encoding::Hex`] and
+/// [`Encoding::Base64`]; these exist for the long-tail senders
+/// [`CustomScheme`] exists to cover (`spec.md` §2.2).
 #[must_use]
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Encoding {
     /// Lower/uppercase hexadecimal (both accepted by the decoder).
     Hex,
-    /// Standard base64 alphabet with padding.
+    /// Standard base64 alphabet (`+` and `/`) with canonical padding, as in
+    /// RFC 4648 §4.
     Base64,
+    /// URL-safe base64 alphabet (`-` and `_` in place of `+` and `/`) with
+    /// canonical padding, as in RFC 4648 §5.
+    ///
+    /// The two alphabets differ *only* in those two characters, so a digest
+    /// whose encoding happens to contain neither decodes identically under
+    /// both — each 6-bit group is `+`/`/` with probability 2/64, so roughly
+    /// seven digests in ten are spelled the same way under both. That makes
+    /// this variant easy to leave out of a scheme without noticing, and easy
+    /// to add to one that did not need it: the difference only shows up on the
+    /// digests that carry a `+` or `/`.
+    Base64Url,
+    /// Standard base64 alphabet (`+` and `/`) with the trailing padding
+    /// **omitted**, the shape RFC 4648 §3.2 calls unpadded and JWS calls
+    /// "base64url without padding".
+    ///
+    /// Padding is never data-dependent, so unlike [`Encoding::Base64Url`]
+    /// this variant differs from [`Encoding::Base64`] on every signature it
+    /// is given: a 32-byte digest is 44 characters padded and 43 unpadded.
+    ///
+    /// This is the standard alphabet, so it does **not** cover the URL-safe
+    /// alphabet; [`Encoding::Base64Url`] does not cover the missing padding
+    /// either. The one cell no variant names — URL-safe *and* unpadded
+    /// (`URL_SAFE_NO_PAD`) — is the rarest of the four, and adding it is a
+    /// one-line, purely additive follow-up whenever a real sender needs it.
+    Base64NoPad,
 }
 
 impl fmt::Display for Encoding {
@@ -156,6 +195,8 @@ impl fmt::Display for Encoding {
         match self {
             Encoding::Hex => f.write_str("hex"),
             Encoding::Base64 => f.write_str("base64"),
+            Encoding::Base64Url => f.write_str("base64url"),
+            Encoding::Base64NoPad => f.write_str("base64-nopad"),
         }
     }
 }
@@ -566,6 +607,16 @@ fn parse_signature(scheme: &CustomScheme, value: &str) -> Result<Vec<u8>, Verify
         });
     }
 
+    // Each base64 arm below decodes with exactly the one engine its variant
+    // names. The variants must not be loosened into "try every engine": a
+    // scheme is the caller's declaration of the sender's wire format, and the
+    // digest-length check that follows is the only thing standing between an
+    // over-permissive decoder and a signature that verifies under a
+    // configuration nobody asked for. `Base64`'s reason string is left as it
+    // shipped — it is pre-1.0 message text callers may match on — while the
+    // variants added here name the vocabulary they expect, so a caller who
+    // configures the wrong one learns which wire shape actually arrived
+    // instead of only that it was "not valid base64" (issue #329).
     let bytes = match scheme.encoding {
         Encoding::Hex => hex::decode(encoded).map_err(|_| VerifyError::BadEncoding {
             reason: "signature is not valid hexadecimal",
@@ -574,6 +625,16 @@ fn parse_signature(scheme: &CustomScheme, value: &str) -> Result<Vec<u8>, Verify
             .decode(encoded)
             .map_err(|_| VerifyError::BadEncoding {
                 reason: "signature is not valid base64",
+            })?,
+        Encoding::Base64Url => base64::engine::general_purpose::URL_SAFE
+            .decode(encoded)
+            .map_err(|_| VerifyError::BadEncoding {
+                reason: "signature is not valid padded URL-safe base64",
+            })?,
+        Encoding::Base64NoPad => base64::engine::general_purpose::STANDARD_NO_PAD
+            .decode(encoded)
+            .map_err(|_| VerifyError::BadEncoding {
+                reason: "signature is not valid unpadded standard base64",
             })?,
     };
 
@@ -597,6 +658,7 @@ mod tests {
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
     use crate::verify;
+    use base64::Engine as _;
     use std::time::Duration;
 
     /// Signing secret from the worked example in Slack's official docs
@@ -1345,6 +1407,378 @@ mod tests {
             clocked_at(ts_scheme::TIMESTAMP, Some(Duration::from_secs(300))),
         );
         assert_eq!(result, Ok(()));
+    }
+
+    // --- Base64 encoding variants (issue #329) -------------------------------
+    //
+    // `Encoding::Base64Url` and `Encoding::Base64NoPad` close the two cells of
+    // the alphabet × padding matrix `Encoding::Base64` alone could not express.
+    // The vectors are RFC 4231 test case 2 / RFC 2202 test case 2 (the same
+    // key/data as `rfc_vectors_across_hash_and_encoding_combinations` above),
+    // re-encoded with Python's `base64` and independently cross-checked against
+    // `openssl dgst -<alg> -mac HMAC -macopt key:Jefe -binary | base64`.
+    //
+    // RFC_KEY/RFC_DATA from this module's own test constants.
+
+    /// RFC 2202 test case 2's SHA-1 digest, hex — the value whose base64
+    /// spellings carry both a `/` and the URL-safe `_` that make the two
+    /// alphabets distinguishable, so the tests that re-encode it per variant
+    /// are testing the decoder rather than an accidental match.
+    const SHA1_DIGEST: &str = "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79";
+
+    /// A raw-body scheme over the RFC key/data, in one given encoding.
+    fn raw_body_scheme(hash: HashAlg, encoding: Encoding) -> CustomScheme {
+        CustomScheme {
+            hash,
+            signature_header: "X-Raw-Sig",
+            timestamp_header: None,
+            timestamp_unit: TimestampUnit::Seconds,
+            encoding,
+            prefix: None,
+            signed_string: |_headers, raw_body| raw_body.to_vec(),
+        }
+    }
+
+    fn verify_raw(hash: HashAlg, encoding: Encoding, signature: &str) -> Result<(), VerifyError> {
+        verify_custom(
+            &raw_body_scheme(hash, encoding),
+            &[("X-Raw-Sig", signature)],
+            RFC_DATA,
+            RFC_KEY,
+            Default::default(),
+        )
+    }
+
+    // 1. Official / reference vectors.
+    //
+    // SHA-256's URL-safe value is *identical* to its standard value — that
+    // digest's base64 happens to contain none of `+`/`/` — and it is pinned
+    // here on purpose, so the `Base64Url` row is not read as "the two
+    // alphabets are the same thing". SHA-1 and SHA-512 both do carry the
+    // characters that differ.
+
+    #[test]
+    fn base64_variants_verify_the_rfc_vectors() {
+        // (hash, encoding, expected signature header value)
+        let cases: &[(HashAlg, Encoding, &str)] = &[
+            // URL-safe alphabet, padding kept. Differs from the `Base64` row
+            // above only by `-`/`_` in place of `+`/`/`.
+            (
+                HashAlg::Sha1,
+                Encoding::Base64Url,
+                "7_zfauXrL6LSdBbV8YTfnCWafHk=",
+            ),
+            (
+                HashAlg::Sha512,
+                Encoding::Base64Url,
+                "Fkt6e_z4GeLjlfvnO1bgo4e9ZCIugx_WECcM1-olBVSXWL91wFqZSm0DT2X48Ob9yuqxo01Ka0tjbgcKOLznNw==",
+            ),
+            (
+                HashAlg::Sha256,
+                Encoding::Base64Url,
+                "W9zBRr9gdU5qBCQmCJV1x1oAPwidJzmDnexYuWTsOEM=",
+            ),
+            // Standard alphabet, padding omitted.
+            (
+                HashAlg::Sha256,
+                Encoding::Base64NoPad,
+                "W9zBRr9gdU5qBCQmCJV1x1oAPwidJzmDnexYuWTsOEM",
+            ),
+            (
+                HashAlg::Sha1,
+                Encoding::Base64NoPad,
+                "7/zfauXrL6LSdBbV8YTfnCWafHk",
+            ),
+            (
+                HashAlg::Sha512,
+                Encoding::Base64NoPad,
+                "Fkt6e/z4GeLjlfvnO1bgo4e9ZCIugx/WECcM1+olBVSXWL91wFqZSm0DT2X48Ob9yuqxo01Ka0tjbgcKOLznNw",
+            ),
+        ];
+
+        for &(hash, encoding, signature) in cases {
+            let result = verify_custom(
+                &raw_body_scheme(hash, encoding),
+                &[("X-Raw-Sig", signature)],
+                RFC_DATA,
+                RFC_KEY,
+                Default::default(),
+            );
+            assert_eq!(result, Ok(()), "{hash:?} + {encoding:?}");
+        }
+    }
+
+    // 2. Negative: a wrong key still fails, and it fails as a mismatch rather
+    //    than by decoding to something the comparison accepts.
+
+    #[test]
+    fn base64_variants_reject_the_wrong_secret() {
+        for encoding in [Encoding::Base64Url, Encoding::Base64NoPad] {
+            let result = verify_custom(
+                &raw_body_scheme(HashAlg::Sha1, encoding),
+                &[("X-Raw-Sig", reencode(SHA1_DIGEST, encoding).as_str())],
+                RFC_DATA,
+                "not the RFC key",
+                Default::default(),
+            );
+            assert_eq!(
+                result,
+                Err(VerifyError::SignatureMismatch),
+                "{encoding:?} + wrong secret"
+            );
+        }
+    }
+
+    // 3. Tamper: one flipped byte of the body breaks the signature.
+
+    #[test]
+    fn base64_variants_reject_a_tampered_body() {
+        let mut tampered = RFC_DATA.to_vec();
+        tampered[0] ^= 0x01;
+        for encoding in [Encoding::Base64Url, Encoding::Base64NoPad] {
+            let result = verify_custom(
+                &raw_body_scheme(HashAlg::Sha1, encoding),
+                &[("X-Raw-Sig", reencode(SHA1_DIGEST, encoding).as_str())],
+                &tampered,
+                RFC_KEY,
+                Default::default(),
+            );
+            assert_eq!(
+                result,
+                Err(VerifyError::SignatureMismatch),
+                "{encoding:?} + tampered body"
+            );
+        }
+    }
+
+    // 4. Replay: the window runs for a new encoding exactly as for `Hex` and
+    //    `Base64`, so the variant only changes the decoder and nothing else.
+
+    /// Re-encode an already-pinned hex digest in one of the new variants, so
+    /// one vector drives both. Cross-checked against Python's
+    /// `base64.b64encode`/`urlsafe_b64encode` and `openssl ... | base64`.
+    fn reencode(hex_digest: &str, encoding: Encoding) -> String {
+        let Ok(bytes) = hex::decode(hex_digest) else {
+            panic!("test vector {hex_digest:?} is not valid hex");
+        };
+        match encoding {
+            Encoding::Base64Url => base64::engine::general_purpose::URL_SAFE.encode(bytes),
+            Encoding::Base64NoPad => base64::engine::general_purpose::STANDARD_NO_PAD.encode(bytes),
+            other => panic!("{other:?} is not re-encoded here"),
+        }
+    }
+
+    #[test]
+    fn base64_variants_run_the_shared_replay_window() {
+        for encoding in [Encoding::Base64Url, Encoding::Base64NoPad] {
+            let scheme = CustomScheme {
+                encoding,
+                prefix: None,
+                ..ts_scheme_config()
+            };
+            let headers = [
+                (
+                    ts_scheme::HEADER.to_string(),
+                    reencode(ts_scheme::PING_SIG, encoding),
+                ),
+                (
+                    ts_scheme::TS_HEADER.to_string(),
+                    ts_scheme::TIMESTAMP.to_string(),
+                ),
+            ];
+
+            // In-window: the authentic delivery verifies.
+            assert_eq!(
+                verify_custom(
+                    &scheme,
+                    &headers,
+                    ts_scheme::PING_BODY,
+                    ts_scheme::SECRET,
+                    clocked_at(ts_scheme::TIMESTAMP, Some(Duration::from_secs(300))),
+                ),
+                Ok(()),
+                "{encoding:?} in window"
+            );
+
+            // Same signature, one second past the window: the authenticated
+            // delivery is now refused. `BadEncoding` instead would mean the
+            // decoder, not the window, rejected it.
+            assert_eq!(
+                verify_custom(
+                    &scheme,
+                    &headers,
+                    ts_scheme::PING_BODY,
+                    ts_scheme::SECRET,
+                    clocked_at(ts_scheme::TIMESTAMP + 301, Some(Duration::from_secs(300))),
+                ),
+                Err(VerifyError::TimestampOutOfTolerance {
+                    skew: Duration::from_secs(301),
+                    max_age: Duration::from_secs(300),
+                }),
+                "{encoding:?} out of window"
+            );
+        }
+    }
+
+    // 5. Malformed header: each variant rejects the wire shapes it does not
+    //    name, so the two new ones cannot drift into "any base64". This is the
+    //    battery that fails if someone relaxes a variant to try several
+    //    engines.
+
+    #[test]
+    fn base64_variants_reject_the_wire_shapes_they_do_not_name() {
+        // Each value below is a *real* signature above, re-spelled into a
+        // shape the variant under test must not accept.
+        // Every value below is an *authentic* signature from the vector test
+        // above, re-spelled into a shape the variant under test must not
+        // accept. Each row pairs the value with the hash whose digest length
+        // it really has, so a row fails only on the vocabulary it is about and
+        // never incidentally on length — that is what makes rows 6 and 7 a
+        // real alphabet test: the SHA-512 spellings differ in `+`/`/` vs
+        // `-`/`_`, whereas the SHA-256 vector's base64 happens to contain
+        // neither and would pass under either alphabet.
+        const PADDED_STANDARD_SHA1: &str = "7/zfauXrL6LSdBbV8YTfnCWafHk=";
+        const PADDED_URL_SHA1: &str = "7_zfauXrL6LSdBbV8YTfnCWafHk=";
+        const UNPADDED_STANDARD_SHA1: &str = "7/zfauXrL6LSdBbV8YTfnCWafHk";
+        const PADDED_STANDARD_SHA512: &str = "Fkt6e/z4GeLjlfvnO1bgo4e9ZCIugx/WECcM1+olBVSXWL91wFqZSm0DT2X48Ob9yuqxo01Ka0tjbgcKOLznNw==";
+        const PADDED_URL_SHA512: &str = "Fkt6e_z4GeLjlfvnO1bgo4e9ZCIugx_WECcM1-olBVSXWL91wFqZSm0DT2X48Ob9yuqxo01Ka0tjbgcKOLznNw==";
+        const UNPADDED_STANDARD_SHA512: &str = "Fkt6e/z4GeLjlfvnO1bgo4e9ZCIugx/WECcM1+olBVSXWL91wFqZSm0DT2X48Ob9yuqxo01Ka0tjbgcKOLznNw";
+
+        let cases: Vec<(HashAlg, Encoding, &str, &str)> = vec![
+            // `Base64` keeps its old, narrow vocabulary: no URL-safe value,
+            // no unpadded value.
+            (
+                HashAlg::Sha1,
+                Encoding::Base64,
+                PADDED_URL_SHA1,
+                "URL-safe under Base64",
+            ),
+            (
+                HashAlg::Sha1,
+                Encoding::Base64,
+                UNPADDED_STANDARD_SHA1,
+                "unpadded under Base64",
+            ),
+            // `Base64Url` is not "base64": the standard alphabet's `+`/`/` are
+            // not URL-safe characters.
+            (
+                HashAlg::Sha1,
+                Encoding::Base64Url,
+                PADDED_STANDARD_SHA1,
+                "standard under Base64Url",
+            ),
+            // ... and it still requires padding.
+            (
+                HashAlg::Sha1,
+                Encoding::Base64Url,
+                UNPADDED_STANDARD_SHA1,
+                "unpadded under Base64Url",
+            ),
+            (
+                HashAlg::Sha512,
+                Encoding::Base64Url,
+                UNPADDED_STANDARD_SHA512,
+                "unpadded + standard under Base64Url",
+            ),
+            // `Base64NoPad` is neither "base64, padding optional" nor
+            // "base64url, padding optional".
+            (
+                HashAlg::Sha1,
+                Encoding::Base64NoPad,
+                PADDED_STANDARD_SHA1,
+                "padded under Base64NoPad",
+            ),
+            (
+                HashAlg::Sha512,
+                Encoding::Base64NoPad,
+                PADDED_URL_SHA512,
+                "padded + URL-safe under Base64NoPad",
+            ),
+            (
+                HashAlg::Sha512,
+                Encoding::Base64NoPad,
+                PADDED_STANDARD_SHA512,
+                "padded + standard under Base64NoPad",
+            ),
+            // Garbage, and the empty value, still fail on both variants.
+            (
+                HashAlg::Sha256,
+                Encoding::Base64Url,
+                "!!!!",
+                "garbage under Base64Url",
+            ),
+            (
+                HashAlg::Sha256,
+                Encoding::Base64NoPad,
+                "!!!!",
+                "garbage under Base64NoPad",
+            ),
+            (
+                HashAlg::Sha256,
+                Encoding::Base64Url,
+                "",
+                "empty under Base64Url",
+            ),
+            (
+                HashAlg::Sha256,
+                Encoding::Base64NoPad,
+                "",
+                "empty under Base64NoPad",
+            ),
+        ];
+
+        for (hash, encoding, signature, label) in cases {
+            let result = verify_raw(hash, encoding, signature);
+            match result {
+                Err(VerifyError::BadEncoding { .. }) | Err(VerifyError::MalformedHeader { .. }) => {
+                }
+                other => panic!("expected a decode failure for {label}, got {other:?}"),
+            }
+        }
+    }
+
+    /// The digest-length check still applies on the new variants: base64's
+    /// trailing-bit slack means a value can decode cleanly at the wrong length,
+    /// and that must still be `BadEncoding` rather than a comparison against a
+    /// differently sized buffer.
+    #[test]
+    fn base64_variants_still_enforce_the_digest_length() {
+        for encoding in [Encoding::Base64Url, Encoding::Base64NoPad] {
+            // A 20-byte (SHA-1) digest under a SHA-256 scheme: decodes fine in
+            // the right alphabet, wrong length for the hash.
+            let result = verify_raw(
+                HashAlg::Sha256,
+                encoding,
+                match encoding {
+                    Encoding::Base64Url => "7_zfauXrL6LSdBbV8YTfnCWafHk=",
+                    _ => "7/zfauXrL6LSdBbV8YTfnCWafHk",
+                },
+            );
+            match result {
+                Err(VerifyError::BadEncoding { .. }) => {}
+                other => panic!("expected BadEncoding for {encoding:?}, got {other:?}"),
+            }
+        }
+    }
+
+    /// Each new variant renders a distinct, stable label, so an operator
+    /// reading a `Display`ed scheme configuration can tell which wire shape
+    /// was configured.
+    #[test]
+    fn base64_variants_have_distinct_display_labels() {
+        let mut labels: Vec<String> = [
+            Encoding::Hex,
+            Encoding::Base64,
+            Encoding::Base64Url,
+            Encoding::Base64NoPad,
+        ]
+        .iter()
+        .map(|encoding| encoding.to_string())
+        .collect();
+        labels.sort();
+        let count = labels.len();
+        labels.dedup();
+        assert_eq!(labels.len(), count, "encoding labels collide: {labels:?}");
     }
 
     // --- CustomScheme::new() convenience constructor ------------------------

@@ -233,6 +233,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep calling the internal trait-generic version, so there is one
   implementation and it cannot drift from the public one.
 
+- **`Encoding::Base64Url` and `Encoding::Base64NoPad`** (issue #329).
+  `CustomScheme` is the crate's stated escape hatch for senders not yet built
+  in, and its `HashAlg` already carries `Sha1`/`Sha512` purely so a long-tail
+  scheme can be expressed. `Encoding` had no equivalent for the two most
+  common base64 wire shapes outside standard-padded: it declared only `Hex`
+  and `Base64`, and `Base64` decoded with `general_purpose::STANDARD` — one
+  exact engine. A URL-safe (RFC 4648 §5) signature was rejected as
+  `BadEncoding { reason: "signature is not valid base64" }`, and so was an
+  unpadded one, in both cases for *authentic* bytes: the same 32-byte digest
+  verified under one spelling and was refused under the other.
+
+  - `Encoding::Base64Url` — URL-safe alphabet, canonical padding required.
+  - `Encoding::Base64NoPad` — standard alphabet, padding omitted.
+
+  Each variant names one decoder, and each arm of `parse_signature`'s match
+  uses exactly that engine; no variant falls back to another. That is the
+  point: the scheme is the caller's declaration of the sender's wire format,
+  and an over-permissive decoder would verify a delivery under a configuration
+  nobody asked for. The existing digest-length check is unchanged and still
+  runs after decoding, so base64's trailing-bit slack cannot admit a
+  wrong-sized signature. `base64_variants_reject_the_wire_shapes_they_do_not_name`
+  pins the negative direction — a `Base64Url` scheme rejects a standard-alphabet
+  value, a `Base64NoPad` scheme rejects a padded one, and `Base64` keeps
+  rejecting both new spellings exactly as it did before this change.
+
+  `Encoding`'s existing `BadEncoding` reason string is deliberately left as it
+  shipped, since it is pre-1.0 message text a caller may match on; the two new
+  variants name the vocabulary they expect instead.
+
+  Purely additive: `Encoding` is `#[non_exhaustive]`, so no version bump, no
+  `CustomScheme` field added (which would be a source-level break for
+  struct-literal construction — see `timestamp_unit`, issue #276), no
+  provider's behavior changed, and no new dependency. The one cell of the
+  alphabet × padding matrix still unnamed — URL-safe *and* unpadded,
+  `URL_SAFE_NO_PAD` — is called out on `Encoding::Base64NoPad`'s docs as a
+  one-line additive follow-up rather than shipped speculatively here.
+
+  `spec.md` §2.2 gains the normative "Encoding requirement" paragraph stating
+  the exact-decoder contract.
+
 ### Changed
 
 - **a `CustomScheme` header name that is not a valid HTTP field name is
