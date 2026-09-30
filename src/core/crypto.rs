@@ -133,9 +133,20 @@ where
 /// Verifies `provided_signature` against HMAC-SHA1(`key`, `signed_string`)
 /// using a constant-time comparison.
 ///
-/// Same guarantees as [`verify_hmac_sha256`]. Used by Twilio's scheme, which
-/// mandates HMAC-SHA1 (`spec.md` §3); Twilio's own docs note HMAC is not
-/// affected by SHA-1's collision attacks given a secret key.
+/// Same guarantees as [`verify_hmac_sha256`]. Used by the Twilio, Vercel,
+/// Intercom, Expo, and Mandrill schemes — the five built-in providers whose
+/// scheme mandates HMAC-SHA1 (`spec.md` §3) — and by [`crate::CustomScheme`]
+/// (`spec.md` §2.2), whose `HashAlg::Sha1` option covers long-tail senders
+/// that still standardize on SHA-1 HMACs. `spec.md` §3 records why the scheme
+/// is kept rather than rejected: HMAC is keyed with the shared secret, so
+/// SHA-1's collision attacks do not apply. Twilio's docs make that argument
+/// first, and Intercom, Expo, and Mandrill repeat it.
+///
+/// Every provider that reaches for this helper is named above, and
+/// `verify_hmac_sha1_doc_names_every_provider_that_calls_it`
+/// (`src/providers/mod.rs`) fails CI when a provider calls it without being
+/// named. It cannot catch the reverse — a name left behind by a provider that
+/// stopped calling the helper.
 #[must_use]
 pub(crate) fn verify_hmac_sha1(
     key: &[u8],
