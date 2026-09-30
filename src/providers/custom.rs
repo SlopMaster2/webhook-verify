@@ -1826,8 +1826,7 @@ mod tests {
             })
             .count();
         assert_eq!(
-            differing_values,
-            2,
+            differing_values, 2,
             "expected exactly two 6-bit values (`+` and `/`) to differ between the standard \
              and URL-safe alphabets, found {differing_values} differing"
         );
