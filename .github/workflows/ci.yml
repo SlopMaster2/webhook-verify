@@ -59,8 +59,21 @@ jobs:
       - run: cargo doc --no-default-features --no-deps
 
   clippy:
-    name: clippy (-D warnings)
+    name: clippy (-D warnings, ${{ matrix.features }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # `--all-features` is the crate's own gate discipline, but it
+        # subsumes configurations a downstream user can reach on their own,
+        # and two of them were built by no job: an adapter without
+        # `sendgrid`/`paypal` (`--features actix`, `--features tower`). Both
+        # had a warning only that configuration could see — an unused test-only
+        # import in the shared `adapter_utils`/adapter test modules, and a
+        # `match_like_matches_macro` that fires once `cfg!` collapses both
+        # arms of a feature-gated match to `false` (issue #335). A lint gate
+        # that only ever sees one configuration cannot catch those.
+        features: ["--all-features", "--features actix", "--features tower"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -73,7 +86,7 @@ jobs:
       # --all-targets: without it clippy lints only lib+bins and test-only
       # modules escape the gate (the class that shipped useless `&str` `.into()`
       # conversions in ripple.rs's tests).
-      - run: cargo clippy --all-features --all-targets -- -D warnings
+      - run: cargo clippy ${{ matrix.features }} --all-targets -- -D warnings
 
   fmt:
     name: format
