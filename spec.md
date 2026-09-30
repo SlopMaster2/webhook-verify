@@ -1269,11 +1269,11 @@ in Ruby, Node.js, Python, Swift, and PHP).
 
 - Header: `Typeform-Signature: sha256=<base64_hmac>`
 - Signed string: the raw request body bytes, unmodified
-- Algorithm: HMAC-SHA256 keyed with the webhook secret's UTF-8 bytes,
-  **base64**-encoded (standard alphabet, padded), with a literal `sha256=`
-  prefix. The prefix is matched case-sensitively, exactly like GitHub
-  (`spec.md` §3): Typeform's docs and reference code emit only the literal
-  lowercase form.
+- Algorithm: HMAC-SHA256 keyed with the webhook secret's UTF-8 bytes; the
+  **digest** is base64-encoded (standard alphabet, padded), carried behind a
+  literal `sha256=` prefix. The prefix is matched case-sensitively, exactly like
+  GitHub (`spec.md` §3): Typeform's docs and reference code emit only the
+  literal lowercase form.
 - Key: the webhook secret configured via the Typeform Webhooks REST API
   (the "secret" field on the webhook), used as its UTF-8 bytes verbatim.
 - No timestamp in the signature scheme (`max_age` has no effect); Typeform
@@ -2314,10 +2314,10 @@ Challenge-Response Check and sample event payloads).
   deliveries only; §4 "no network calls").
 - Algorithm: HMAC-SHA256 keyed with the **consumer secret** (the "API secret
   key" of the app — never the bearer token or an access token) as its UTF-8
-  bytes, **base64**-encoded (standard alphabet, padded), with a literal
-  `sha256=` prefix. The prefix is matched case-sensitively, exactly like
-  GitHub (`§3`): X's docs and reference code emit only the literal lowercase
-  form.
+  bytes; the **digest** is base64-encoded (standard alphabet, padded), carried
+  behind a literal `sha256=` prefix. The prefix is matched case-sensitively,
+  exactly like GitHub (`§3`): X's docs and reference code emit only the literal
+  lowercase form.
 - No timestamp in the signature scheme (`max_age` has no effect); X
   recommends deduping from event payloads rather than signing time.
 - Test-vector provenance: X's docs describe the scheme, ship reference

@@ -7,8 +7,8 @@
 //! - Signed string: the raw request body bytes, unmodified — Razorpay's own
 //!   docs are explicit that the body must not be parsed or re-cast before
 //!   hashing
-//! - Algorithm: HMAC-SHA256 keyed with the webhook secret's UTF-8 bytes,
-//!   **hex**-encoded, no `sha256=` prefix, no timestamp
+//! - Algorithm: HMAC-SHA256 keyed with the webhook secret's UTF-8 bytes; the
+//!   **digest** is **hex**-encoded, no `sha256=` prefix, no timestamp
 //!
 //! The signing key is the webhook secret configured in the dashboard — not the
 //! API `key_id`/`key_secret` pair, per the docs and the FAQ.

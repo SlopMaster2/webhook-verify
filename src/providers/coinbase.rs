@@ -18,8 +18,8 @@
 //!   The docs warn that parsing the JSON payload before verification breaks
 //!   the signature, because it is computed over the raw bytes.
 //! - Algorithm: HMAC-SHA256 keyed by the webhook subscription secret's UTF-8
-//!   bytes, hex-encoded (the docs' `crypto.createHmac('sha256', secret)`
-//!   digest is lowercase hex).
+//!   bytes; the **digest** is hex-encoded (the docs'
+//!   `crypto.createHmac('sha256', secret)` digest is lowercase hex).
 //! - The secret is the plain string returned in the subscription-response
 //!   `secret` field — used as raw UTF-8 bytes, never base64/hex-decoded.
 //!

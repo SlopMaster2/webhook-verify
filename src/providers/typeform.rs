@@ -7,11 +7,11 @@
 //!
 //! - Header: `Typeform-Signature: sha256=<base64(HMAC-SHA256(secret, raw_body))>`
 //! - Signed string: the raw request body bytes, unmodified
-//! - Algorithm: HMAC-SHA256 keyed with the webhook secret's UTF-8 bytes,
-//!   **base64**-encoded (standard alphabet, padded), with a literal `sha256=`
-//!   prefix — the docs' reference code always prefixes (`sha256=` +
-//!   `Base64.strict_encode64(hash)`), and the docs' validation sample rejects
-//!   any algorithm prefix other than `sha256`
+//! - Algorithm: HMAC-SHA256 keyed with the webhook secret's UTF-8 bytes; the
+//!   **digest** is base64-encoded (standard alphabet, padded), carried behind a
+//!   literal `sha256=` prefix — the docs' reference code always prefixes
+//!   (`sha256=` + `Base64.strict_encode64(hash)`), and the docs' validation
+//!   sample rejects any algorithm prefix other than `sha256`
 //!
 //! The prefix is matched case-sensitively, exactly like GitHub's `sha256=`
 //! (`spec.md` §3): Typeform's docs and reference code emit only the literal

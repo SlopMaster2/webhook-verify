@@ -13,7 +13,8 @@
 //!   unmodified ("Every byte in the request body must remain unaltered for
 //!   successful signature verification", per the docs).
 //! - Algorithm: HMAC-SHA256 keyed by the webhook signing secret's UTF-8
-//!   bytes, hex-encoded (the docs' signature format is lowercase hex).
+//!   bytes; the **digest** is hex-encoded (the docs' signature format is
+//!   lowercase hex).
 //! - The signing secret is the plain string returned by the Stream API
 //!   (`"secret": "85011ed3a913c6ad5f9cf6c5573cc0a7"` in the docs' example
 //!   response) — used as raw UTF-8 bytes, never base64/hex-decoded.

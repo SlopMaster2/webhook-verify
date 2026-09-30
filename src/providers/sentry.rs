@@ -7,8 +7,9 @@
 //! - Header: `Sentry-Hook-Signature: <hex_hmac>`
 //! - Signed string: the raw request body bytes, unmodified
 //! - Algorithm: HMAC-SHA256 keyed with the webhook's *Client Secret* as its
-//!   UTF-8 bytes, **hex**-encoded (the docs' `crypto.createHmac("sha256",
-//!   secret) ... digest("hex")`), no `sha256=` prefix, no timestamp
+//!   UTF-8 bytes; the **digest** is **hex**-encoded (the docs'
+//!   `crypto.createHmac("sha256", secret) ... digest("hex")`), no `sha256=`
+//!   prefix, no timestamp
 //!
 //! The signing key is the "Client Secret" shown on the Sentry
 //! `sentry.io/settings/<org>/apps/<app>/` page for the integration, not an

@@ -6987,6 +6987,148 @@ pub struct S {
         }
     }
 
+    /// The words a scheme's encoding is spelled with, as the prose writes them.
+    ///
+    /// Only the two this crate ever emits for a signature: `base64` and `hex`.
+    /// An encoding spelled some other way would not be scanned for, which is why
+    /// the guard's vacuity floor requires `spec.md` to keep naming both of
+    /// these — a scheme documenting a third encoding has to be added here rather
+    /// than silently skipped.
+    const ENCODING_WORDS: [&str; 2] = ["base64", "hex"];
+
+    /// The offending phrase if `text` attaches an encoding to a *key*'s bytes
+    /// rather than to the digest.
+    ///
+    /// The shape is `…bytes, <encoding>` — a comma directly after the word
+    /// "bytes", then the encoding. That reads as "the key's bytes, base64", so
+    /// the base64 lands on the key; the constructions this crate verifies all
+    /// encode the *digest* and use the key verbatim. The offending clause is
+    /// returned so the failing assertion can quote the sentence a reader would
+    /// have misread.
+    ///
+    /// Rust doc comments and Markdown both wrap prose across lines, and
+    /// `spec.md` marks emphasis with `**` while every module doc carries a
+    /// `//!` prefix per line. Both are stripped first, because a scan matching
+    /// the raw source sees `bytes,\n//!   **hex**-encoded` and finds neither
+    /// `*` nor `hex` where it expects them — it would pass on the exact shape
+    /// this guard exists to reject. Every site this catches spelled the
+    /// encoding on the line *after* the "bytes,", so the wrapping is the
+    /// normal case, not an edge one.
+    fn encoding_attached_to_key_bytes(source: &str) -> Option<String> {
+        // One sentence's worth of context, quoted on failure. Bullets carry
+        // several claims each, so quoting to the end of the file would bury the
+        // offending clause under the rest of the module's documentation.
+        let flat = source
+            .lines()
+            .map(|line| {
+                line.trim_start()
+                    .trim_start_matches("//!")
+                    .trim_start_matches("///")
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let lower = flat.to_lowercase();
+
+        let mut from = 0;
+        while let Some(at) = lower[from..].find("bytes,") {
+            let after = from + at + "bytes,".len();
+            // Only emphasis and wrapping may separate the two words; anything
+            // else means this "bytes," is not the key's, so keep looking. The
+            // gap is quoted from `flat`, not `lower`, so the failure message
+            // shows the sentence as it is written.
+            let gap = flat[after..].trim_start_matches([' ', '*']);
+            if ENCODING_WORDS
+                .iter()
+                .any(|word| gap.to_lowercase().starts_with(word))
+            {
+                let clause = gap.split(". ").next().unwrap_or(gap).trim_end_matches('.');
+                return Some(format!("bytes, {clause}"));
+            }
+            from = after;
+        }
+        None
+    }
+
+    /// No provider's scheme prose may attach the signature's encoding to the
+    /// HMAC key instead of to the digest.
+    ///
+    /// Nine prose sites described the construction as "HMAC-SHA256 keyed with
+    /// *key* as its UTF-8 bytes, **base64**-encoded" — two in `spec.md` §3 (X
+    /// and Typeform) and seven module docs. Read literally, and a reader
+    /// implementing from the spec reads it literally, the encoding attaches to
+    /// the *key*: the recipe becomes `base64(consumer_secret)` as the HMAC key.
+    /// Every one of these providers keys the HMAC with the secret's raw bytes
+    /// and encodes the *digest*, so that recipe rejects every legitimate
+    /// delivery.
+    ///
+    /// It fails *quietly*, which is the sharp end. No provider errors, no
+    /// header is malformed, no test vector turns red — the integration just
+    /// looks installed and accepts nothing (issue #336).
+    ///
+    /// Both encodings are checked, because the same sentence shape appears for
+    /// hex-schemes: Cloudflare, Coinbase, Razorpay, and Sentry all spelled their
+    /// key as `…UTF-8 bytes, hex-encoded`, which reads as the key being
+    /// hex-encoded. `spec.md`'s own Cloudflare and Coinbase rows were never
+    /// affected — they already split `- Algorithm:` from `- Key:` — so outside
+    /// Typeform and X this was the module-doc template's shape, not the spec's.
+    ///
+    /// Both prose surfaces a scheme is described in are scanned: each §3 entry
+    /// (via [`spec_section_three_entries`]) and each provider module doc. They
+    /// drift independently — the X entry and `x_twitter.rs`'s module doc carried
+    /// the identical sentence, so fixing only the spec would have left the
+    /// rustdoc copy wrong.
+    ///
+    /// Textual, so it cannot know what a sentence *means*: it rejects one shape
+    /// because the shape is what carries the misreading. A rewording that
+    /// moves the encoding onto the digest passes; one that re-attaches it to the
+    /// key in different words ("the secret's bytes, base64") is caught, but a
+    /// genuinely different phrasing would need this read by eye.
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[test]
+    fn no_scheme_prose_attaches_the_encoding_to_the_key() {
+        let mut sites: Vec<(String, String)> =
+            spec_section_three_entries(include_str!("../../spec.md"))
+                .into_iter()
+                .map(|entry| (format!("spec.md §3 `{}`", entry.heading), entry.body))
+                .collect();
+        for stem in provider_module_stems() {
+            sites.push((
+                format!("`src/providers/{stem}.rs` module docs"),
+                module_implementation(&stem),
+            ));
+        }
+
+        for (label, source) in &sites {
+            if let Some(offending) = encoding_attached_to_key_bytes(source) {
+                panic!(
+                    "the {label} prose attaches the signature's encoding to the HMAC key \
+                     instead of the digest — \"{offending}\" reads as \"the key's bytes, \
+                     base64\", i.e. keying the HMAC with the base64/hex of the secret. This \
+                     crate uses the key verbatim and encodes the *digest*: say \"as its UTF-8 \
+                     bytes; the digest is base64-encoded\" instead. The provider tables in \
+                     README.md and the crate docs state the same schemes and must agree \
+                     (spec.md §3)"
+                );
+            }
+        }
+
+        // The vacuity floor: if the scheme prose stopped naming an encoding
+        // altogether, or spelled it some other way, the scan above would find
+        // nothing and pass while checking nothing. Both encodings must still be
+        // described, so an emptied check is a loud failure rather than a silent
+        // one.
+        let spec = include_str!("../../spec.md").to_lowercase();
+        for word in ENCODING_WORDS {
+            assert!(
+                spec.contains(word),
+                "spec.md no longer contains `{word}`, so \
+                 `no_scheme_prose_attaches_the_encoding_to_the_key` cannot be finding anything \
+                 — if the encodings really changed, update `ENCODING_WORDS` and this guard \
+                 together rather than deleting the check"
+            );
+        }
+    }
+
     /// Whether a provider module's implementation region reads
     /// `VerifyOptions::field`, found by scanning for a field access `<some
     /// receiver>.<field>`.

@@ -9,9 +9,10 @@
 //!   sha256=<base64(HMAC-SHA256(consumer_secret, raw_body))>`
 //! - Signed string: the raw request body bytes, unmodified
 //! - Algorithm: HMAC-SHA256 keyed with the app's **consumer secret** (the API
-//!   secret key) as its UTF-8 bytes, **base64**-encoded (standard alphabet,
-//!   padded), with a literal `sha256=` prefix — the docs' reference code
-//!   always prefixes (`sha256=` + `base64.b64encode(hmac(...).digest())`)
+//!   secret key) as its UTF-8 bytes; the **digest** is base64-encoded (standard
+//!   alphabet, padded), carried behind a literal `sha256=` prefix — the docs'
+//!   reference code always prefixes (`sha256=` +
+//!   `base64.b64encode(hmac(...).digest())`)
 //!
 //! The prefix is matched case-sensitively, exactly like GitHub's `sha256=`
 //! (`spec.md` §3): X's docs and reference implementations emit only the
