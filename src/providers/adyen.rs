@@ -5,7 +5,7 @@
 //! "Verify HMAC keys returned in the header") and the worked example in
 //! <https://docs.adyen.com/classic-platforms/configure-notifications/signing-notifications-with-hmac>:
 //!
-//! - Header: `hmacsignature: <base64(HMAC-SHA256(key, raw_body))>`
+//! - Header: `HmacSignature: <base64(HMAC-SHA256(key, raw_body))>`
 //! - Signed string: the raw request body bytes, unmodified. Adyen's docs are
 //!   explicit: "Make sure that the request body is as it is—do not
 //!   deserialize it".

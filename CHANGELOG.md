@@ -385,6 +385,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`src/providers/adyen.rs` spelled its own `- Header:` bullet `hmacsignature`.**
+  The module doc opened with `` - Header: `hmacsignature: <base64(...)>` ``
+  while `SIGNATURE_HEADER` — the name the code looks up — declared
+  `HmacSignature`, and so did the README's provider table, the crate docs,
+  `Provider::Adyen`'s variant doc, and `spec.md` §3. That module doc was the
+  one spelling surface in the repo a reader could not reconcile with any
+  other.
+
+  Lookup is ASCII-case-insensitive, so no delivery changes behavior: a header
+  spelled either way verifies identically. It is a documentation fix, not a
+  verification fix, and it is worth shipping because that bullet is the
+  copy-paste line — it opens the module's `//!` block and mirrors the `spec.md`
+  §3 bullet beside it, so it is where someone takes a `HeaderName` from. The
+  module doc's *prose* further down deliberately quotes both spellings to
+  explain that Adyen's current docs use the lowercase form while the
+  classic-platforms form is mixed-case; that is accurate and is unchanged.
+
+  The drift is possible because the header-spelling guards cover five surfaces
+  — the provider constants, `README.md`, the crate docs, `spec.md` §3, and the
+  `Provider` variant docs — and never `src/providers/<name>.rs`'s own module
+  doc, the sixth and closest to the code. (Shopify's variant doc drifted the
+  same way in issue #302, which is why the variant docs are now covered at
+  all; the module docs were left as the remaining hole.)
+
+  `provider_module_docs_spell_their_header_bullet_the_way_the_code_does` in
+  `src/providers/mod.rs` closes it: it reads every provider module's `- Header:`
+  bullet plus its continuation lines — `square`, `tailscale`, and `x_twitter`
+  all wrap the bullet, breaking inside the backticked `name: <format>` span —
+  and requires the bullet to spell at least one of that module's declared
+  `*_HEADER` constants exactly. The bar is `exact >= 1` rather than "no
+  wrongly-cased spelling anywhere" because `nylas` and `docusign` legitimately
+  quote an alternate casing *inside* their bullets to document that
+  case-insensitive lookup resolves it; failing on any alternate mention would
+  break the modules that are right. All 58 pass today, and
+  `module_doc_header_bullet_scan_is_exercised_over_synthetic_docs` exercises
+  the three extractions over synthetic input so the real run is not the only
+  evidence the scan works.
+
+  No provider behavior changes, no new dependency, no `spec.md` or `README.md`
+  change — every other surface already read `HmacSignature`.
+
 - **The PayPal row of the README's provider table rendered broken.** The row
   quoted its signed string as `` `transmission_id|time|webhook_id|crc32(body)` ``
   with three unescaped pipes, and GFM splits a table row into cells on *every*
