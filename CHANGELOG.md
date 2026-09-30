@@ -425,6 +425,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Nine prose sites attached a provider's signature encoding to the HMAC key
+  instead of to the digest** (#336). The `spec.md` §3 entry for X (formerly
+  Twitter) described its construction as "HMAC-SHA256 keyed with the **consumer
+  secret** … as its UTF-8 bytes, **base64**-encoded". Read literally — and
+  implementing from the spec is exactly what the spec asks a reader to do
+  (`AGENTS.md` §2.2) — that attaches the base64 to the *key*: the recipe becomes
+  `base64(consumer_secret)` as the HMAC key. `x_twitter.rs` keys the HMAC with
+  `secret.as_bytes()` and base64-encodes the resulting digest, so the literal
+  reading rejects every legitimate delivery. It fails quietly, which is the
+  sharp end: no provider errors, no header is malformed, the integration simply
+  looks installed and accepts nothing.
+
+  The same sentence shape appeared in eight other places, and was not X-specific
+  — it turns out to be the module-doc template these entries were written from:
+
+  | Surface | Provider | Encoding |
+  |---|---|---|
+  | `spec.md` §3 + module doc | X (formerly Twitter) | base64 |
+  | `spec.md` §3 + module doc | Typeform | base64 |
+  | module doc | Xero | base64 |
+  | module doc | Cloudflare | hex |
+  | module doc | Coinbase | hex |
+  | module doc | Razorpay | hex |
+  | module doc | Sentry | hex |
+
+  `spec.md`'s own rows for Cloudflare and Coinbase already split `- Algorithm:`
+  from `- Key:` and so were never affected; the comma placement only ever went
+  wrong in the module-doc template that says both in one bullet. Each of the
+  nine now says the digest is what is encoded — "as its UTF-8 bytes; the
+  **digest** is base64-encoded" — which is what all nine implementations have
+  always done. No provider's behavior changed; this is a documentation fix
+  throughout, and the code was already correct in every case.
+
+  `no_scheme_prose_attaches_the_encoding_to_the_key` closes the class rather
+  than the nine sentences: it scans every §3 entry and every provider module
+  doc for a comma placed directly after a key's "bytes" with an encoding word
+  following it, and fails naming the clause to reword. Both prose surfaces are
+  scanned because they drift independently — the X entry and `x_twitter.rs`'s
+  module doc carried the identical sentence, so fixing only the spec would have
+  left the rustdoc copy wrong. `ENCODING_WORDS` is an explicit list, so a scheme
+  documenting a third encoding has to be added rather than silently skipped, and
+  a vacuity floor requires `spec.md` to still name both encodings so a scan that
+  stopped matching cannot pass by finding nothing.
+
 - **An oversized body returned `400 Bad Request`, not the documented `413
   Payload Too Large` — and every `with_max_body_size` above 256 KiB was
   dead configuration.** The actix adapter buffers with `web::Bytes`, which is

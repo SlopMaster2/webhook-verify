@@ -8,8 +8,9 @@
 //!
 //! - Header: `x-xero-signature: <base64_hmac>`
 //! - Signed string: the raw request body bytes, unmodified
-//! - Algorithm: HMAC-SHA256 keyed with the webhook signing key's UTF-8 bytes,
-//!   **base64**-encoded (standard alphabet with padding) — not hex
+//! - Algorithm: HMAC-SHA256 keyed with the webhook signing key's UTF-8 bytes;
+//!   the **digest** is base64-encoded (standard alphabet with padding) — not
+//!   hex
 //!
 //! # Replay protection
 //!
