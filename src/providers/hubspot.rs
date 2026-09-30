@@ -35,10 +35,13 @@
 //!
 //! # Replay protection
 //!
-//! HubSpot delivers the signing timestamp in **epoch milliseconds** — the one
-//! timestamped provider here that does not use whole seconds. The signed
-//! string always uses the raw header value verbatim; the recency check
-//! converts to whole seconds (`millis / 1000`, dropping the sub-second
+//! HubSpot delivers the signing timestamp in **epoch milliseconds**, as do
+//! Contentful, WorkOS, Ripple, Airwallex and Webflow — the six providers whose
+//! timestamps this crate floors to whole seconds. Every other timestamped
+//! provider uses whole seconds already (`spec.md` §3).
+//!
+//! The signed string always uses the raw header value verbatim; the recency
+//! check converts to whole seconds (`millis / 1000`, dropping the sub-second
 //! remainder, as the official Java reference's integer division does) and
 //! applies the shared symmetric default window ([`VerifyOptions::max_age`],
 //! injectable clock). HubSpot's own reference snippets use a one-sided

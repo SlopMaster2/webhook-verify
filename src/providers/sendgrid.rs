@@ -50,9 +50,9 @@
 //!
 //! # Security model
 //!
-//! Like Discord, this scheme uses a *public* key: verification proves the
-//! payload was signed by SendGrid's private key, not that the sender shares a
-//! secret with you. The [`crate::Secret`] argument is accepted for API
+//! Like Discord and PayPal, this scheme uses a *public* key: verification
+//! proves the payload was signed by SendGrid's private key, not that the sender
+//! shares a secret with you. The [`crate::Secret`] argument is accepted for API
 //! uniformity and ignored. The key material is supplied by the caller — this
 //! crate never fetches it over the network (`spec.md` §1).
 //!

@@ -385,6 +385,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two provider module docs claimed a security property their own code
+  contradicts.** `src/providers/discord.rs` headed its security section
+  "# Security model difference from every other provider here" while
+  `uses_secret` excludes **two** providers, not one, and `src/providers/hubspot.rs`
+  called HubSpot "the one timestamped provider here that does not use whole
+  seconds" when six providers read epoch-millisecond timestamps.
+
+  Both are the shape `spec.md` §3's cross-checking guards exist to catch, and
+  neither is covered by one — the claims are *negative* ("no one else does
+  this"), so a guard that pins a positive name list derived from the code
+  cannot see them drift. `spec.md` already lists the six millisecond
+  providers, `core::replay::parse_millis`'s docs name the same six, and
+  `providers::tests::uses_secret_excludes_exactly_the_asymmetric_providers`
+  pins the code side of the `Secret` claim; nothing pinned the prose side.
+
+  It matters because these are the sentences a caller reads to decide whether
+  `Secret` is load-bearing for a scheme and whether a millisecond timestamp is
+  normal for this crate. "Differs from every other provider" is the wrong
+  takeaway for a three-provider set, and "the one" reads as though
+  `TimestampUnit::Millis` only matters when writing a HubSpot prototype.
+
+  Three prose fixes: `discord.rs` retitles the section `# Security model` and
+  names SendGrid and PayPal as the crate's other two public-key schemes (noting
+  that both take key material from `VerifyOptions::verifying_material` rather
+  than `Secret`); `sendgrid.rs`'s "Like Discord" becomes "Like Discord and
+  PayPal", so all three modules name the same set; `hubspot.rs` drops the
+  exclusivity claim and names its five millisecond siblings instead.
+
+  `providers::tests::public_key_module_docs_name_their_peers` in
+  `src/providers/mod.rs` closes the prose gap: it derives the
+  `!uses_secret(provider)` set from the code — not from a hand-written list —
+  and requires each member's module doc to name every *other* member, with a
+  vacuity floor so a broken derivation cannot pass silently. Discord is
+  deliberately outside that set (it holds its public key in `Secret`) and so is
+  not forced to enumerate peers; likewise HubSpot's module doc gets the prose
+  fix only, since a reader integrating HubSpot has no use for the other five.
+
+  No provider behavior changes, no new dependency, no `spec.md` or `README.md`
+  change — those surfaces made no such exclusivity claim.
+
 - **`src/providers/adyen.rs` spelled its own `- Header:` bullet `hmacsignature`.**
   The module doc opened with `` - Header: `hmacsignature: <base64(...)>` ``
   while `SIGNATURE_HEADER` — the name the code looks up — declared
