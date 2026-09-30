@@ -425,6 +425,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Encoding::Base64Url`'s docs overstated how often the standard and
+  URL-safe base64 spellings of one digest coincide.** The variant's doc
+  comment said each 6-bit group is `+`/`/` with probability 2/64, "so roughly
+  seven digests in ten are spelled the same way under both". The per-group
+  figure is right; the conclusion is not, because it compounds over *every*
+  group in the digest rather than applying to one. The real rate is
+  `(62/64)^groups`: **44%** for SHA-1's 20-byte digest, **26%** for SHA-256's
+  32, and **7%** for SHA-512's 64 — against a claimed 70%, and in the opposite
+  direction for every hash this crate supports. Confirmed by exhaustive count
+  over 20 000 HMACs per hash (0.4354 / 0.2661 / 0.0669).
+
+  This is not cosmetic: the number is what tells a caller whether
+  configuring the wrong `Encoding` variant gets caught by the first authentic
+  delivery or slips through. Reading "seven in ten", a caller would expect a
+  wrong `Base64`/`Base64Url` choice to be caught most of the time. It is the
+  reverse — the two spellings differ on most SHA-256 and SHA-512 digests, so
+  the mistake nearly always surfaces immediately, and it is a **SHA-1**-sized
+  digest that collides often enough to verify authentic bytes under a
+  configuration the caller did not ask for. That is the exact scenario
+  §2.2's exact-decoder contract exists to prevent, so the docs understating it
+  mattered. The prose now states the formula, the group counts, and the three
+  figures.
+
+  `custom::tests::base64url_docs_state_the_derived_alphabet_collision_rate`
+  pins the prose to the arithmetic: the percentages are derived from
+  `HashAlg::digest_len()` rather than a hand-written list, the formula's
+  per-group factor is counted against the `base64` engines themselves (exactly
+  two of 64 6-bit values differ) rather than assumed, and each derived figure
+  must appear in the variant's own doc comment. A reworded number now fails CI
+  instead of surviving until someone relies on it.
+
 - **Two provider module docs claimed a security property their own code
   contradicts.** `src/providers/discord.rs` headed its security section
   "# Security model difference from every other provider here" while
