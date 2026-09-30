@@ -252,7 +252,9 @@ pub(crate) fn parse_rfc3339_timestamp(
 /// - hour/minutes/seconds must be in 00–59 (IMF-fixdate's grammar is
 ///   `second = 2DIGIT`, so unlike RFC 3339 it has no leap-second value 60),
 /// - the four-digit year must map to a non-negative unix timestamp (dates
-///   before 1970-01-01 are rejected).
+///   before 1970-01-01 are rejected). The grammar's `dddd` admits `0000` to
+///   `9999`, so the upper end is 9999-12-31T23:59:59Z and every year in
+///   between converts without truncation.
 ///
 /// The conversion reuses the same `days_from_civil` algorithm as
 /// [`parse_rfc3339_timestamp`].
@@ -614,10 +616,27 @@ mod tests {
                 parse_header("Mon, 29 Feb 2016 00:00:00 GMT"),
                 Ok(1_456_704_000)
             );
-            // The last instant representable in the four-digit-year form.
+            // A far-future date well inside the four-digit-year range; a
+            // header the provider never emits still has to convert, because
+            // the value is HMAC-covered and only `check_replay` decides
+            // whether it is in tolerance.
             assert_eq!(
                 parse_header("Thu, 31 Dec 2026 23:59:59 GMT"),
                 Ok(1_798_761_599)
+            );
+            // The last instant the four-digit-year form can actually spell:
+            // year 9999 is the widest `dddd` the 29-character grammar admits,
+            // and the weekday check still holds on it.
+            assert_eq!(
+                parse_header("Fri, 31 Dec 9999 23:59:59 GMT"),
+                Ok(253_402_300_799)
+            );
+            // ...and that ceiling is the grammar's, not an integer width's:
+            // the first instant past it needs a fifth year digit, so it is
+            // rejected as malformed rather than wrapped by the conversion.
+            assert_eq!(
+                parse_header("Sat, 01 Jan 10000 00:00:00 GMT"),
+                malformed("Sat, 01 Jan 10000 00:00:00 GMT")
             );
             // Every weekday maps correctly; 2024-01-01 was a Monday.
             assert_eq!(

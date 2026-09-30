@@ -385,6 +385,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `parse_imf_fixdate` boundary test claimed a boundary it did not
+  reach** (issue #317). `handles_boundary_dates_and_weekdays` asserted
+  `Thu, 31 Dec 2026 23:59:59 GMT` under the comment *"The last instant
+  representable in the four-digit-year form."* 2026 is not the last instant: the
+  29-character IMF-fixdate grammar admits any `dddd` from `0000` to `9999`, and
+  `parse_imf_fixdate` accepts the top of that range —
+  `Fri, 31 Dec 9999 23:59:59 GMT` parses to `253_402_300_799`, comfortably
+  inside a `u64`. So the test exercising the end of the range asserted an
+  arbitrary mid-range date instead, and a reader auditing the conversion for
+  truncation or wrap-around found no coverage where the comment promised one.
+
+  The 2026 case is kept — a far-future timestamp must still *convert*, because
+  the value is HMAC-covered and only `check_replay` decides whether it is in
+  tolerance — and is now labeled for what it is. The boundary it claimed to
+  cover is asserted for real alongside it, plus the first instant past the
+  range (`Sat, 01 Jan 10000 ...`, which needs a fifth year digit and so is
+  rejected as malformed rather than wrapped), which pins that the conversion's
+  upper end is a grammar limit and not an integer-width one. The function's
+  doc comment now states the same `0000..=9999` span it claims to enforce.
+  No behavior change: every assertion added passes against the code as written.
+
 - **`src/providers/custom.rs` stated that a `CustomScheme` timestamp is parsed
   *after* the signature, which is the opposite of what the code does** (issue
   #315). The comment above the timestamp-header lookup read *"Its value is
