@@ -385,6 +385,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The PayPal row of the README's provider table rendered broken.** The row
+  quoted its signed string as `` `transmission_id|time|webhook_id|crc32(body)` ``
+  with three unescaped pipes, and GFM splits a table row into cells on *every*
+  `|` — including one inside a code span. The row therefore split into six
+  cells instead of three: the scheme text rendered truncated after the first
+  element, the rest spilled into phantom columns, and the `Status` column's
+  `✅` was dropped. It was the only row in the tree with a cell count other
+  than its table's (60 rows at 3, this one at 6).
+
+  The cell is also corrected to the construction the provider actually signs,
+  `{transmission_id}|{transmission_time}|{webhook_id}|{crc32}` — `time` named a
+  field that is not one (`transmission_time` is signed, as
+  `PayPal-Transmission-Time`), and the trailing element is the decimal CRC-32
+  of the body. The three interior pipes are written `\|`, which GFM renders as
+  a bare `|` even inside a code span, and this is the first such escape
+  anywhere in the tree; the crate-docs table in `src/lib.rs` had only avoided
+  the bug by not quoting the construction at all.
+
+  Documentation only — no code path, signature, or test vector changes. The
+  three existing table guards could not have caught it: they match on the
+  row's *first* cell, which the truncation leaves intact, and nothing in the
+  tree looks at cell counts because `README.md` is prose as far as `cargo` is
+  concerned. `providers::tests::provider_table_rows_are_not_split_by_unescaped_pipes`
+  closes the class — every row of both "Supported providers" tables
+  (`README.md` and the crate docs) must render to the same number of
+  unescaped-pipe-delimited cells as its own header row, so it holds for both
+  table shapes present today (the README has a `Status` column, the crate docs
+  do not). Counting unescaped pipes is what makes the check see the bug, and a
+  literal `|` in a provider row is the natural way to break one of these
+  tables: PayPal's construction is three of them.
+
 - **The `spec.md` §4.7 decoded-key rule named three secret-decoding providers
   where four decode** (issue #320). Five surfaces stated the rule — the crate
   docs, `verify`'s doc comment, `unusable_secret_reason`'s,

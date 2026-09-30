@@ -3946,6 +3946,64 @@ mod tests {
         }
     }
 
+    /// Every row of both "Supported providers" tables must render to the same
+    /// number of cells as its own header row.
+    ///
+    /// The other two table guards here check what a row *says* (that it names
+    /// the signature header, that its replay claim matches the code). Neither
+    /// can see a row that is structurally broken, and the most natural way to
+    /// break one of these tables is to quote a construction containing a `|` —
+    /// PayPal's signed string is
+    /// `{transmission_id}|{transmission_time}|{webhook_id}|{crc32}`, three of
+    /// them. Unescaped, GFM splits the row on each: the scheme cell renders
+    /// truncated after the first element, the remainder spills into phantom
+    /// columns, and the `Status` cell is lost. Nothing in the tree failed,
+    /// because `README.md` is prose as far as `cargo` is concerned and the
+    /// three existing guards all match on the *first* cell, which the
+    /// truncation leaves intact. Hence a check on the cell count, driven off
+    /// each table's own header so it holds for both shapes present today
+    /// (`README.md` has a `Status` column, the crate docs do not).
+    #[test]
+    fn provider_table_rows_are_not_split_by_unescaped_pipes() {
+        for (label, markdown) in [
+            ("README.md", include_str!("../../README.md")),
+            ("crate docs", include_str!("../lib.rs")),
+        ] {
+            let rows = provider_table_row_cell_counts(markdown);
+            // A vacuity floor: the header plus a body row, and at least the
+            // two columns the tables have always had. A guard that found
+            // nothing would assert everything trivially, so a change to the
+            // section heading has to fail loudly rather than pass vacuously.
+            assert!(
+                rows.len() > 1,
+                "`{label}` must still contain a '## Supported providers' table; \
+                 found {} row(s) — if the heading moved, update the lookup in \
+                 `provider_table_rows`/`provider_table_row_cell_counts` rather \
+                 than deleting this guard",
+                rows.len()
+            );
+
+            let (header, expected) = &rows[0];
+            assert!(
+                *expected >= 2,
+                "`{label}`'s provider table header `{header}` renders to {expected} \
+                 cell(s), so the table has no body column to lose"
+            );
+
+            for (row, cells) in &rows[1..] {
+                assert_eq!(
+                    cells,
+                    expected,
+                    "`{label}`'s provider table row renders to {cells} cells but its \
+                     header declares {expected}. A literal `|` in a cell's content \
+                     splits the row (GFM splits on every unescaped pipe, inside a \
+                     code span too) and silently truncates the row's text — write \
+                     it `\\|`, which renders as a bare `|`: {row}"
+                );
+            }
+        }
+    }
+
     /// The doc block on every `Provider` enum variant, as `(variant
     /// identifier, doc text)`, in declaration order.
     ///
@@ -4832,6 +4890,68 @@ mod tests {
             } else {
                 break;
             }
+        }
+        rows
+    }
+
+    /// How many cells a GFM table row renders to: its *unescaped* `|`
+    /// delimiters, less one.
+    ///
+    /// `n` delimiters open `n - 1` cells — the leading pipe opens the first,
+    /// each interior one closes one cell and opens the next, and the trailing
+    /// one closes the last. For `| A | B | C |` that is 4 pipes and 3 cells.
+    ///
+    /// The escaping is the whole point. GFM splits a row into cells on every
+    /// `|`, **including one inside a code span** — a literal pipe in a cell's
+    /// content has to be written `\|`, which renders as a bare `|` even inside
+    /// a code span. A row that quotes a `|`-joined construction without
+    /// escaping (PayPal's signed string is three of them) therefore does not
+    /// render as a slightly-odd row: it splits, spilling the rest of the text
+    /// into phantom columns and dropping the trailing ones, and nothing
+    /// anywhere complains. Counting the `|` bytes the way a renderer would is
+    /// what makes that visible, so `\|` is skipped and `\` is consumed as the
+    /// escape it is (so `\\|` still counts — an escaped backslash leaves the
+    /// pipe live).
+    fn gfm_row_cell_count(row: &str) -> usize {
+        let mut delimiters = 0_usize;
+        let mut escaped = false;
+        for byte in row.as_bytes() {
+            match byte {
+                b'\\' => escaped = !escaped,
+                b'|' if !escaped => delimiters += 1,
+                _ => escaped = false,
+            }
+        }
+        delimiters.saturating_sub(1)
+    }
+
+    /// Every row of the "Supported providers" table in `markdown` — header,
+    /// separator, and body — as `(row, rendered cell count)`.
+    ///
+    /// Unlike [`provider_table_rows`] nothing is excluded, because the header
+    /// is what the body rows are compared *against*: a table's shape is
+    /// declared by its header, and the check is "every row renders to the same
+    /// number of cells as that header". Walks the section and normalizes
+    /// crate-doc lines the same way (strip the `//!` marker, then trim). Test
+    /// helper over compile-time `include_str!` data.
+    fn provider_table_row_cell_counts(markdown: &str) -> Vec<(String, usize)> {
+        let mut rows = Vec::new();
+        let mut in_section = false;
+        for line in markdown.lines() {
+            let line = line.strip_prefix("//!").unwrap_or(line).trim();
+            if !in_section {
+                in_section = line.contains("## Supported providers");
+                continue;
+            }
+            if !line.starts_with('|') {
+                // The table is one contiguous run of `|`-prefixed lines; the
+                // first line that is not one has ended it.
+                if !rows.is_empty() {
+                    break;
+                }
+                continue;
+            }
+            rows.push((String::from(line), gfm_row_cell_count(line)));
         }
         rows
     }
