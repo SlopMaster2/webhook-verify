@@ -4189,7 +4189,11 @@ mod tests {
         // `HeaderName` out of, and it is the only one of the six surfaces that
         // disagreed — the existing guards cross-check `README.md`, the crate
         // docs and `spec.md` against the provider constants and never the
-        // variant docs, which is how this one drifted past them.
+        // variant docs, which is how this one drifted past them. (A seventh
+        // surface, each module's own `- Header:` bullet, was likewise uncovered
+        // until Adyen's drifted the same way; that one is now checked by
+        // `provider_module_docs_spell_their_header_bullet_the_way_the_code_does`
+        // below.)
         //
         // Only the provider's *own* declared headers are checked, and only for
         // casing. A doc legitimately names another provider's header to say a
@@ -4360,6 +4364,369 @@ mod tests {
                 "synthetic comment: {text:?}"
             );
         }
+    }
+
+    /// A provider module's leading `//!` module-doc block, with the `//!`
+    /// marker and one following space stripped from each line and blank lines
+    /// preserved.
+    ///
+    /// Reading stops at the first line that is neither a `//!` doc line nor
+    /// blank, which is what keeps a `//!` comment inside the *body* from being
+    /// mistaken for module-doc prose. Every provider module opens with `//!`,
+    /// so a module that stopped doing so surfaces in the caller as a missing
+    /// `- Header:` bullet rather than as a silently empty scan.
+    ///
+    /// Split from [`module_doc`] so this stripping — the one extraction that
+    /// needs real module source rather than already-stripped text — is
+    /// exercised over synthetic input too.
+    fn stripped_module_doc(source: &str) -> String {
+        let mut lines = Vec::new();
+        for line in source.lines() {
+            if let Some(rest) = line.trim_start().strip_prefix("//!") {
+                lines.push(rest.strip_prefix(' ').unwrap_or(rest));
+            } else if line.trim().is_empty() {
+                lines.push("");
+            } else {
+                break;
+            }
+        }
+        lines.join("\n")
+    }
+
+    /// [`stripped_module_doc`] applied to `src/providers/{stem}.rs` as it
+    /// stands on disk.
+    fn module_doc(stem: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/providers")
+            .join(format!("{stem}.rs"));
+        let source = std::fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!(
+                "reading {} to determine its module doc failed: {err} — every provider in \
+                 `provider_list()` must have a module",
+                path.display()
+            )
+        });
+        stripped_module_doc(&source)
+    }
+
+    /// A provider module doc's `- Header:` / `- Headers:` bullet, together with
+    /// its continuation lines, joined into one line. `None` when the module doc
+    /// has no such bullet.
+    ///
+    /// Continuation lines are what makes joining necessary rather than
+    /// incidental: several providers wrap the bullet over three or more lines,
+    /// and `square`, `tailscale`, and `x_twitter` all break *inside* the
+    /// `name: <format>` span itself, so a single-line read would truncate the
+    /// very header name the guard is checking. A continuation is any following
+    /// line indented by at least two spaces, which is how these modules set
+    /// them; the bullet ends at the first line that is not one.
+    fn module_doc_header_bullet(doc: &str) -> Option<String> {
+        let mut lines = Vec::new();
+        for line in doc.lines() {
+            let trimmed = line.trim_start();
+            let starts_bullet =
+                trimmed.starts_with("- Header:") || trimmed.starts_with("- Headers:");
+            let continues_bullet =
+                !lines.is_empty() && line.starts_with("  ") && !line.trim().is_empty();
+            if starts_bullet || continues_bullet {
+                lines.push(trimmed);
+            } else if !lines.is_empty() {
+                break;
+            }
+        }
+        (!lines.is_empty()).then(|| lines.join(" "))
+    }
+
+    /// Occurrences of a name in `declared` that appear in `text` with different
+    /// casing than declared, phrased for the failure message, plus how many
+    /// spell it exactly as declared.
+    ///
+    /// Matches on a token boundary — a run of ASCII alphanumerics, `-`, and `_`
+    /// — rather than on the backticked spans
+    /// [`header_spelling_offenders`] keys on. A module doc's `- Header:` bullet
+    /// wraps freely and routinely carries the header name inside a
+    /// `<base64(HMAC-SHA256(key, raw_body))>` format description rather than in
+    /// a code span of its own, so span extraction would silently miss some
+    /// providers and catch others. Searching the ASCII-lowercased text and then
+    /// re-checking the matched slice of the original case-sensitively keeps the
+    /// comparison honest without depending on where the backticks fell.
+    ///
+    /// An empty name in `declared` is skipped. `str::find("")` always succeeds
+    /// at the cursor, so an empty needle would leave `from` where it is and spin
+    /// forever — a test-suite hang rather than a test failure, the worst outcome
+    /// for a guard. The caller rejects such a constant outright, so skipping here
+    /// costs no coverage; it only keeps this helper total over whatever
+    /// `declared` it is handed.
+    fn header_casing_in_text(text: &str, declared: &[&str]) -> (usize, Vec<String>) {
+        fn is_token_char(byte: u8) -> bool {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
+        }
+
+        let lowered = text.to_ascii_lowercase();
+        let mut exact = 0;
+        let mut offenders = Vec::new();
+        for header in declared {
+            let needle = header.to_ascii_lowercase();
+            if needle.is_empty() {
+                continue;
+            }
+            let mut from = 0;
+            while let Some(offset) = lowered
+                .get(from..)
+                .and_then(|rest| rest.find(needle.as_str()))
+            {
+                let start = from + offset;
+                let end = start + needle.len();
+                from = end;
+                // `lowered` is an ASCII-lowercased copy of `text`, so it is the
+                // same length and the byte offsets below address both. `header`
+                // is an ASCII field name, so a match is a whole-token match in
+                // `lowered` and therefore ASCII — hence a char boundary in both.
+                let before_ok = start == 0 || !is_token_char(lowered.as_bytes()[start - 1]);
+                let after_ok = end == lowered.len() || !is_token_char(lowered.as_bytes()[end]);
+                if !before_ok || !after_ok {
+                    continue;
+                }
+                let found = &text[start..end];
+                if found == *header {
+                    exact += 1;
+                } else {
+                    offenders.push(format!(
+                        "`{found}` where the implementation declares `{header}`"
+                    ));
+                }
+            }
+        }
+        (exact, offenders)
+    }
+
+    /// Every provider's own module doc must spell its `- Header:` bullet the way
+    /// the module's `*_HEADER` constant declares it.
+    ///
+    /// This is the sixth spelling surface, and the one closest to the code.
+    /// [`provider_variant_docs_spell_their_own_headers_the_way_the_code_does`]
+    /// exists precisely because the others missed the variant docs, and its own
+    /// rationale enumerates the covered set — the provider constants,
+    /// `README.md`, the crate docs, `spec.md` §3, and the variant docs — which
+    /// leaves `src/providers/<name>.rs`'s `//!` block out of it. Adyen's is the
+    /// one that drifted: its bullet read `hmacsignature` while
+    /// `SIGNATURE_HEADER`, the README row, the variant doc, and `spec.md` §3
+    /// all read `HmacSignature` (issue #325).
+    ///
+    /// The failure direction is documentation, not verification: lookup is
+    /// ASCII-case-insensitive, so a delivery using either spelling verifies
+    /// identically. It is still a build failure, because the bullet is the
+    /// copy-paste line — it opens the module's doc block and mirrors the
+    /// `spec.md` §3 bullet beside it, so it is where a reader takes a
+    /// `HeaderName` from, and a name that agrees with nothing else is the
+    /// spelling most likely to be pasted into a `HeaderName` literal or an
+    /// allowlist.
+    ///
+    /// The bar is `exact >= 1` and *not* "no wrongly-cased spelling anywhere":
+    /// `nylas` and `docusign` deliberately quote an alternate casing inside the
+    /// bullet's own prose to document that Adyen/Nylas-style lowercase headers
+    /// resolve, which is accurate and must stay quiet. Failing on any alternate
+    /// mention would break the modules that are correct. `exact >= 1` still
+    /// catches `adyen`, whose bullet named the header in no other casing.
+    #[test]
+    fn provider_module_docs_spell_their_header_bullet_the_way_the_code_does() {
+        let mut offenders: Vec<String> = Vec::new();
+        for provider in provider_list() {
+            let stem = provider_module_stem(provider);
+            let implementation = module_implementation(&stem);
+            let declared: Vec<&str> = declared_header_constants(&implementation)
+                .into_iter()
+                .map(|(_, name)| name)
+                .collect();
+            assert!(
+                !declared.is_empty(),
+                "`src/providers/{stem}.rs` declares no `*_HEADER: &str` constant in its \
+                 implementation, so this guard checks nothing for `{provider}` — either the \
+                 constants lost their `_HEADER` suffix or the module reads header names in a \
+                 shape the derivation does not follow"
+            );
+            assert!(
+                declared.iter().all(|name| !name.is_empty()),
+                "`src/providers/{stem}.rs` declares an empty `*_HEADER` constant — an empty \
+                 header name matches nothing and would also make `header_casing_in_text`'s \
+                 scan non-terminating, so fix the constant rather than the guard"
+            );
+            let Some(bullet) = module_doc_header_bullet(&module_doc(&stem)) else {
+                panic!(
+                    "`src/providers/{stem}.rs`'s module doc has no `- Header:` bullet naming \
+                     `{provider}`'s signature header"
+                );
+            };
+            let (exact, wrong) = header_casing_in_text(&bullet, &declared);
+            if exact == 0 {
+                offenders.push(format!(
+                    "`src/providers/{stem}.rs`'s `- Header:` bullet never spells {} as \
+                     declared, only {:?} — every other surface reads the declared spelling, so \
+                     this module doc is the only one a reader cannot reconcile",
+                    declared.join("`/`"),
+                    wrong
+                ));
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "a provider module doc must spell its `- Header:` bullet the way the module \
+             declares the constant — the bullet is the copy-paste line, and lookup is \
+             case-insensitive, so a different casing verifies identically but is the spelling \
+             no other surface in the repo uses: {offenders:?}"
+        );
+    }
+
+    /// The scan above is only as good as its three extractions —
+    /// [`stripped_module_doc`], [`module_doc_header_bullet`], and
+    /// [`header_casing_in_text`] — so each is exercised over synthetic input:
+    /// raw module source whose `//!` block ends at the first body line, a
+    /// bullet whose only spelling is wrongly cased, the legitimate
+    /// alternate-casing prose `nylas`/`docusign` write, the wrapped bullet that
+    /// breaks inside its code span, and a token that merely *contains* the
+    /// header name. Without this the real run is the only evidence the scan
+    /// works, which is the vacuous pass
+    /// `provider_module_docs_spell_their_header_bullet_the_way_the_code_does`
+    /// cannot detect from the outside.
+    #[test]
+    fn module_doc_header_bullet_scan_is_exercised_over_synthetic_docs() {
+        const DECLARED: &[&str] = &["X-Example-Signature", "X-Example-Timestamp"];
+
+        /// `stripped_module_doc` + `module_doc_header_bullet` as a total
+        /// function for these fixtures, run over raw module source so the
+        /// `//!` stripping is exercised too. `unwrap_or_else(panic)` rather than
+        /// `.expect` because `clippy::expect_used` is denied crate-wide, tests
+        /// included.
+        fn bullet(source: &str) -> String {
+            let doc = stripped_module_doc(source);
+            module_doc_header_bullet(&doc)
+                .unwrap_or_else(|| panic!("expected a `- Header:` bullet in {doc:?}"))
+        }
+
+        // The shape `adyen` shipped: only one spelling, and it is not the
+        // declared one. Must be reported.
+        let adyen_shaped = bullet(
+            "//! Scheme, per the docs:\n\
+             //!\n\
+             //! - Header: `x-example-signature: <hex_hmac>`\n\
+             //! - Signed string: the raw body bytes, unmodified\n\
+             //! The rest of the module:\n\
+             //! \n\
+             //! use core::fmt;\n",
+        );
+        let (exact, wrong) = header_casing_in_text(&adyen_shaped, DECLARED);
+        assert_eq!(
+            exact, 0,
+            "a wrongly-cased-only bullet must not count as spelled"
+        );
+        assert_eq!(
+            wrong,
+            vec![
+                "`x-example-signature` where the implementation declares \
+                 `X-Example-Signature`"
+                    .to_string()
+            ]
+        );
+
+        // The shape `nylas` and `docusign` write: the bullet names the declared
+        // header, and its continuation prose quotes an alternate casing to
+        // explain that lookup is case-insensitive. Accepted, because the bullet
+        // does spell the header the way the code declares it.
+        let alternate_casing_prose = bullet(
+            "//! - Header: `X-Example-Signature: <hex_hmac>` — bare hex. The docs\n\
+             //!   state it arrives as either `X-Example-Signature` or\n\
+             //!   `x-example-signature`; lookup is case-insensitive, so either\n\
+             //!   spelling works.\n\
+             //! - Signed string: raw body\n",
+        );
+        let (exact, wrong) = header_casing_in_text(&alternate_casing_prose, DECLARED);
+        assert!(
+            exact >= 1,
+            "the declared spelling in the bullet must count as exact"
+        );
+        assert_eq!(
+            wrong.len(),
+            1,
+            "the prose's alternate spelling is reported for the message but must not fail: \
+             {wrong:?}"
+        );
+
+        // `square`, `tailscale`, and `x_twitter` break inside the code span, so
+        // the header name is the first thing on the bullet's first line and the
+        // continuation must not cost the scan the match.
+        let wrapped = bullet(
+            "//! - Header: `X-Example-Signature: <base64(HMAC-SHA256(key,\n\
+             //!   notification_url ++ raw_body))>`\n\
+             //! - Signed string: the notification URL\n",
+        );
+        let (exact, wrong) = header_casing_in_text(&wrapped, DECLARED);
+        assert_eq!(exact, 1, "a wrapped bullet still yields its header name");
+        assert!(
+            wrong.is_empty(),
+            "the wrapped bullet spells the header as declared"
+        );
+
+        // A longer token that merely contains a declared name is not a spelling
+        // of it: `X-Example-Signature-V2` must not satisfy the
+        // `X-Example-Signature` constant.
+        let superstring = bullet(
+            "//! - Header: `x-example-signature-v2: <hex_hmac>`\n\
+             //! - Signed string: raw body\n",
+        );
+        assert_eq!(
+            header_casing_in_text(&superstring, DECLARED).0,
+            0,
+            "a token that merely contains a declared name is not a spelling of it"
+        );
+
+        // A module doc with no bullet at all is a panic, not a silent pass.
+        assert_eq!(
+            module_doc_header_bullet(&stripped_module_doc("//! Scheme, per the docs.\n")),
+            None
+        );
+        // Indentation does not hide the bullet: the scan trims before matching,
+        // so a module that nests its `- Header:` line inside a list is still
+        // checked rather than silently skipped.
+        assert_eq!(
+            bullet("//!   - Header: `X-Example-Signature: <hex_hmac>`\n"),
+            "- Header: `X-Example-Signature: <hex_hmac>`"
+        );
+        // `stripped_module_doc` stops at the first non-`//!`, non-blank line, so
+        // a `//!` comment in the module *body* is never read as module-doc prose.
+        let body_only = stripped_module_doc(
+            "//! Scheme, per the docs.\n\
+             \n\
+             //! - Header: `X-Example-Signature: <hex_hmac>`\n\
+             \n\
+             const SIGNATURE_HEADER: &str = \"X-Example-Signature\";\n\
+             //! a body comment that mentions X-EXAMPLE-SIGNATURE\n",
+        );
+        assert!(
+            !body_only.contains("body comment"),
+            "the body comment must not be read as module-doc prose: {body_only:?}"
+        );
+
+        // An empty declared name terminates instead of spinning: `str::find("")`
+        // always matches at the cursor, so an unskipped empty needle would never
+        // advance the search and hang the suite. The guard rejects an empty
+        // `*_HEADER` constant outright, so this only pins that the helper itself
+        // cannot be the thing that hangs.
+        assert_eq!(
+            header_casing_in_text("- Header: `x-example-signature`", &[""]),
+            (0, Vec::new()),
+            "an empty declared name must be skipped, not matched at every position"
+        );
+        // …and it must not stop the *real* names in the same slice from being
+        // scanned.
+        assert_eq!(
+            header_casing_in_text(
+                "- Header: `X-Example-Signature`",
+                &["", "X-Example-Signature"]
+            )
+            .0,
+            1,
+            "an empty name must not suppress the names beside it"
+        );
     }
 
     /// The provenance comment `src/providers/line.rs` places immediately above
