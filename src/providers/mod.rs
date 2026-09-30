@@ -3992,8 +3992,7 @@ mod tests {
 
             for (row, cells) in &rows[1..] {
                 assert_eq!(
-                    cells,
-                    expected,
+                    cells, expected,
                     "`{label}`'s provider table row renders to {cells} cells but its \
                      header declares {expected}. A literal `|` in a cell's content \
                      splits the row (GFM splits on every unescaped pipe, inside a \
