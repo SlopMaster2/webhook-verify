@@ -168,11 +168,16 @@ pub enum Encoding {
     ///
     /// The two alphabets differ *only* in those two characters, so a digest
     /// whose encoding happens to contain neither decodes identically under
-    /// both — each 6-bit group is `+`/`/` with probability 2/64, so roughly
-    /// seven digests in ten are spelled the same way under both. That makes
-    /// this variant easy to leave out of a scheme without noticing, and easy
-    /// to add to one that did not need it: the difference only shows up on the
-    /// digests that carry a `+` or `/`.
+    /// both — but only *some* digests are so spelled. Each full 6-bit group is
+    /// `+`/`/` with probability 2/64, so a digest is spelled the same way
+    /// under both alphabets with probability `(62/64)^groups`, where `groups`
+    /// is the number of full 6-bit groups in its base64 form (26 for SHA-1's
+    /// 20-byte digest, 42 for SHA-256's 32, 85 for SHA-512's 64): about **44%**
+    /// for SHA-1, **26%** for SHA-256, and **7%** for SHA-512. The two
+    /// spellings therefore differ on most SHA-256 and SHA-512 digests, which
+    /// is why picking the wrong variant is usually caught immediately; it is
+    /// a SHA-1-sized digest that is spelled the same way under both often
+    /// enough for a wrong `Encoding` to verify authentic bytes by accident.
     Base64Url,
     /// Standard base64 alphabet (`+` and `/`) with the trailing padding
     /// **omitted**, the shape RFC 4648 §3.2 calls unpadded and JWS calls
@@ -1779,6 +1784,82 @@ mod tests {
         let count = labels.len();
         labels.dedup();
         assert_eq!(labels.len(), count, "encoding labels collide: {labels:?}");
+    }
+
+    /// `Encoding::Base64Url`'s docs tell a caller how often the standard and
+    /// URL-safe spellings of the *same* digest coincide, because that rate is
+    /// what decides whether configuring the wrong variant is caught by the
+    /// first authentic delivery or slips through. Those figures are a derived
+    /// quantity — `(62/64)^groups`, where `groups` is the count of full 6-bit
+    /// groups in the digest's base64 form — so a hand-written number in prose
+    /// can be wrong with nothing failing, which is exactly what happened:
+    /// the docs claimed "roughly seven digests in ten", while the real rates
+    /// are 44% (SHA-1), 26% (SHA-256) and 7% (SHA-512).
+    ///
+    /// So the figures are derived here from the code — `digest_len()`, not a
+    /// hand-written list — and required to appear in the variant's own doc
+    /// comment. The formula is checked two ways: against the closed form, and
+    /// against an exhaustive count over the first group's worth of values,
+    /// which pins the exponent's per-group probability of *not* colliding.
+    #[test]
+    fn base64url_docs_state_the_derived_alphabet_collision_rate() {
+        /// Probability that a digest with `groups` full 6-bit groups is
+        /// spelled identically under the standard and URL-safe alphabets:
+        /// each group is `+`/`/` with probability 2/64, and the alphabets
+        /// agree on every other value.
+        fn collision_rate(groups: u32) -> f64 {
+            (62.0f64 / 64.0).powi(i32::try_from(groups).unwrap_or(i32::MAX))
+        }
+
+        // The per-group probability, counted rather than assumed: of the 64
+        // possible 6-bit values, exactly `+` (62) and `/` (63) differ between
+        // the two alphabets, so 62 values agree.
+        let differing_values = (0u8..64)
+            .filter(|group| {
+                // A 3-byte input is exactly four 6-bit groups with no
+                // padding, and `group << 2` places `group` in the leading one
+                // with the rest zero — encoding a single byte instead would
+                // only ever reach the low 6 bits of it.
+                let bytes = [group << 2, 0, 0];
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+                    != base64::engine::general_purpose::URL_SAFE.encode(bytes)
+            })
+            .count();
+        assert_eq!(
+            differing_values, 2,
+            "expected exactly two 6-bit values (`+` and `/`) to differ between the standard \
+             and URL-safe alphabets, found {differing_values} differing"
+        );
+
+        let source = include_str!("custom.rs");
+        let docs = source
+            .lines()
+            .skip_while(|line| !line.contains("/// URL-safe base64 alphabet"))
+            .take_while(|line| line.trim_start().starts_with("///"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !docs.is_empty(),
+            "could not locate `Encoding::Base64Url`'s doc comment in `custom.rs`; this guard \
+             is matching the first `/// URL-safe base64 alphabet` line, so update it if the \
+             variant's docs were reworded"
+        );
+
+        for hash in [HashAlg::Sha1, HashAlg::Sha256, HashAlg::Sha512] {
+            // `base64` encodes `8 * bits / 6` groups, of which the last one is
+            // partial whenever the digest is not a whole number of 3-byte
+            // quanta; only full groups can carry a `+`/`/` at all, since the
+            // trailing partial group is zero-padded on the right.
+            let groups = u32::try_from(hash.digest_len() * 8 / 6).unwrap_or(u32::MAX);
+            let rate = collision_rate(groups);
+            let percent = (rate * 100.0).round() as u32;
+            assert!(
+                docs.contains(&format!("**{percent}%**")),
+                "`Encoding::Base64Url`'s docs must state **{percent}%** as the rate at which \
+                 the two alphabets spell a {hash:?} digest identically \
+                 (`(62/64)^{groups}` = {rate:.4}); it currently says:\n{docs}"
+            );
+        }
     }
 
     // --- CustomScheme::new() convenience constructor ------------------------
