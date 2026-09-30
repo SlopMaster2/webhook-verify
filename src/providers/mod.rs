@@ -1803,6 +1803,7 @@ mod tests {
     use crate::test_helpers::clocked_at;
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
+    use std::collections::BTreeSet;
     use std::time::Duration;
 
     /// Locally constructs a Slack `v0=` signature over `v0:{ts}:{body}` with
@@ -6015,7 +6016,6 @@ pub struct S {
     /// rather than skipped so the map below cannot rot either.
     #[test]
     fn rotation_lists_prose_names_every_separator_the_code_actually_splits_on() {
-        use std::collections::BTreeSet;
         use std::fs;
         use std::path::Path;
 
@@ -6109,6 +6109,145 @@ pub struct S {
                 "verify_hmac_sha256_any's doc comment does not name the `{separator}` \
                  separator that a rotation-list provider actually splits on (expected it to \
                  contain {named}); the rotation lists are not comma-uniform — see spec.md §4.1"
+            );
+        }
+    }
+
+    /// The prose name `verify_hmac_sha1`'s doc comment has to use for a
+    /// provider module, given the module's file stem, lowercased to match the
+    /// words the caller scan compares against.
+    ///
+    /// Every provider module is named after its file, so a module whose stem is
+    /// its prose name needs no entry here. `custom.rs` is the one module that
+    /// is not: it implements `CustomScheme`, which is how the sibling
+    /// `verify_hmac_sha512` doc comment names the same file. A stem that needs
+    /// a spelling of its own (say `box_webhooks`, or `x_twitter` for `Provider::X`)
+    /// fails the guard's assertion rather than passing vacuously, so it shows up
+    /// here instead of quietly searching the doc for a name no reader would use.
+    fn sha1_caller_prose_name(stem: &str) -> String {
+        match stem {
+            "custom" => String::from("customscheme"),
+            other => other.to_lowercase(),
+        }
+    }
+
+    /// The words of a `///` doc run, lowercased, so a provider can be recognized
+    /// by name without the comparison being fooled by punctuation or casing
+    /// (`Provider::Twilio`, "Twilio", and "twilio" all tokenize to `twilio`).
+    fn doc_run_words(source: &str, from: usize) -> BTreeSet<String> {
+        source[from..]
+            .lines()
+            // A non-`///` line ends the run: the function signature and body
+            // below it are not prose, and crypto.rs's own tests name providers
+            // for unrelated reasons.
+            .take_while(|line| line.starts_with("///"))
+            .flat_map(|line| line.strip_prefix("///").map(str::trim))
+            .flat_map(|line| line.split(|c: char| !c.is_ascii_alphanumeric()))
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    }
+
+    /// `verify_hmac_sha1`'s doc comment must name every provider that calls it.
+    ///
+    /// SHA-1 collision exposure is the one question nearly every reader brings
+    /// to an HMAC-SHA1 implementation, and in this crate the answer lives on
+    /// the shared helper rather than in each provider's own module. The doc
+    /// comment said only "Used by Twilio's scheme" while five built-in
+    /// providers called the helper, so a reader tracing it to assess collision
+    /// exposure found one provider and moved on (issue #319). The sibling
+    /// helpers already enumerate their callers — `verify_hmac_sha512` names the
+    /// one built-in provider that uses it, and `verify_hmac_sha256_any` lists
+    /// its six multi-candidate providers — which is what made the omission read
+    /// as a mistake rather than a stylistic choice.
+    ///
+    /// The scan is textual, so it cannot see a call laundered through a local
+    /// wrapper; what it buys is that a *direct* call in a provider module fails
+    /// CI until the doc names it, which is the shape this actually regressed
+    /// to. Only the implementation region counts, so a test re-deriving a
+    /// vector through the helper is not a caller.
+    ///
+    /// One direction only. A provider that *stopped* calling the helper leaves
+    /// its name behind, and nothing here notices: the check reads the callers
+    /// out of the code and looks each one up in the doc, never the reverse.
+    /// That is the direction worth guarding — the unlisted caller is what hides
+    /// a scheme from a reader auditing SHA-1 exposure — but it is not "the list
+    /// is exact", and the helper's doc comment says so rather than implying
+    /// otherwise.
+    #[test]
+    fn verify_hmac_sha1_doc_names_every_provider_that_calls_it() {
+        use std::fs;
+        use std::path::Path;
+
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/providers");
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            // `src/providers` is shipped in the crates.io tarball, so this is
+            // only a guard against a packaging surprise: a repo-internal
+            // directory this crate's own tests must not fail on.
+            Err(_) => return,
+        };
+
+        let mut scanned = 0_usize;
+        let mut callers = BTreeSet::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            // `mod.rs` is the dispatch table and the test module itself, not a
+            // provider implementation, and the helper it documents lives in
+            // `core/crypto.rs`, which is not scanned here.
+            if stem == "mod" {
+                continue;
+            }
+            let source = match fs::read_to_string(&path) {
+                Ok(source) => source,
+                Err(_) => continue,
+            };
+            let implementation = match source.find("#[cfg(test)]") {
+                Some(at) => &source[..at],
+                None => source.as_str(),
+            };
+            scanned += 1;
+            // The `use` line that imports the helper has no `(`, so only a
+            // call site matches.
+            if implementation.contains("verify_hmac_sha1(") {
+                callers.insert(String::from(stem));
+            }
+        }
+        assert!(
+            scanned > 0,
+            "the HMAC-SHA1 caller scan found no provider modules to check under {}",
+            dir.display()
+        );
+        assert!(
+            callers.len() > 1,
+            "expected several providers to call `verify_hmac_sha1`, but the scan found \
+             {callers:?} — if the schemes really had converged on one, delete this guard \
+             instead of loosening it"
+        );
+
+        let crypto = match fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/core/crypto.rs"),
+        ) {
+            Ok(source) => source,
+            Err(_) => return,
+        };
+        let Some(at) = crypto.find("/// Verifies `provided_signature` against HMAC-SHA1(") else {
+            panic!("`verify_hmac_sha1`'s doc comment must keep its first line");
+        };
+        let words = doc_run_words(&crypto, at);
+        for caller in &callers {
+            let name = sha1_caller_prose_name(caller);
+            assert!(
+                words.contains(&name),
+                "verify_hmac_sha1's doc comment does not name `{caller}.rs`, which calls it; \
+                 add `{name}` to that doc comment so the set of HMAC-SHA1 schemes stays \
+                 auditable (spec.md §3)"
             );
         }
     }

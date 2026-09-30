@@ -385,6 +385,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`core::crypto::verify_hmac_sha1`'s doc comment named one of the five
+  providers that call it** (issue #319). It read *"Used by Twilio's scheme,
+  which mandates HMAC-SHA1 (`spec.md` §3)"*. Nothing there claimed
+  exclusivity, but it read as a complete list, and it is not: Twilio, Vercel,
+  Intercom, Expo, and Mandrill all route their scheme through this helper
+  (`spec.md` §3 enumerates all five), and `custom.rs` can select it through
+  `CustomScheme`'s `HashAlg::Sha1`.
+
+  SHA-1 collision exposure is the one question nearly every reader brings to an
+  HMAC-SHA1 implementation, and in this crate the answer lives on the shared
+  helper rather than in each provider's own module — so a reader who traced it
+  to scope that exposure found a single provider and moved on, having learned
+  that one scheme out of five uses SHA-1. The sibling helpers already enumerate
+  their callers (`verify_hmac_sha512` names the one built-in provider that
+  mandates it, `verify_hmac_sha256_any` lists its six multi-candidate
+  providers), which is what made the omission read as a mistake rather than a
+  stylistic choice.
+
+  The doc comment now names all five plus [`CustomScheme`], in the same shape as
+  its SHA-512 sibling, and attributes the keyed-HMAC argument to `spec.md` §3,
+  where it is recorded for each scheme: Twilio's docs make the argument first
+  and Intercom, Expo,   and Mandrill repeat it. It also states that every provider reaching for the
+  helper is named there, which
+  `providers::tests::verify_hmac_sha1_doc_names_every_provider_that_calls_it`
+  now enforces by reading every `src/providers/*.rs` implementation region for
+  a direct `verify_hmac_sha1(` call and requiring the doc run to name the
+  caller's module (`custom.rs` resolves to `CustomScheme`, the way the SHA-512
+  doc names it). The guard floors on both counts — more than one caller found,
+  and more than zero modules scanned — so a broken scan fails loudly instead of
+  passing vacuously. Only implementation regions count, so a test re-deriving a
+  vector through the helper is not a caller. The reverse — a name left behind
+  by a provider that stopped calling the helper — is stated in the doc comment
+  as uncovered rather than claimed.
+
+  Documentation and tests only: no API change, no verification-behavior change,
+  no new dependency.
+
 - **The `parse_imf_fixdate` boundary test claimed a boundary it did not
   reach** (issue #317). `handles_boundary_dates_and_weekdays` asserted
   `Thu, 31 Dec 2026 23:59:59 GMT` under the comment *"The last instant
