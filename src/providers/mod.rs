@@ -7020,19 +7020,22 @@ pub struct S {
     /// this guard exists to reject. Every site this catches spelled the
     /// encoding on the line *after* the "bytes,", so the wrapping is the
     /// normal case, not an edge one.
+    ///
+    /// The quoted clause stops at the end of the bullet or paragraph it sits
+    /// in, not at the next `". "`. The scheme bullets run several claims deep —
+    /// Razorpay's says "keyed with the webhook secret's UTF-8 bytes; the digest
+    /// is hex-encoded, no `sha256=` prefix, no timestamp" — so splitting on
+    /// `". "` ran the quote through the end of the bullet into the paragraph
+    /// after it, and the failure named a sentence the reader would not find on
+    /// the page. Markdown emphasis is dropped from the quote for the same
+    /// reason: `**hex**-encoded` renders as `hex-encoded`, and quoting the
+    /// markers — doubled, when the line join split the pair — showed the reader
+    /// something the source does not literally say (issue #339).
     fn encoding_attached_to_key_bytes(source: &str) -> Option<String> {
-        // One sentence's worth of context, quoted on failure. Bullets carry
+        // One bullet's worth of context, quoted on failure. Bullets carry
         // several claims each, so quoting to the end of the file would bury the
         // offending clause under the rest of the module's documentation.
-        let flat = source
-            .lines()
-            .map(|line| {
-                line.trim_start()
-                    .trim_start_matches("//!")
-                    .trim_start_matches("///")
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
+        let (flat, unit_starts) = flatten_prose_with_unit_starts(source);
         let lower = flat.to_lowercase();
 
         let mut from = 0;
@@ -7047,12 +7050,110 @@ pub struct S {
                 .iter()
                 .any(|word| gap.to_lowercase().starts_with(word))
             {
-                let clause = gap.split(". ").next().unwrap_or(gap).trim_end_matches('.');
-                return Some(format!("bytes, {clause}"));
+                return Some(format!(
+                    "bytes, {}",
+                    clause_within_unit(&flat, &unit_starts, after)
+                ));
             }
             from = after;
         }
         None
+    }
+
+    /// The rest of the prose unit containing byte `at`: from `at` to whichever
+    /// comes first, the next unit's start or the next `". "`.
+    ///
+    /// The unit boundaries come from the flattening rather than from the text,
+    /// so a quote cannot run past the end of the bullet or paragraph it sits in.
+    /// Markdown emphasis is dropped, so the quote reads as the rendered page
+    /// does (issue #339).
+    fn clause_within_unit(flat: &str, unit_starts: &[usize], at: usize) -> String {
+        let unit_end = unit_starts
+            .iter()
+            .copied()
+            .find(|start| *start > at)
+            .unwrap_or(flat.len());
+        let end = flat[at..]
+            .find(". ")
+            .map_or(unit_end, |dot| at + dot)
+            .min(unit_end);
+        flat[at..end.min(flat.len())]
+            .replace("**", "")
+            .trim()
+            .trim_end_matches('.')
+            .trim()
+            .to_string()
+    }
+
+    /// `source`'s prose flattened into one string, plus the byte offsets in it
+    /// at which a new bullet (`- `/`* `) or a new paragraph begins.
+    ///
+    /// The `//!`/`///` prefix is stripped per line so wrapped prose reads as a
+    /// reader sees it, and a blank line contributes no space, so a paragraph
+    /// break stays a boundary instead of flattening into a run of spaces. The
+    /// offsets are what let [`clause_within_unit`] stop a quote at the end of
+    /// its bullet.
+    fn flatten_prose_with_unit_starts(source: &str) -> (String, Vec<usize>) {
+        let mut flat = String::with_capacity(source.len());
+        let mut unit_starts = Vec::new();
+        let mut previous_blank = true;
+        for line in source.lines() {
+            let text = line
+                .trim_start()
+                .trim_start_matches("//!")
+                .trim_start_matches("///");
+            if !flat.is_empty() {
+                let starts_unit =
+                    text.starts_with("- ") || text.starts_with("* ") || previous_blank;
+                if !previous_blank {
+                    flat.push(' ');
+                }
+                if starts_unit {
+                    unit_starts.push(flat.len());
+                }
+            }
+            flat.push_str(text);
+            previous_blank = text.is_empty();
+        }
+        (flat, unit_starts)
+    }
+
+    /// The quoted clause stops at the end of its bullet, and reads without the
+    /// emphasis markers the flattening may split (issue #339).
+    ///
+    /// This is a property of the *message*, not of the verdict: the guard still
+    /// rejects the same shapes. Razorpay's pre-#337 module doc is the case that
+    /// produced a quote spanning the bullet into the paragraph after it, and the
+    /// `**hex**` there split across the join into `hex**-encoded`, so both
+    /// artifacts are pinned on one input shaped like that module's.
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[test]
+    fn encoding_on_key_quotes_only_its_own_bullet() {
+        let source = "\
+//! - Algorithm: HMAC-SHA256 keyed with the webhook secret's UTF-8
+//!   bytes, hex**-encoded, no `sha256=` prefix, no timestamp
+//!
+//! The signing key is the webhook secret configured in the dashboard — not the
+//! API `key_id`/`key_secret` pair, per the docs and the FAQ.
+";
+        assert_eq!(
+            encoding_attached_to_key_bytes(source).as_deref(),
+            Some("bytes, hex-encoded, no `sha256=` prefix, no timestamp"),
+            "the quote must stop at the end of the bullet that carries the offending clause, \
+             and must not carry the `**` that the line join split"
+        );
+
+        // Prose that attaches the encoding to the digest is not this guard's
+        // business, however its bullet wraps.
+        assert_eq!(
+            encoding_attached_to_key_bytes(
+                "\
+//! - Algorithm: HMAC-SHA256 keyed with the webhook secret's UTF-8 bytes;
+//!   the digest is hex-encoded, no timestamp follows
+"
+            ),
+            None
+        );
     }
 
     /// No provider's scheme prose may attach the signature's encoding to the
