@@ -570,7 +570,10 @@ before the body is read, but verification requires those bytes.
   hex-decodes its key and Ripple and Standard Webhooks base64-decode theirs, so
   `"0000"`, `"AAAA"`, and `"whsec_AAAA"` are not all-NUL *text* — they reach
   the MAC as the empty key and would accept a signature anyone can compute.
-  The three providers re-apply the rule to the decoded bytes.
+  The three providers re-apply the rule to the decoded bytes. Discord also
+  hex-decodes its secret, but into an Ed25519 *public key* rather than MAC key
+  material, so the rule does not reach it; an all-NUL key there is a point of
+  order 4, which the low-order check rejects instead.
 
 ## Non-goals
 
