@@ -189,8 +189,11 @@
 //!   is used exactly as configured: nothing is trimmed before the MAC. A
 //!   secret that is not itself all-NUL but *decodes* to an all-NUL key is the
 //!   same empty key one encoding layer deeper, so the three providers that
-//!   hex- or base64-decode it (Adyen, Ripple, Standard Webhooks) re-apply the
-//!   rule to the decoded bytes.
+//!   hex- or base64-decode it into HMAC key material (Adyen, Ripple, Standard
+//!   Webhooks) re-apply the rule to the decoded bytes. Discord hex-decodes its
+//!   secret too, but into an Ed25519 *public key*, which no HMAC is keyed with
+//!   and which RFC 2104 cannot zero-pad into anything; its degenerate shape is
+//!   the low-order point the next bullet rejects.
 //! - Ed25519 verification (Discord) uses dalek's **strict** equation, so a
 //!   low-order ("weak") public key is rejected rather than used — a weak key
 //!   forges signatures outright, and one is a valid compressed point, so the

@@ -1415,10 +1415,14 @@ pub(crate) fn provider_sent_duplicate_headers(provider: &Provider) -> &'static [
 ///
 /// This check reads the **raw** secret, which is the same bytes the MAC is
 /// keyed with for every provider except the three that hex- or base64-decode
-/// it first (Adyen, Ripple, Standard Webhooks). Those re-apply the all-NUL rule
-/// to the *decoded* key at their key-derivation sites, since a secret that is
-/// not itself all-NUL (`"0000"`, `"AAAA"`, `"whsec_AAAA"`) can decode to an
-/// all-NUL key and so is the empty key one encoding layer deeper.
+/// it into HMAC key material (Adyen, Ripple, Standard Webhooks). Those
+/// re-apply the all-NUL rule to the *decoded* key at their key-derivation
+/// sites, since a secret that is not itself all-NUL (`"0000"`, `"AAAA"`,
+/// `"whsec_AAAA"`) can decode to an
+/// all-NUL key and so is the empty key one encoding layer deeper. Discord
+/// hex-decodes its secret too, but into an Ed25519 *public key* rather than
+/// MAC key material, so the rule does not reach it; its degenerate shape is
+/// the low-order point `spec.md` §4.8 rejects.
 ///
 /// Only those shapes are rejected. A secret that merely *contains* whitespace
 /// or a NUL is used exactly as configured, byte for byte — the key is never
@@ -1575,12 +1579,16 @@ fn uses_secret(provider: Provider) -> bool {
 ///
 /// This reads the **raw** secret, which is the same byte string the MAC is
 /// keyed with for every provider except the three that hex- or base64-decode
-/// it first (Adyen, Ripple, Standard Webhooks). RFC 2104 pads the *decoded*
-/// bytes there, and a secret that is not itself all-NUL text — `"0000"`,
-/// `"AAAA"`, `"whsec_AAAA"` — can still decode to an all-NUL key, which is
-/// the empty key one encoding layer deeper and accepts its publicly
+/// it into HMAC key material (Adyen, Ripple, Standard Webhooks). RFC 2104 pads
+/// the *decoded* bytes there, and a secret that is not itself all-NUL text —
+/// `"0000"`, `"AAAA"`, `"whsec_AAAA"` — can still decode to an all-NUL key,
+/// which is the empty key one encoding layer deeper and accepts its publicly
 /// computable signature. Those three re-apply the predicate to the decoded
 /// key at their key-derivation sites via `core::crypto::is_all_nul_key`.
+/// Discord's hex-decoded secret is an Ed25519 *public key*, not MAC key
+/// material, so it is deliberately not one of the three; RFC 2104 cannot pad
+/// it into anything, and its degenerate shape is the low-order point
+/// `spec.md` §4.8 rejects instead.
 ///
 /// "Entirely" is load-bearing and the *only* line drawn here: a secret that
 /// merely contains whitespace or a NUL (`"hunter2 "`, `"hunter2\n"`,
@@ -6248,6 +6256,247 @@ pub struct S {
                 "verify_hmac_sha1's doc comment does not name `{caller}.rs`, which calls it; \
                  add `{name}` to that doc comment so the set of HMAC-SHA1 schemes stays \
                  auditable (spec.md §3)"
+            );
+        }
+    }
+
+    /// Every provider module that decodes the configured `Secret` into bytes
+    /// before using it, as the `src/providers` module stem.
+    ///
+    /// Derived from the modules rather than listed, for the same reason
+    /// [`millisecond_timestamp_providers`] is: a fourth decoding provider added
+    /// later is the case that matters, and a hand-written list is a list
+    /// somebody has to remember to extend. The scan is a function taking
+    /// `secret: &[u8]` whose *body* calls a hex or base64 decode — which is the
+    /// shape every key-derivation site here has, and is what separates it from
+    /// a decode of a *header* value (those functions take `value`/`encoded`) and
+    /// from the five providers that use the secret's bytes verbatim (their
+    /// key-derivation function returns `secret` untouched).
+    ///
+    /// The body is scoped to the current function: it ends at the next `///`
+    /// doc run or the next top-level `fn`, whichever comes first, and `//`
+    /// comments are dropped from it. Without those boundaries a verbatim-key
+    /// provider can come back as a decoder — Contentful's `signing_key` is
+    /// followed directly by `parse_signature`, whose body hex-decodes its
+    /// *header*, and a scan that read past the function would report the secret
+    /// as decoded. The test asserts on the resulting set, so a scan that
+    /// quietly widened would not fail on its own.
+    fn secret_decoding_providers() -> Vec<String> {
+        provider_module_stems()
+            .into_iter()
+            .filter(|stem| {
+                let implementation = module_implementation(stem);
+                let mut rest = implementation.as_str();
+                while let Some(at) = rest.find("secret: &[u8]") {
+                    let body = &rest[at..];
+                    let end = body
+                        .find("\n/// ")
+                        .or_else(|| body.find("\nfn "))
+                        .or_else(|| body.find("\npub fn "))
+                        .unwrap_or(body.len());
+                    let code: String = body[..end]
+                        .lines()
+                        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if code.contains("hex::decode(") || code.contains(".decode(") {
+                        return true;
+                    }
+                    rest = &body[end..];
+                }
+                false
+            })
+            .collect()
+    }
+
+    /// The prose block a doc claim lives in: a `///` / `//!` list bullet in a
+    /// Rust source, or a blank-line-delimited paragraph in Markdown.
+    ///
+    /// Narrower than the surrounding file on purpose — the claim being checked
+    /// is a *scoped* one ("these three, not the four that decode"), so the
+    /// evidence has to be the sentence that scopes it. A whole-file search
+    /// would let a name appearing anywhere in the same document stand in for
+    /// the qualifier this guard exists to keep.
+    fn prose_block(source: &str, anchor: &str) -> String {
+        let lines: Vec<&str> = source.lines().collect();
+        let at = lines
+            .iter()
+            .position(|line| line.contains(anchor))
+            .unwrap_or_else(|| panic!("no prose block contains the anchor {anchor:?}"));
+        let is_doc = |line: &&str| {
+            line.trim_start().starts_with("///") || line.trim_start().starts_with("//!")
+        };
+        let (start, end) = if is_doc(&lines[at]) {
+            let bullet = |line: &&str| {
+                let trimmed = line.trim_start();
+                trimmed.starts_with("/// - ") || trimmed.starts_with("//! - ")
+            };
+            (
+                (0..at).rev().find(|i| bullet(&lines[*i])).unwrap_or(at),
+                // Exclusive of the next bullet: its first line is a
+                // different claim, and letting it satisfy this one would
+                // mean a name one bullet away counted as evidence.
+                ((at + 1)..lines.len())
+                    .find(|i| bullet(&lines[*i]))
+                    .unwrap_or(lines.len()),
+            )
+        } else {
+            let start = (0..at)
+                .rev()
+                .find(|i| lines[*i].trim().is_empty())
+                .map_or(0, |i| i + 1);
+            let end = ((at + 1)..lines.len())
+                .find(|i| lines[*i].trim().is_empty())
+                .unwrap_or(lines.len());
+            (start, end)
+        };
+        lines[start..end]
+            .iter()
+            .map(|line| {
+                let trimmed = line.trim_start();
+                for prefix in ["///", "//!"] {
+                    if let Some(rest) = trimmed.strip_prefix(prefix) {
+                        return rest.trim();
+                    }
+                }
+                line.trim()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Every prose site stating the `spec.md` §4.7 decoded-key rule must scope
+    /// it to HMAC key material, and name the providers it does not cover.
+    ///
+    /// Four sites spelled this rule out — the crate docs, `verify`'s own doc,
+    /// `unusable_secret_reason`'s, and `core::crypto::is_all_nul_key`'s — plus
+    /// the README, and all five said "the three providers that hex- or
+    /// base64-decode it" without saying *what they decode it into*. Four
+    /// modules decode the secret, not three: Discord hex-decodes too. Its
+    /// decoded value is an Ed25519 *public key*, so RFC 2104's zero-padding has
+    /// no bearing on it and the all-NUL predicate genuinely does not apply —
+    /// but a reader auditing "which providers re-apply the rule to the decoded
+    /// key", which is the question a security review actually asks of §4.7,
+    /// had to grep four files to learn that the count excluded a decoder. The
+    /// count was right and the scoping was missing (issue #320).
+    ///
+    /// Both directions are checked, and the derived set is what makes them
+    /// checkable. [`secret_decoding_providers`] reads the modules, so a fourth
+    /// decoder has to be *named* as covered or *named* as excluded — a silent
+    /// one fails either way. The exclusion half is the load-bearing one: it is
+    /// the direction that regressed, and the direction where a bare count is
+    /// wrong rather than merely incomplete.
+    ///
+    /// One per surface, so each of the five is fixed at its own site rather
+    /// than leaving a reader to infer the rule from the others. The anchors are
+    /// the sentence that carries the claim, so the evidence is the scoping
+    /// sentence and not a name elsewhere in the same document.
+    #[test]
+    fn the_decoded_key_all_nul_rule_is_scoped_to_hmac_key_material() {
+        let sites: [(&str, String, &str); 5] = [
+            (
+                "crate docs",
+                include_str!("../lib.rs").to_string(),
+                "hex- or base64-decode it into HMAC key material",
+            ),
+            (
+                "verify() docs",
+                include_str!("mod.rs").to_string(),
+                "This check reads the **raw** secret",
+            ),
+            (
+                "unusable_secret_reason() docs",
+                include_str!("mod.rs").to_string(),
+                "This reads the **raw** secret",
+            ),
+            (
+                "core::crypto::is_all_nul_key docs",
+                include_str!("../core/crypto.rs").to_string(),
+                "into HMAC key material first",
+            ),
+            (
+                "README.md",
+                include_str!("../../README.md").to_string(),
+                "re-apply the rule to the decoded bytes",
+            ),
+        ];
+
+        let decoders = secret_decoding_providers();
+        // A vacuity guard: with no decoder found, "every decoder is named"
+        // holds for an empty set and the whole test asserts nothing. Discord
+        // alone fixes the floor at two; a real scheme change should trip it
+        // loudly rather than quietly emptying the check.
+        assert!(
+            decoders.len() >= 2,
+            "expected several providers to decode the configured secret, but the scan found \
+             {decoders:?} — if the schemes really stopped decoding, delete this guard instead \
+             of loosening it"
+        );
+
+        // The two sets the prose has to account for. `is_all_nul_key` is the
+        // shared decoded-key predicate from `core::crypto`, so calling it *is*
+        // "re-applies the rule to the decoded bytes" — the same derivation
+        // `verify_hmac_sha1_doc_names_every_provider_that_calls_it` uses for
+        // its own caller set.
+        let reapplies: Vec<String> = provider_module_stems()
+            .into_iter()
+            .filter(|stem| module_implementation(stem).contains("is_all_nul_key("))
+            .collect();
+        let excluded: Vec<String> = decoders
+            .iter()
+            .filter(|stem| !reapplies.contains(stem))
+            .cloned()
+            .collect();
+
+        // The predicate's own callers must be decoders. A module that applied
+        // the all-NUL rule to a key it did not decode would make both prose
+        // sets wrong in a way the naming checks below cannot see.
+        for stem in &reapplies {
+            assert!(
+                decoders.contains(stem),
+                "`src/providers/{stem}.rs` calls `is_all_nul_key` but does not decode the \
+                 configured secret, so it is in neither prose set; the scan behind \
+                 `secret_decoding_providers` has stopped matching its shape"
+            );
+        }
+        // And the sets must be disjoint and non-trivial on the exclusion side,
+        // which is the half that regressed: a guard that passed with no
+        // exclusions would not notice a decoder joining the covered set
+        // unmentioned.
+        assert!(
+            !excluded.is_empty(),
+            "every secret-decoding provider re-applies the all-NUL rule to the decoded key \
+             ({reapplies:?}), so no site has an exclusion left to state — if Discord's decoded \
+             Ed25519 public key is now covered, delete this guard instead of loosening it"
+        );
+
+        for (label, source, anchor) in &sites {
+            let block = prose_block(source, anchor);
+            for stem in reapplies.iter().chain(&excluded) {
+                let brand = provider_list()
+                    .into_iter()
+                    .find(|provider| provider_module_stem(*provider) == *stem)
+                    .unwrap_or_else(|| {
+                        panic!("`{stem}.rs` is not a provider, so its prose name is undefined")
+                    })
+                    .to_string();
+                assert!(
+                    block.contains(&brand),
+                    "the {label} prose block stating the spec.md §4.7 decoded-key rule does \
+                     not name {brand}, whose module decodes the secret — it must be named as \
+                     one of the {reapplies:?} that re-apply the all-NUL rule to the decoded \
+                     key, or, for {excluded:?}, as excluded and why. \"{block}\""
+                );
+            }
+            // The qualifier itself, not just the names. Naming Discord without
+            // saying what its decoded bytes are would leave the reader to
+            // re-derive the distinction the sentence exists to state, which is
+            // the gap this guard closes.
+            assert!(
+                block.contains("public key"),
+                "the {label} prose block naming the secret-decoding providers must say that the \
+                 one it excludes decodes to a *public key* rather than HMAC key material, so \
+                 the count reads as scoped rather than short; \"{block}\""
             );
         }
     }

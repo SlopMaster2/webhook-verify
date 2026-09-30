@@ -385,6 +385,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `spec.md` §4.7 decoded-key rule named three secret-decoding providers
+  where four decode** (issue #320). Five surfaces stated the rule — the crate
+  docs, `verify`'s doc comment, `unusable_secret_reason`'s,
+  `core::crypto::is_all_nul_key`'s, and the README — and all five said "the
+  three providers that hex- or base64-decode it" without saying *what they
+  decode it into*. Discord hex-decodes its secret too, so the bare count read
+  as short. It is not a behavior gap: Discord's decoded value is an Ed25519
+  *public key*, not MAC key material, so RFC 2104's zero-padding — the whole
+  reason the rule has to be re-applied to decoded bytes — has no bearing on
+  it, and an all-NUL 32-byte key decompresses to a point of order 4, which the
+  low-order check `spec.md` §4.8 requires rejects outright.
+
+  The distinction is one a security review actually asks of §4.7 — *which*
+  providers re-apply the all-NUL predicate to their decoded key — and a reader
+  had to grep four files to learn the count excluded a decoder. All five sites
+  now scope the claim to "HMAC key material" and name the exclusion with the
+  reason, so the count reads as scoped rather than short. `spec.md` §4.7
+  already drew the distinction and is unchanged.
+
+  `providers::tests::the_decoded_key_all_nul_rule_is_scoped_to_hmac_key_material`
+  now holds the count: it derives the decoding set from the modules (a
+  key-derivation function taking `secret: &[u8]` whose body calls a hex or
+  base64 decode, scoped to the current function — the body ends at the next
+  doc-comment run or the next top-level `fn`, and `//` comments are dropped,
+  so Contentful's `signing_key`, followed directly by a `parse_signature`
+  that hex-decodes its *header*, is not mistaken for a secret decoder) and
+  requires every one of
+  them named at every site, as covered or as excluded, plus the "public key"
+  qualifier itself. The sets are floored (at least two decoders, at least one
+  exclusion) and the predicate's own callers are checked to be decoders, so a
+  scan that stopped matching fails loudly instead of passing on an empty set.
+  The region read is a single prose block — a list bullet, or a
+  blank-line-delimited paragraph — so a name one bullet away cannot stand in
+  for the qualifier.
+
+  Documentation and tests only: no API change, no verification-behavior change,
+  no new dependency.
+
 - **`core::crypto::verify_hmac_sha1`'s doc comment named one of the five
   providers that call it** (issue #319). It read *"Used by Twilio's scheme,
   which mandates HMAC-SHA1 (`spec.md` §3)"*. Nothing there claimed

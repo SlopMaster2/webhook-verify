@@ -289,11 +289,17 @@ pub(crate) fn verify_ed25519(public_key: &[u8], message: &[u8], signature: &[u8]
 /// The entry-point guard (`providers::unusable_secret_reason`) applies the same
 /// rule to the **raw** `Secret` string, which is the same thing only for the
 /// providers that use the secret's bytes as key material verbatim. A provider
-/// that hex- or base64-decodes the secret first (Adyen, Ripple, Standard
-/// Webhooks) has to re-apply it to the **decoded** bytes, because those are
-/// what gets padded — a secret of `"0000"` is not all-NUL text but decodes to
-/// an all-NUL key. This helper is the shared form of that second check, so the
-/// audited key-derivation sites all use one definition.
+/// that hex- or base64-decodes the secret into HMAC key material first (Adyen,
+/// Ripple, Standard Webhooks) has to re-apply it to the **decoded** bytes,
+/// because those are what gets padded — a secret of `"0000"` is not all-NUL
+/// text but decodes to an all-NUL key. This helper is the shared form of that
+/// second check, so the audited key-derivation sites all use one definition.
+///
+/// "HMAC key material" is the load-bearing qualifier: Discord also hex-decodes
+/// its secret, but into an Ed25519 *public key*, which nothing is keyed with
+/// and which RFC 2104's padding has no bearing on. Its degenerate shape — an
+/// all-NUL 32-byte key, i.e. a point of order 4 — is a valid compressed point
+/// and is caught by `spec.md` §4.8's low-order check instead.
 ///
 /// Empty is deliberately **not** all-NUL: `[].iter().all(..)` is vacuously
 /// true, which would collapse the two shapes into one and lose the distinct
