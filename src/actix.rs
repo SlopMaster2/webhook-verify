@@ -313,7 +313,9 @@ impl fmt::Display for WebhookVerificationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             // `VerifyError`'s Display carries only header names, static
-            // reasons, and durations (spec.md §2.1) — safe to surface.
+            // reasons, and durations (spec.md §2.1) — safe to surface in
+            // server-side logs. It is deliberately *not* surfaced over the
+            // wire: `error_response` below sends a bodiless response.
             Rejection::Verify(error) => write!(f, "webhook verification failed: {error}"),
             Rejection::BodyRead => f.write_str("webhook body could not be read"),
             Rejection::BodyTooLarge => {
@@ -338,9 +340,25 @@ impl ResponseError for WebhookVerificationError {
         }
     }
 
-    // The default `error_response` builds an empty-bodied response from
-    // `status_code`; that is exactly what we want (spec.md §2.1 / tower
-    // adapter parity), so it is not overridden.
+    // The default `error_response` is **not** empty-bodied: actix-web renders
+    // `Display` into a `text/plain` body (`actix_web::error::ResponseError`'s
+    // provided method, which builds `Content-Type: text/plain; charset=utf-8`
+    // and writes `{}` into the body). Overridden to keep the documented
+    // contract — a rejection's status carries the signal and nothing else —
+    // and the tower adapter's parity (`rejection_response`, `src/tower.rs`),
+    // which is likewise a bodiless `Response`.
+    //
+    // The reason this is worth overriding rather than documenting: no secret
+    // material is at stake (`VerifyError`'s `Display` is redacted,
+    // spec.md §2.1), but `TimestampOutOfTolerance`'s `Display` spells out
+    // both the measured `skew` and the operator's configured `max_age`, which
+    // is a free calibration oracle for an unauthenticated caller probing the
+    // replay window. Operators still get the detail: `Display`/`Debug` on this
+    // type are unchanged and remain the server-side logging surface, keyed off
+    // the structured [`VerifyError`].
+    fn error_response(&self) -> actix_web::HttpResponse<actix_web::body::BoxBody> {
+        actix_web::HttpResponse::build(self.status_code()).finish()
+    }
 }
 
 type ExtractFuture = Pin<Box<dyn Future<Output = Result<VerifiedBody, WebhookVerificationError>>>>;
@@ -1406,6 +1424,110 @@ mod tests {
         let debug = format!("{config:?}");
         assert!(!debug.contains("super-secret-key"));
         assert!(debug.contains("max_body_size: Some(1024)"));
+    }
+
+    // --- rejection responses carry no body -----------------------------------
+
+    /// Every rejection class the extractor can produce is asserted here, one
+    /// request per class, because the *body* was the untested half of the
+    /// contract: the module docs, `WebhookVerificationError`'s own doc, and
+    /// the README all promise an empty body ("bodies are deliberately empty",
+    /// "renders as an empty-bodied response", "parity" with the tower
+    /// adapter's empty-bodied `rejection_response`) — but actix-web's default
+    /// `ResponseError::error_response` renders `Display` into a
+    /// `text/plain` body, so before this test every rejection shipped its
+    /// reason to the unauthenticated caller.
+    ///
+    /// That matters most for `TimestampOutOfTolerance`, whose `Display`
+    /// spells out both the measured `skew` and the operator's configured
+    /// `max_age` — a free calibration oracle for a replay-window probe. The
+    /// other classes leak only header names and static reason strings, which
+    /// are not secret, but the contract is one sentence: empty, always, for
+    /// every class.
+    #[actix_web::test]
+    async fn every_rejection_response_has_an_empty_body() {
+        // 400: missing signature header.
+        let missing = github_app!();
+        let req = aw_test::TestRequest::post()
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&missing, req).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(aw_test::read_body(res).await, Bytes::new());
+
+        // 400: conflicting duplicates of the signature header (§4.4).
+        let ambiguous = github_app!();
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Hub-Signature-256", GITHUB_SIGNATURE))
+            .insert_header(("x-hub-signature-256", "sha256=00"))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&ambiguous, req).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(aw_test::read_body(res).await, Bytes::new());
+
+        // 401: signature mismatch. The signature must stay well-formed hex —
+        // a `sha256=00` prefix-only value decodes to the wrong *length* and
+        // is a `BadEncoding` 400, not a forgery.
+        const WRONG_SIGNATURE: &str =
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e18";
+        let mismatch = github_app!();
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Hub-Signature-256", WRONG_SIGNATURE))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&mismatch, req).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(aw_test::read_body(res).await, Bytes::new());
+
+        // 401: stale timestamp. Slack's vector is pinned to a clock 600s
+        // away from its own timestamp with a 300s window, so the replay
+        // check is what rejects it — this is the class whose `Display`
+        // carries `max_age` and `skew`.
+        let stale = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::with_options(
+                    Provider::Slack,
+                    Secret::new(SLACK_SECRET),
+                    clocked_at(
+                        SLACK_TIMESTAMP + 600,
+                        Some(std::time::Duration::from_secs(300)),
+                    ),
+                ))
+                .route("/", web::post().to(echo_len_slack)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Slack-Signature", format!("v0={SLACK_SIGNATURE}")))
+            .insert_header(("X-Slack-Request-Timestamp", SLACK_TIMESTAMP.to_string()))
+            .set_payload(Bytes::from_static(SLACK_BODY))
+            .to_request();
+        let res = aw_test::call_service(&stale, req).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(aw_test::read_body(res).await, Bytes::new());
+
+        // 413: body over the configured limit.
+        let oversized = aw_test::init_service(
+            App::new()
+                .app_data(
+                    WebhookConfig::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                        .with_max_body_size(10),
+                )
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = github_request(GITHUB_BODY).to_request();
+        let res = aw_test::call_service(&oversized, req).await;
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(aw_test::read_body(res).await, Bytes::new());
+
+        // 500: no `WebhookConfig` registered (operator misconfiguration).
+        let unconfigured =
+            aw_test::init_service(App::new().route("/", web::post().to(echo_len_slack))).await;
+        let req = github_request(GITHUB_BODY).to_request();
+        let res = aw_test::call_service(&unconfigured, req).await;
+        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(aw_test::read_body(res).await, Bytes::new());
     }
 
     // --- unit-level checks ----------------------------------------------------

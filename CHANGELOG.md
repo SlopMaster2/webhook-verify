@@ -425,6 +425,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The actix adapter returned a *non-empty* body for every rejection, against
+  three separate documented claims.** `src/actix.rs` did not override
+  `ResponseError::error_response`, on the strength of a comment asserting that
+  actix-web's provided implementation "builds an empty-bodied response from
+  `status_code`". It does not: the default sets
+  `Content-Type: text/plain; charset=utf-8` and writes `Display` into the body.
+  So every rejected delivery shipped its reason to the unauthenticated caller,
+  contradicting the module docs ("Bodies are deliberately empty"),
+  `WebhookVerificationError`'s own doc ("renders as an empty-bodied response"),
+  and the README's parity claim against the tower adapter — whose
+  `rejection_response` really is a bodiless `Response`.
+
+  No secret material was involved (`VerifyError`'s `Display` is redacted,
+  §2.1), so this is information disclosure rather than a credential leak, and
+  the classes differ in how much they give away: `MissingHeader` /
+  `MalformedHeader` / `BadEncoding` leak a header name and a static reason,
+  and `SignatureMismatch` leaks nothing at all. The one that matters is
+  `TimestampOutOfTolerance`, whose `Display` spells out **both** the measured
+  `skew` and the operator's configured `max_age` — handed to an unauthenticated
+  caller, that is a free calibration oracle for a replay-window probe.
+
+  `error_response` is now overridden to return `HttpResponse::build(
+  status_code()).finish()`, matching the tower adapter byte for byte. The
+  status codes, the routing of every rejection class, `Display`, and `Debug`
+  are all unchanged, so this is a response-body-only change; operators keep the
+  detail, because `Display`/`Debug` on `WebhookVerificationError` remain the
+  server-side logging surface the module docs point at. `every_rejection_
+  response_has_an_empty_body` (`src/actix.rs`) walks **every** class the
+  extractor can produce — missing header, ambiguous duplicate, mismatch, stale
+  timestamp, oversized body, and unregistered config — and asserts both the
+  status and the empty body, because the body was the untested half of a
+  contract that three docs already described and no test checked. The README's
+  adapter section now states the guarantee for both adapters.
+
 - **`Encoding::Base64Url`'s docs overstated how often the standard and
   URL-safe base64 spellings of one digest coincide.** The variant's doc
   comment said each 6-bit group is `+`/`/` with probability 2/64, "so roughly
