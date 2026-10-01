@@ -396,8 +396,7 @@ mod tests {
         // `mandrill_events=[]` sent twice de-duplicates to the same signed
         // string as a single `[]`, so it verifies against the single-field
         // check vector rather than needing a separate one.
-        let params: [(&str, &str); 2] =
-            [("mandrill_events", "[]"), ("mandrill_events", "[]")];
+        let params: [(&str, &str); 2] = [("mandrill_events", "[]"), ("mandrill_events", "[]")];
         assert_eq!(verify_with(&params, CHECK_SIGNATURE), Ok(()));
     }
 

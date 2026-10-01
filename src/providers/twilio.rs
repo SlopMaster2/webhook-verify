@@ -715,7 +715,10 @@ mod tests {
             "received order must not matter"
         );
         assert_eq!(
-            verify_with(&[("Body", "a"), ("Body", "a")], DEDUPLICATED_VALUES_SIGNATURE),
+            verify_with(
+                &[("Body", "a"), ("Body", "a")],
+                DEDUPLICATED_VALUES_SIGNATURE
+            ),
             Ok(()),
             "the duplicate `a` is signed once"
         );
