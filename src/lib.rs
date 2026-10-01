@@ -251,6 +251,10 @@ pub mod klaviyo {
 
 #[cfg(test)]
 mod docs {
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
     /// Splits a `major.minor[.patch]` version into numbers, so two versions can
     /// be compared without pulling in a semver dependency the crate does not
     /// otherwise need. A third component that is not a number (a pre-release
@@ -428,6 +432,289 @@ mod docs {
             checked > 0,
             "README.md's Releasing checklist must still show a `git tag v…` command in a form \
              this guard can read"
+        );
+    }
+
+    /// The body of `spec.md`'s `heading`, from the line after it to the next
+    /// top-level `## ` heading.
+    fn spec_section<'a>(spec: &'a str, heading: &str) -> &'a str {
+        let body = spec
+            .split_once(heading)
+            .unwrap_or_else(|| panic!("spec.md must keep its `{heading}` heading"))
+            .1;
+        body.split_once("\n## ")
+            .map_or(body, |(section, _)| section)
+    }
+
+    /// The first `- ` bullet of a `spec.md` section whose text contains
+    /// `needle`, continuation lines joined onto their opening line.
+    ///
+    /// `spec.md` wraps its bullets across indented continuation lines, and a
+    /// claim like "this configuration is compiled" can sit on any of them, so
+    /// the whole bullet has to be searched rather than just its first line.
+    /// Blank lines, `## ` headings, and the `---` between sections are prose
+    /// rather than a bullet in progress, so leaving a bullet is explicit
+    /// instead of an accident of the last-line-wins rule below.
+    fn spec_bullet(section: &str, needle: &str) -> Option<String> {
+        let mut bullets: Vec<String> = Vec::new();
+        for line in section.lines() {
+            if let Some(opening) = line.strip_prefix("- ") {
+                bullets.push(String::from(opening.trim()));
+                continue;
+            }
+            let continuation = line.trim();
+            let is_prose = continuation.is_empty()
+                || continuation.starts_with('#')
+                || continuation == "---"
+                || continuation.starts_with("--- ");
+            if !is_prose {
+                if let Some(bullet) = bullets.last_mut() {
+                    bullet.push(' ');
+                    bullet.push_str(continuation);
+                }
+            }
+        }
+        bullets.into_iter().find(|bullet| bullet.contains(needle))
+    }
+
+    /// The lines belonging to one `jobs:` entry of `ci.yml`, or `None` if no
+    /// such job is declared.
+    ///
+    /// A workflow's job keys sit at exactly two spaces of indentation while
+    /// every key inside a job is indented further, so the next two-space
+    /// `key:` line ends the block. This is a line scan, not a YAML parse: the
+    /// crate takes no dependency it does not already need, and the shapes read
+    /// here (`name:`, `strategy:`, `continue-on-error:`, a flow-sequence
+    /// `features: […]`) are stable across the workflow's edits.
+    fn ci_job_block<'a>(workflow: &'a str, job: &str) -> Option<Vec<&'a str>> {
+        let mut block: Vec<&str> = Vec::new();
+        let mut inside = false;
+        for line in workflow.lines() {
+            let is_job_key =
+                line.starts_with("  ") && !line.starts_with("   ") && line.trim().ends_with(':');
+            if is_job_key {
+                if inside {
+                    break;
+                }
+                inside = line.trim() == format!("{job}:");
+                continue;
+            }
+            if inside {
+                block.push(line);
+            }
+        }
+        inside.then_some(block)
+    }
+
+    /// The entries of a job block's flow-sequence `features:` matrix, e.g.
+    /// `["--all-features", "--features actix"]`.
+    fn ci_job_features(block: &[&str]) -> Vec<String> {
+        block
+            .iter()
+            .filter_map(|line| line.trim().strip_prefix("features: ["))
+            .flat_map(|list| list.trim_end_matches(']').split(','))
+            .filter_map(|entry| entry.trim().strip_prefix('"'))
+            .filter_map(|entry| entry.strip_suffix('"'))
+            .map(String::from)
+            .collect()
+    }
+
+    /// Whether a job block's failure fails the build, i.e. it does not carry
+    /// `continue-on-error: true`.
+    fn ci_job_is_blocking(block: &[&str]) -> bool {
+        !block
+            .iter()
+            .any(|line| line.trim() == "continue-on-error: true")
+    }
+
+    /// `.github/workflows/ci.yml`, or `None` in a checkout that does not ship
+    /// it.
+    ///
+    /// `.github` is in `Cargo.toml`'s `exclude`, so it is absent from the
+    /// crates.io tarball and the guards below skip rather than fail — the same
+    /// skip `fuzz_seed_bullets_and_corpus_agree` uses for `fuzz/`. They are
+    /// repo-internal consistency checks, not part of the shipped crate's
+    /// contract.
+    fn ci_workflow() -> Option<String> {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/ci.yml"),
+        )
+        .ok()
+    }
+
+    /// `spec.md` §6's clippy requirement must name every feature configuration
+    /// CI actually compiles.
+    ///
+    /// The `clippy` job is a three-way feature matrix, not the single
+    /// `--all-features` invocation §6 used to name, and the two extra entries
+    /// are the whole point of it: `--features actix` and `--features tower`
+    /// are configurations a downstream user reaches on their own, and each
+    /// carried a warning `--all-features` structurally cannot see (issue #335).
+    /// Nothing compiles §6 — it is prose in a file no tool reads — so the
+    /// matrix grew there while the spec still described one configuration, and
+    /// a reader taking §6 as the gate inventory had no home for the class of
+    /// bug the matrix exists to catch. A new matrix entry must be recorded in
+    /// §6 in the same change that adds it.
+    #[test]
+    fn spec_ci_clippy_bullet_names_every_compiled_configuration() {
+        let Some(workflow) = ci_workflow() else {
+            return;
+        };
+        let block = ci_job_block(&workflow, "clippy")
+            .unwrap_or_else(|| panic!("ci.yml must still declare a `clippy` job"));
+
+        let compiled = ci_job_features(&block);
+        assert!(
+            !compiled.is_empty(),
+            "ci.yml's `clippy` job must still compile a flow-sequence `features:` matrix, or this \
+             guard can no longer see which configurations it holds to `-D warnings`"
+        );
+
+        let spec = include_str!("../spec.md");
+        let bullet = spec_bullet(spec_section(spec, "## 6. CI requirements"), "cargo clippy")
+            .unwrap_or_else(|| panic!("spec.md §6 must keep a `cargo clippy` requirement"));
+        for configuration in &compiled {
+            assert!(
+                bullet.contains(configuration.as_str()),
+                "spec.md §6's clippy requirement does not name the `{configuration}` \
+                 configuration that ci.yml's `clippy` job compiles — a lint gate that only ever \
+                 compiles one feature set cannot see a warning unique to another (issue #335), so \
+                 record every matrix entry in §6 in the same change that adds it"
+            );
+        }
+    }
+
+    /// `spec.md` §6 must not call a job advisory that CI runs as a gate.
+    ///
+    /// §6 described `cargo semver-checks` as informational on the reasoning
+    /// that no baseline existed until the first release published — 0.1.0
+    /// published 2026-09-08, and the job has blocked since issue #276, with
+    /// `constructible_struct_adds_field` denied outright through
+    /// `Cargo.toml`'s semver-checks lint config. That gap is how #274's
+    /// deliberate `CustomScheme::timestamp_unit` source break merged with the
+    /// job red: the spec that should have warned of the gate had kept calling
+    /// it advisory. The check reads the workflow first and only then demands
+    /// §6 agree, so the day someone deliberately relaxes the job this guard
+    /// stops objecting rather than blocking the relaxation.
+    #[test]
+    fn spec_ci_semver_requirement_matches_how_the_job_runs() {
+        let Some(workflow) = ci_workflow() else {
+            return;
+        };
+        let block = ci_job_block(&workflow, "semver-checks")
+            .unwrap_or_else(|| panic!("ci.yml must still declare a `semver-checks` job"));
+        if !ci_job_is_blocking(&block) {
+            // Deliberately advisory (or deliberately `continue-on-error`):
+            // §6 may describe it either way, so there is nothing to check.
+            return;
+        }
+
+        let spec = include_str!("../spec.md");
+        let bullet = spec_bullet(
+            spec_section(spec, "## 6. CI requirements"),
+            "cargo semver-checks",
+        )
+        .unwrap_or_else(|| panic!("spec.md §6 must keep a `cargo semver-checks` requirement"));
+        for claim in ["informational", "non-blocking", "does not block"] {
+            assert!(
+                !bullet.to_lowercase().contains(claim),
+                "spec.md §6 calls `cargo semver-checks` {claim}, but ci.yml runs the job without \
+                 `continue-on-error`, so it fails the build. A break that needs a version bump \
+                 then lands as a red build the spec promised would not happen (#274), which is how \
+                 the surprise has to be avoided"
+            );
+        }
+    }
+
+    /// The bullet reader has to find a claim that sits on a continuation line
+    /// and stop at the end of its own bullet, or §6's wrapped prose would read
+    /// as if the claim were never made.
+    #[test]
+    fn spec_bullets_are_read_across_their_continuation_lines() {
+        let spec = "\
+## 6. CI requirements
+
+Prose before the list, which mentions `cargo clippy` only in passing.
+
+- `cargo clippy --all-features --all-targets -- -D warnings` — a wrapped
+  bullet whose second line names `--features tower` as a matrix entry.
+- `cargo test --all-features` on stable, MSRV, and beta.
+
+---
+
+## 7. Open questions
+
+- `cargo clippy` again, one section too far.
+";
+        let section = spec_section(spec, "## 6. CI requirements");
+
+        let bullet = spec_bullet(section, "--features tower")
+            .unwrap_or_else(|| panic!("a claim on a continuation line must be found"));
+        assert!(
+            bullet.starts_with("`cargo clippy"),
+            "the claim must resolve to the bullet it belongs to, not to section prose"
+        );
+        assert!(
+            !bullet.contains("stable, MSRV"),
+            "the following bullet must not be joined onto the one that matched"
+        );
+        assert!(
+            !section.contains("Open questions"),
+            "the section must end at the next `## ` heading"
+        );
+        assert!(
+            spec_bullet(section, "no claim like this exists").is_none(),
+            "a section with no matching bullet reports none"
+        );
+    }
+
+    /// The workflow reader has to see a job's own keys and stop at the next
+    /// job, or the guards above compare §6 against the wrong job's lines.
+    #[test]
+    fn ci_job_blocks_are_read_from_their_own_job() {
+        let workflow = "\
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  clippy:
+    strategy:
+      matrix:
+        features: [\"--all-features\", \"--features actix\"]
+    steps:
+      - run: cargo clippy ${{ matrix.features }} --all-targets -- -D warnings
+  constant-time:
+    name: constant-time assertion (informational)
+    continue-on-error: true
+    steps:
+      - run: cargo test --release --all-features
+";
+
+        let clippy = ci_job_block(workflow, "clippy")
+            .unwrap_or_else(|| panic!("fixture must yield a `clippy` block"));
+        assert_eq!(
+            ci_job_features(&clippy),
+            ["--all-features", "--features actix"],
+            "the matrix must be read out of the `clippy` job, not the one that follows it"
+        );
+        assert!(
+            ci_job_is_blocking(&clippy),
+            "a job without `continue-on-error` fails the build"
+        );
+
+        let advisory = ci_job_block(workflow, "constant-time")
+            .unwrap_or_else(|| panic!("fixture must yield a `constant-time` block"));
+        assert!(
+            !ci_job_is_blocking(&advisory),
+            "`continue-on-error: true` must not be read out of a neighboring job"
+        );
+        assert!(
+            ci_job_features(&advisory).is_empty(),
+            "a job with no feature matrix yields no configurations, rather than the previous job's"
+        );
+
+        assert!(
+            ci_job_block(workflow, "no-such-job").is_none(),
+            "an absent job must be reported as absent, not as an empty block"
         );
     }
 }
