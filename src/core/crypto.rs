@@ -199,6 +199,28 @@ pub(crate) fn sha256_hexdigest(bytes: &[u8]) -> alloc::string::String {
     hex::encode(hasher.finalize())
 }
 
+/// Verifies `raw_body`'s plain SHA-256 digest against `expected_digest` using a
+/// constant-time comparison.
+///
+/// This is **not** an HMAC and takes no key. Twilio's JSON-body variant
+/// (`spec.md` §3) signs the URL alone and commits to the body out of band, via
+/// a `bodySHA256` query parameter carrying the body's SHA-256 hex digest; a
+/// provider must check that commitment, and cannot do so with
+/// [`sha256_hexdigest`] plus `==`. Providers must call this helper instead of
+/// reaching for `sha2` directly, keeping the digest construction and the
+/// constant-time comparison in the audited module.
+///
+/// `expected_digest` is compared as raw bytes, so a caller that hex-decodes
+/// the provider's parameter turns a length or non-hex failure into `false`
+/// rather than a panic.
+#[must_use]
+pub(crate) fn verify_sha256_digest(raw_body: &[u8], expected_digest: &[u8]) -> bool {
+    let mut hasher = Sha256::new();
+    hasher.update(raw_body);
+    let expected = hasher.finalize();
+    expected.as_slice().ct_eq(expected_digest).into()
+}
+
 /// Verifies `provided_signature` against the plain SHA-256 digest of the
 /// concatenation `key || raw_body` — the UTF-8 bytes of a secret key
 /// immediately followed by the raw body, no separator — using a constant-time

@@ -1172,8 +1172,21 @@ worked example) and the reference implementations in Twilio's official SDKs
   pass fields in any order. A duplicate field name keeps its received
   relative order (the official SDKs use keyed dicts, which cannot represent
   duplicates). Omitting either option fails closed with `MissingContext`.
-  An explicitly empty parameter list is meaningful (the JSON-body variant
-  carries a `bodySHA256` query parameter and signs the URL alone).
+- JSON-body variant: with an explicitly empty parameter list the request
+  carries a `bodySHA256` query parameter and Twilio signs the URL **alone** —
+  so the signature covers nothing of the body. This crate therefore
+  additionally requires `sha256_hexdigest(raw_body)` to equal the
+  `bodySHA256` value whenever the configured `request_url` carries that
+  parameter, compared in constant time, ANDed into the result exactly as
+  `twilio-python` does (`return valid_body_hash and (valid_signature or
+  valid_signature_with_port)`). Without it the signature is a wire value and
+  an observed one would authenticate an attacker-chosen body. A malformed or
+  wrong-length `bodySHA256` is a comparison failure (`SignatureMismatch`), not
+  a skipped check, matching upstream's opaque-string comparison; the parameter
+  is matched on its exact key, first occurrence wins, and the value is compared
+  as decoded bytes, so a case-folded hex spelling is accepted. A URL with no
+  `bodySHA256` parameter is unchanged — the form-encoded case, where the signed
+  fields already cover the body.
 - No timestamp in the signature scheme (`max_age` has no effect).
 
 ### Mailchimp Transactional (Mandrill)
