@@ -3549,10 +3549,23 @@ A provider implementation is not mergeable until it has:
 ## 6. CI requirements
 
 - `cargo test --all-features` on stable, MSRV, and beta.
-- `cargo clippy --all-features --all-targets -- -D warnings` — the
-  `--all-targets` flag holds test, bench, and example modules to the same
+- `cargo clippy --all-targets -- -D warnings` on stable, in a three-way
+  feature matrix — `--all-features`, `--features actix`, `--features tower`
+  (the `clippy` CI job, `.github/workflows/ci.yml`). Stable-only on purpose:
+  lint sets differ between toolchains, and this bar is defined against stable.
+  The `--all-targets` flag holds test, bench, and example modules to the same
   bar as the library itself (test-only code otherwise escapes the gate; the
-  ripple.rs `.into()` drift it caught shipped only in tests, PR #124).
+  ripple.rs `.into()` drift it caught shipped only in tests, PR #124). The two
+  adapter-only configurations are separate entries because each is a
+  configuration a downstream user can reach on their own, and each carried a
+  warning `--all-features` structurally cannot see: an unused test-only import
+  in the shared `adapter_utils`/adapter test modules, and a
+  `match_like_matches_macro` that only fires once `cfg!` collapses both arms of
+  a feature-gated `match` to `false` (issue #335, PR #338). A lint gate that
+  only ever compiles one configuration cannot catch that class, and
+  `adapter_utils.rs` is exactly the kind of shared file — one test helper used
+  by one adapter's tests and not the other's — where a future edit can break a
+  configuration no job builds.
 - `cargo test --no-default-features --features sendgrid,paypal` on stable, so
   the `no_std + alloc` paths (the wall-clock fallback in [`Clock::now`], the
   unconditional `core::error::Error` impls on [`VerifyError`] and
@@ -3593,10 +3606,18 @@ A provider implementation is not mergeable until it has:
   grep covers all of `src/`, a macro used inside `#[cfg(test)]` is still a
   build failure; there is no allowlist — the acceptable releases are the
   `Secret`/`VerifyError`/`VerifyOptions` redaction impls themselves.
-- `cargo semver-checks` against the last published version to catch
-  accidental breaking changes to the public API. Until the first version
-  publishes there is no baseline to compare against, so this check is
-  informational/non-blocking.
+- `cargo semver-checks` against the last published version (0.1.0,
+  2026-09-08) to catch accidental breaking changes to the public API.
+  **Blocking** (issue #276): the baseline exists, so the job's result gates the
+  build, and `Cargo.toml`'s `[package.metadata.cargo-semver-checks.lints]`
+  pins `constructible_struct_adds_field` to `level = "deny"` with
+  `required-update = "minor"`, so adding a public field to a struct downstream
+  code can construct with a literal fails the job outright. That break (#274's
+  `CustomScheme::timestamp_unit`) was deliberate and pre-1.0, and for a `0.y.z`
+  crate a minor bump *is* the compatibility boundary, so it rode 0.2.0. Treat a
+  newly-firing lint on unchanged code as a tripwire to triage: allow that
+  specific lint with a justification, the way `.cargo/audit.toml` handles
+  dependency advisories, rather than restoring `continue-on-error`.
 
 ---
 

@@ -425,6 +425,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`spec.md` §6 described a `cargo clippy` gate and a `cargo semver-checks`
+  job CI no longer runs** (#349). §6 is normative and two of its eight
+  bullets had drifted from `.github/workflows/ci.yml`:
+
+  - The clippy bullet named one invocation,
+    `cargo clippy --all-features --all-targets -- -D warnings`, while the
+    `clippy` job is a three-way feature matrix (`--all-features`,
+    `--features actix`, `--features tower`). The two adapter-only entries were
+    added deliberately in #338 because each is a configuration a downstream
+    user reaches on their own and each carried a warning `--all-features`
+    structurally cannot see — an unused test-only import in the shared
+    `adapter_utils`/adapter test modules, and a `match_like_matches_macro`
+    that only fires once `cfg!` collapses both arms of a feature-gated match
+    to `false` (#335). §6 recorded neither the matrix nor the reason, so a
+    reader taking §6 as the gate inventory concluded one configuration was
+    compiled and the class the matrix exists to catch had no home in the spec.
+  - The semver-checks bullet still said the check was
+    "informational/non-blocking … until the first version publishes". 0.1.0
+    published on 2026-09-08, so a baseline exists; the job has blocked since
+    #276, and `Cargo.toml`'s `[package.metadata.cargo-semver-checks.lints]`
+    denies `constructible_struct_adds_field` outright. That is how #274's
+    deliberate `CustomScheme::timestamp_unit` break could merge with the job
+    red: the spec that should have warned of the gate had kept calling it
+    advisory.
+
+  Both bullets now record what runs and why the extra configurations exist, in
+  the wording §6 already uses for its other multi-configuration jobs, and the
+  semver-checks bullet names the pre-1.0 compatibility boundary (a minor bump)
+  and the "allow the specific lint with a justification" answer to a
+  newly-firing lint — the way `.cargo/audit.toml` handles dependency advisories
+  — instead of leaving `continue-on-error` as an implied option.
+
+  Two guards in `src/lib.rs`'s `docs` module keep the prose honest. They read
+  the workflow at runtime and skip when `.github` is absent (it is in
+  `Cargo.toml`'s `exclude`, so it is missing from the publish tarball — the
+  skip `fuzz_seed_bullets_and_corpus_agree` already uses), and they read it as
+  lines rather than pulling in a YAML parser for the four shapes they need. The
+  clippy guard requires every `features:` entry of the job's matrix to be named
+  in §6's bullet, and the semver-checks guard requires §6 not to call the job
+  advisory while `ci.yml` runs it without `continue-on-error` — so deliberately
+  relaxing the job later stops the guard rather than blocking the relaxation.
+  Both fail loudly if the job or the bullet is renamed out of recognition
+  instead of passing vacuously.
+
+  Documentation and two tests. No code, dependency, CI, or verification
+  behavior change; no provider's signed string moved.
+
 - **Twilio/Mandrill: a repeated form-field name was signed in received order,
   rejecting legitimately signed requests** (#344). `twilio.rs` and
   `mandrill.rs` sorted the parsed fields by name with a stable sort, so values
