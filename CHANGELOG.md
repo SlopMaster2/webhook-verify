@@ -425,6 +425,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Twilio/Mandrill: a repeated form-field name was signed in received order,
+  rejecting legitimately signed requests** (#344). `twilio.rs` and
+  `mandrill.rs` sorted the parsed fields by name with a stable sort, so values
+  under a repeated name kept their received relative order and a duplicated
+  value was signed once per occurrence. `twilio-python`'s
+  `RequestValidator.compute_signature` does neither:
+
+  ```python
+  for param_name in sorted(set(params)):
+      for value in sorted(set(self.get_values(params, param_name))):
+          s += param_name + value
+  ```
+
+  and its `get_values` helper reads duplicates explicitly (Flask
+  `MultiDict.getall` / Django `QueryDict.getlist`), so the reference
+  implementation does represent them. The crate now matches it: values under a
+  repeated name are sorted and de-duplicated, so the same multiset of fields
+  signs one string regardless of arrival order. (Mandrill's reference verifier
+  iterates a keyed object and so has no duplicate case; the same rule is
+  applied there for consistency, so both providers build the signed string
+  identically.) `Tag=b&Tag=a` and
+  `Tag=a&Tag=a` now verify as Twilio signs them instead of failing closed with
+  an attack-shaped `SignatureMismatch`.
+
+  This is availability, not a bypass — the old behavior was *stricter* than
+  upstream — but the misleading error and the two false-rejection classes were
+  real. The `VerifyOptions::form_params` builder and field docs, both module
+  docs, `spec.md` §3's Twilio and Mandrill entries, and the tests' duplicate
+  vectors were updated together so no copy of the old "keeps received relative
+  order" / "keyed dicts cannot represent duplicates" justification survives.
+  No new dependency; the signed-string construction is the only behavior that
+  changes.
+
 - **Twilio's port inconsistency in the signed URL was documented nowhere** (#345).
   `twilio-python`'s `RequestValidator.validate` signs the request URL **twice**
   and accepts a match against either — `remove_port(uri)` and `add_port(uri)`,
