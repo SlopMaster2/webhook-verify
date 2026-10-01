@@ -31,16 +31,33 @@
 //! keeps its received relative order (the official SDKs use keyed dicts, which
 //! cannot represent duplicates).
 //!
-//! For Twilio's JSON-body variant the request carries a `bodySHA256` query
-//! parameter and signs the URL alone; pass an explicitly empty parameter list
-//! for that shape ([`VerifyOptions::with_form_params`] with no items).
+//! # The JSON-body variant
+//!
+//! Twilio's JSON-body variant signs the **URL alone**: the body is not form
+//! fields, so there is nothing for the signature to cover. Pass an explicitly
+//! empty parameter list for that shape ([`VerifyOptions::with_form_params`]
+//! with no items), and the body is authenticated by the `bodySHA256` query
+//! parameter Twilio appends to the URL — the SHA-256 hex digest of the body it
+//! sent.
+//!
+//! Whenever the configured [`VerifyOptions::request_url`] carries a
+//! `bodySHA256` parameter, this provider checks `raw_body` against it in
+//! addition to the signature, and fails closed on mismatch. Without that
+//! second check the signature would authenticate the URL alone, so an
+//! attacker who observes one legitimate JSON delivery could replay the same URL
+//! and signature with a fully attacker-chosen body. A malformed
+//! `bodySHA256` parameter is a comparison failure, never a skipped check; a URL
+//! with no `bodySHA256` parameter is unchanged, which is the
+//! form-encoded case where the signed form fields already cover the body.
 //!
 //! # Caller-supplied context
 //!
 //! Verification needs both [`VerifyOptions::request_url`] (the full URL,
 //! including any query string) and [`VerifyOptions::form_params`]. Omitting
 //! either fails closed with [`VerifyError::MissingContext`] rather than
-//! degrading into a weaker check.
+//! degrading into a weaker check. The body itself is only consulted through
+//! the `bodySHA256` parameter above — pass the received bytes as `raw_body`
+//! either way.
 //!
 //! # Replay protection
 //!
@@ -54,7 +71,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha1;
+use crate::core::crypto::{verify_hmac_sha1, verify_sha256_digest};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::secret::Secret;
@@ -63,12 +80,16 @@ use base64::Engine;
 /// The header carrying Twilio's signature.
 pub(crate) const SIGNATURE_HEADER: &str = "X-Twilio-Signature";
 
+/// Query parameter naming the SHA-256 hex digest of the body Twilio sent, and
+/// the only thing authenticating the body in the JSON-body variant.
+const BODY_HASH_PARAM: &str = "bodySHA256";
+
 /// HMAC-SHA1 output length in bytes.
 const SIGNATURE_LEN_BYTES: usize = 20;
 
 pub(crate) fn verify(
     headers: &dyn HeaderMap,
-    _raw_body: &[u8],
+    raw_body: &[u8],
     secret: &Secret,
     options: &VerifyOptions,
 ) -> Result<(), VerifyError> {
@@ -116,11 +137,58 @@ pub(crate) fn verify(
         signed_string.extend_from_slice(value.as_bytes());
     }
 
-    if verify_hmac_sha1(key, &signed_string, &provided) {
-        Ok(())
-    } else {
-        Err(VerifyError::SignatureMismatch)
+    if !verify_hmac_sha1(key, &signed_string, &provided) {
+        return Err(VerifyError::SignatureMismatch);
     }
+
+    // A `bodySHA256` query parameter on the signed URL is Twilio's commitment
+    // to the body it sent, and it is the *only* one when the JSON-body variant
+    // signs the URL alone: the form-field list is empty, so the signature above
+    // never touches the bytes that carry the event. `twilio-python` ANDs the
+    // body-hash comparison into its result for exactly this reason, and this
+    // must run before returning `Ok(())` — the signature is a wire value, so a
+    // replayed one would otherwise authenticate an attacker-chosen body.
+    //
+    // The comparison is constant-time like every other digest check here, and
+    // a malformed parameter is a comparison failure rather than a skipped
+    // check (`twilio-python` compares the two as opaque strings, so a
+    // wrong-length or non-hex value simply does not match).
+    if let Some(provided) = body_sha256_param(url) {
+        // A parameter that is not a hex digest cannot equal a SHA-256 digest,
+        // so this fails the comparison below. Spelled as an early return rather
+        // than `unwrap_or_default()` so the fail-closed path is visible.
+        let Ok(expected) = hex::decode(provided) else {
+            return Err(VerifyError::SignatureMismatch);
+        };
+        if !verify_sha256_digest(raw_body, &expected) {
+            return Err(VerifyError::SignatureMismatch);
+        }
+    }
+
+    Ok(())
+}
+
+/// Returns the value of the `bodySHA256` query parameter of `url`, if present.
+///
+/// The query string is everything after the first `?` up to the first `#`: a
+/// fragment is never sent to the server, so a `bodySHA256` after one is not a
+/// query parameter. Parameters are matched on their exact key, as `parse_qs`
+/// does upstream, and the first occurrence wins (again matching upstream's
+/// `query["bodySHA256"][0]`).
+///
+/// No percent-decoding is applied. The key `bodySHA256` consists entirely of
+/// unreserved characters, so a conformant encoding leaves it intact, and the
+/// value is a hex digest, whose characters are equally unaffected. This is not
+/// a bypass surface: `url` is covered by the HMAC verified before this runs, so
+/// an attacker cannot substitute a differently-spelled parameter without also
+/// forging the signature over it.
+fn body_sha256_param(url: &str) -> Option<&str> {
+    let (_, after_query) = url.split_once('?')?;
+    let query = after_query.split('#').next()?;
+    query.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name == BODY_HASH_PARAM).then_some(value)
+    })
 }
 
 /// Returns the HMAC key bytes: the Auth Token exactly as configured.
@@ -210,8 +278,37 @@ mod tests {
     /// letters, uppercase before lowercase), same recipe as above.
     const BYTE_SORT_ORDER_SIGNATURE: &str = "Ww6eWkSu0j/9l8dG3e+uIq1kCUI=";
 
+    /// Twilio's own JSON-body variant example, verbatim from "Explore the
+    /// algorithm yourself" (<https://www.twilio.com/docs/usage/security>): the
+    /// body below, its `bodySHA256` query parameter, and — constructed with the
+    /// documented recipe over the URL *alone*, since the JSON variant signs no
+    /// form fields — the expected signature
+    /// `printf '%s' "$url" | openssl dgst -sha1 -hmac '12345' -binary | base64`.
+    const JSON_BODY: &str = r#"{"property": "value", "boolean": true}"#;
+    const JSON_BODY_SHA256: &str =
+        "0a1ff7634d9ab3b95db5c9a2dfe9416e41502b283a80c7cf19632632f96e6620";
+    const JSON_BODY_URL: &str = concat!(
+        "https://example.com/myapp?bodySHA256=",
+        "0a1ff7634d9ab3b95db5c9a2dfe9416e41502b283a80c7cf19632632f96e6620"
+    );
+    const JSON_BODY_SIGNATURE: &str = "Klp85180pYIxzIO5cuyxpfh1BKw=";
+
     fn twilio_headers(signature: &str) -> Vec<(String, String)> {
         vec![(SIGNATURE_HEADER.to_string(), signature.to_string())]
+    }
+
+    /// Verifies the JSON-body variant: an empty parameter list plus the raw
+    /// body, which is authenticated by the URL's `bodySHA256` query parameter.
+    fn verify_json_body(url: &str, body: &[u8], signature: &str) -> Result<(), VerifyError> {
+        verify(
+            crate::Provider::Twilio,
+            &twilio_headers(signature),
+            body,
+            &Secret::new(OFFICIAL_TOKEN),
+            VerifyOptions::default()
+                .with_request_url(url)
+                .with_form_params(core::iter::empty::<(&str, &str)>()),
+        )
     }
 
     fn verify_with(params: &[(&str, &str)], signature: &str) -> Result<(), VerifyError> {
@@ -281,6 +378,8 @@ mod tests {
     fn raw_body_is_irrelevant_to_the_scheme() {
         // The signature covers the parsed fields, not the body bytes; pin that
         // passing arbitrary body bytes alongside valid context verifies fine.
+        // (Only true while the signed URL carries no `bodySHA256`: see
+        // `json_body_variant_*`.)
         let options = VerifyOptions::default()
             .with_request_url(OFFICIAL_URL)
             .with_form_params(OFFICIAL_PARAMS);
@@ -292,6 +391,155 @@ mod tests {
             options,
         );
         assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn json_body_variant_verifies_and_authenticates_the_body() {
+        // Twilio's own worked example: the URL alone is signed, and the body
+        // is authenticated by the `bodySHA256` query parameter carrying its
+        // SHA-256 hex digest. `sha256_hexdigest` is asserted against the
+        // documented digest independently so a bug in this provider's wiring
+        // cannot be masked by a bug in the shared helper.
+        assert_eq!(
+            crate::core::crypto::sha256_hexdigest(JSON_BODY.as_bytes()),
+            JSON_BODY_SHA256
+        );
+        assert_eq!(
+            verify_json_body(JSON_BODY_URL, JSON_BODY.as_bytes(), JSON_BODY_SIGNATURE),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn json_body_variant_rejects_a_swapped_body() {
+        // The bypass this closes: the signature and URL are unchanged, so only
+        // the `bodySHA256` check stands between an attacker-chosen body and an
+        // `Ok(())`.
+        assert_eq!(
+            verify_json_body(
+                JSON_BODY_URL,
+                br#"{"property": "attacker", "boolean": false}"#,
+                JSON_BODY_SIGNATURE
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn json_body_variant_rejects_an_altered_signed_body() {
+        // A single flipped byte of the real body must not pass.
+        let mut body = JSON_BODY.as_bytes().to_vec();
+        let last = body.len() - 1;
+        body[last] = b' ';
+        assert_eq!(
+            verify_json_body(JSON_BODY_URL, &body, JSON_BODY_SIGNATURE),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn malformed_body_sha256_fails_closed() {
+        // `twilio-python` compares the digest as an opaque string, so a
+        // malformed or wrong-length parameter is a plain comparison failure —
+        // never a silently skipped check. Each signature is validly computed
+        // over its own URL, so `SignatureMismatch` here can only come from the
+        // body-hash check and not from the HMAC.
+        let cases: &[(&str, &str)] = &[
+            // Not hex.
+            (
+                "https://example.com/myapp?bodySHA256=not-a-hex-digest-at-all-but-long-enough-to-look-right!!",
+                "Z8qKrg+/Q1Gp9IVtToZJ0VW82vQ=",
+            ),
+            // Valid hex, wrong length (SHA-1 size rather than SHA-256).
+            (
+                "https://example.com/myapp?bodySHA256=0a1ff7634d9ab3b95db5c9a2dfe9416e41502b28",
+                "cB8+ZyW0TufQ1tGySQc9x2fmJ44=",
+            ),
+            // Empty value.
+            (
+                "https://example.com/myapp?bodySHA256=",
+                "PZ2ZB8j1sTWZk/inD7lFpKm8iPA=",
+            ),
+        ];
+        for &(url, signature) in cases {
+            assert_eq!(
+                verify_json_body(url, JSON_BODY.as_bytes(), signature),
+                Err(VerifyError::SignatureMismatch),
+                "url: {url:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn body_sha256_is_compared_as_decoded_bytes() {
+        // Twilio emits a lowercase digest; this pins that the comparison is on
+        // the decoded 32 bytes rather than on the ASCII spelling, so a
+        // case-folded spelling is accepted. Documented rather than relied upon:
+        // hex encoding is canonical in practice, and this is the one input
+        // shape where the crate is deliberately more permissive than upstream's
+        // string comparison.
+        const URL: &str = concat!(
+            "https://example.com/myapp?bodySHA256=",
+            "0A1FF7634D9AB3B95DB5C9A2DFE9416E41502B283A80C7CF19632632F96E6620"
+        );
+        const SIGNATURE: &str = "GScayKQw4JgUJBVFEY3VkzEkYnI=";
+        assert_eq!(
+            verify_json_body(URL, JSON_BODY.as_bytes(), SIGNATURE),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn body_sha256_is_not_read_from_a_similar_named_parameter() {
+        // Only the exact `bodySHA256` key names a body commitment. A lookalike
+        // must not be mistaken for one — Twilio's SDKs match the key exactly
+        // (`parse_qs`), so a `bodySHA256x` parameter commits to nothing and the
+        // body check stays correctly skipped. The signature is valid over this
+        // exact URL, so if the lookalike *were* read the swapped body would
+        // fail; this pins that it is not read.
+        const URL: &str = concat!(
+            "https://example.com/myapp?bodySHA256x=",
+            "0a1ff7634d9ab3b95db5c9a2dfe9416e41502b283a80c7cf19632632f96e6620"
+        );
+        const SIGNATURE: &str = "xsTf5BeAjPX2Fn6DgoCix/OOr9Y=";
+        assert_eq!(
+            verify_json_body(URL, JSON_BODY.as_bytes(), SIGNATURE),
+            Ok(())
+        );
+        assert_eq!(verify_json_body(URL, b"attacker-chosen", SIGNATURE), Ok(()));
+    }
+
+    #[test]
+    fn body_sha256_is_read_from_anywhere_in_the_query() {
+        // `bodySHA256` is not required to be the first parameter, and other
+        // parameters around it must not disturb the lookup. Signature
+        // constructed over this exact URL with the documented recipe.
+        const URL: &str = concat!(
+            "https://example.com/myapp?a=1&bodySHA256=",
+            "0a1ff7634d9ab3b95db5c9a2dfe9416e41502b283a80c7cf19632632f96e6620&z=2"
+        );
+        const SIGNATURE: &str = "XfF5rbcC5Xzh39JhYVGh3vQlHAE=";
+        assert_eq!(
+            verify_json_body(URL, JSON_BODY.as_bytes(), SIGNATURE),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn fragment_is_not_part_of_the_query() {
+        // A `#` ends the query string: a `bodySHA256` after it is not a query
+        // parameter and must not be read as one. Signature constructed over this
+        // exact URL with the documented recipe.
+        const URL: &str = concat!(
+            "https://example.com/myapp?a=1#",
+            "0a1ff7634d9ab3b95db5c9a2dfe9416e41502b283a80c7cf19632632f96e6620"
+        );
+        const SIGNATURE: &str = "RMmDEbpnZkTnoUdeRvUv5GFboJU=";
+        assert_eq!(
+            verify_json_body(URL, b"attacker-chosen", SIGNATURE),
+            Ok(()),
+            "a fragment-borne lookalike is not a query parameter"
+        );
     }
 
     #[test]

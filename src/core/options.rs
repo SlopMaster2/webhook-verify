@@ -155,7 +155,9 @@ pub struct VerifyOptions {
     /// name keeps its received relative order.
     ///
     /// An explicitly empty list is meaningful (Twilio's JSON-body variant signs
-    /// the URL alone); omitting the option entirely fails closed with
+    /// the URL alone, leaving the body authenticated only by the `bodySHA256`
+    /// query parameter — which Twilio then verifies against `raw_body`); omitting
+    /// the option entirely fails closed with
     /// [`crate::VerifyError::MissingContext`] so a caller that forgot to parse
     /// the body cannot be confused with an attacker-supplied input.
     pub form_params: Option<Vec<(String, String)>>,
