@@ -1169,9 +1169,14 @@ worked example) and the reference implementations in Twilio's official SDKs
   the body bytes. Callers pass every received field via
   [`VerifyOptions::form_params`] (decided API shape; the URL goes in
   `VerifyOptions::request_url`). Sorting is applied by this crate — callers
-  pass fields in any order. A duplicate field name keeps its received
-  relative order (the official SDKs use keyed dicts, which cannot represent
-  duplicates). Omitting either option fails closed with `MissingContext`.
+  pass fields in any order. Under a repeated field name the values are sorted
+  and de-duplicated as well, exactly as `twilio-python`'s
+  `for value in sorted(set(values))` does; its `get_values` helper reads
+  duplicates from Flask `MultiDict`s and Django `QueryDict`s, so the reference
+  implementation does represent them. Two deliveries carrying the same
+  multiset of fields therefore sign identically regardless of the order the
+  caller received them in. Omitting either option fails closed with
+  `MissingContext`.
 - The signed URL is signed **verbatim**, and Twilio's signing backend is known
   to be inconsistent about whether the port appears in it. The official SDKs
   absorb that by signing **twice**: `twilio-python`'s `validate` compares
@@ -1236,11 +1241,15 @@ generic key Mailchimp uses for webhook-URL-check POSTs: the value
   (`mandrill_events`, historically the only field), not the body bytes.
   Callers pass every received field via [`VerifyOptions::form_params`], and
   the URL via `VerifyOptions::request_url`, exactly as with Twilio. Sorting
-  is applied by this crate — callers pass fields in any order. Mailchimp's
-  official verifier uses keyed dicts, which cannot represent duplicate field
-  names; this crate keeps a duplicate field's received relative order. Both
-  options must be supplied or verification fails closed with
-  `MissingContext`.
+  is applied by this crate — callers pass fields in any order. The reference
+  `generateSignature` iterates a keyed object (`Object.keys(params).sort()`
+  then `params[key]`), which cannot represent a repeated field name; this
+  crate handles that case by sorting and de-duplicating the values under a
+  repeated name (the same rule Twilio's reference implementation uses), so
+  each distinct value is signed once and two deliveries carrying the same
+  multiset of fields sign identically regardless of the order the caller
+  received them in. Both options must be supplied or verification fails
+  closed with `MissingContext`.
 - No timestamp in the signature scheme (`max_age` has no effect).
 
 ### Twitch

@@ -31,9 +31,13 @@
 //! `application/x-www-form-urlencoded` body themselves and pass every
 //! received field via [`VerifyOptions::form_params`]; the URL goes in
 //! [`VerifyOptions::request_url`]. Sorting is part of the signing scheme and
-//! is applied here; callers pass fields in any order. A duplicate field name
-//! keeps its received relative order (Mailchimp's official verifier uses
-//! keyed dicts, which cannot represent duplicates).
+//! is applied here; callers pass fields in any order. Mailchimp's reference
+//! verifier iterates a keyed object (`Object.keys(params)`), so it cannot
+//! represent a repeated field name at all; this crate handles that case by
+//! sorting and de-duplicating the values under a repeated name (the same rule
+//! Twilio's reference implementation uses), so each distinct value is signed
+//! once and two deliveries carrying the same multiset of fields sign
+//! identically regardless of the order the caller received them in.
 //!
 //! # Caller-supplied context
 //!
@@ -50,7 +54,6 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
@@ -100,11 +103,19 @@ pub(crate) fn verify(
     let key = webhook_key_bytes(secret.as_bytes())?;
 
     // Signed string: URL bytes first, then every form field's name and value
-    // concatenated in byte-wise-sorted-by-name order, no delimiters
-    // (`{url}{key1}{value1}{key2}{value2}...`). A stable sort preserves the
-    // received relative order of same-named fields.
-    let mut ordered: Vec<&(String, String)> = params.iter().collect();
-    ordered.sort_by(|a, b| a.0.cmp(&b.0));
+    // concatenated in byte-wise-sorted-by-(name, value) order, no delimiters
+    // (`{url}{key1}{value1}{key2}{value2}...`). Under a repeated name the
+    // values are sorted and de-duplicated as well, so two deliveries carrying
+    // the same multiset of fields sign identically regardless of the order the
+    // caller received them in.
+    let mut ordered: Vec<(&str, &str)> = params
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    ordered.sort_by(|(name_a, value_a), (name_b, value_b)| {
+        name_a.cmp(name_b).then_with(|| value_a.cmp(value_b))
+    });
+    ordered.dedup();
 
     let mut capacity = url.len();
     for (name, value) in &ordered {
@@ -226,9 +237,15 @@ mod tests {
     const SORTED_MULTI_SIGNATURE: &str = "D+0bnklDFx/yUQ1G6b9RBdGQTG8=";
 
     /// Locally constructed with the `mandrill_events` field name sent twice
-    /// (duplicates keep received relative order under this crate's stable
-    /// sort), same recipe as above.
-    const DUPLICATE_KEYS_SIGNATURE: &str = "+dtLALpd+/+yjAWVGUrhn4GX2Hg=";
+    /// (`b` then `a`): under a repeated name the values are sorted, so the
+    /// signed string is `...mandrill_eventsamandrill_eventsb` regardless of
+    /// arrival order, same recipe as above.
+    const DUPLICATE_KEYS_SIGNATURE: &str = "li5DSv789yS2FP6YD4icbGFQ2Dk=";
+
+    /// Locally constructed with `mandrill_events` sent twice as the *same*
+    /// value (`x`, `x`): the repeated value is signed once, same recipe as
+    /// above.
+    const DEDUPLICATED_VALUES_SIGNATURE: &str = "A+ygj9AIrzisVuxetHcxG7hg8ns=";
 
     fn mandrill_headers(signature: &str) -> Vec<(String, String)> {
         vec![(SIGNATURE_HEADER.to_string(), signature.to_string())]
@@ -343,9 +360,45 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_field_names_keep_relative_order() {
-        let params: [(&str, &str); 2] = [("mandrill_events", "[]"), ("mandrill_events", "[]")];
-        assert_eq!(verify_with(&params, DUPLICATE_KEYS_SIGNATURE), Ok(()));
+    fn duplicate_field_names_are_sorted_and_deduplicated() {
+        // Under a repeated name the values are sorted and de-duplicated, so a
+        // multiset of same-named values signs the same string regardless of the
+        // order it arrived in, and a repeated value is signed once. Each
+        // assertion feeds a permutation (or duplicate) of the values its
+        // signature was built from.
+        assert_eq!(
+            verify_with(
+                &[("mandrill_events", "b"), ("mandrill_events", "a")],
+                DUPLICATE_KEYS_SIGNATURE
+            ),
+            Ok(()),
+            "received order must not matter"
+        );
+        assert_eq!(
+            verify_with(
+                &[("mandrill_events", "a"), ("mandrill_events", "b")],
+                DUPLICATE_KEYS_SIGNATURE
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            verify_with(
+                &[("mandrill_events", "x"), ("mandrill_events", "x")],
+                DEDUPLICATED_VALUES_SIGNATURE
+            ),
+            Ok(()),
+            "the duplicate `x` is signed once"
+        );
+    }
+
+    #[test]
+    fn duplicating_a_value_matches_signing_it_once() {
+        // `mandrill_events=[]` sent twice de-duplicates to the same signed
+        // string as a single `[]`, so it verifies against the single-field
+        // check vector rather than needing a separate one.
+        let params: [(&str, &str); 2] =
+            [("mandrill_events", "[]"), ("mandrill_events", "[]")];
+        assert_eq!(verify_with(&params, CHECK_SIGNATURE), Ok(()));
     }
 
     #[test]

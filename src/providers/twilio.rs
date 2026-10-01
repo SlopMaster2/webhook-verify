@@ -27,9 +27,13 @@
 //! field via [`VerifyOptions::form_params`] — Twilio's docs explicitly warn
 //! against validating against a hardcoded subset of parameters, since new ones
 //! may be added without notice. Sorting is part of the signing scheme and is
-//! applied here; callers pass fields in any order. A duplicate field name
-//! keeps its received relative order (the official SDKs use keyed dicts, which
-//! cannot represent duplicates).
+//! applied here; callers pass fields in any order. Under a repeated field name
+//! the values are sorted and de-duplicated too, matching `twilio-python`'s
+//! `for value in sorted(set(values))` — its `get_values` helper reads
+//! duplicates from Flask `MultiDict`s and Django `QueryDict`s, so the reference
+//! implementation does represent them. Two deliveries carrying the same
+//! multiset of fields therefore sign identically regardless of the order the
+//! caller received them in.
 //!
 //! # The JSON-body variant
 //!
@@ -94,7 +98,6 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
@@ -148,10 +151,19 @@ pub(crate) fn verify(
     let key = auth_token_bytes(secret.as_bytes())?;
 
     // Signed string: URL bytes first, then every form field's name and value
-    // concatenated in byte-wise-sorted-by-name order, no delimiters. A stable
-    // sort preserves the received relative order of same-named fields.
-    let mut ordered: Vec<&(String, String)> = params.iter().collect();
-    ordered.sort_by(|a, b| a.0.cmp(&b.0));
+    // concatenated in byte-wise-sorted-by-(name, value) order, no delimiters.
+    // Sorting and de-duplicating *within* a repeated name mirrors
+    // `twilio-python`'s `for value in sorted(set(values))`, so two deliveries
+    // carrying the same multiset of fields sign identically no matter what
+    // order the caller received them in.
+    let mut ordered: Vec<(&str, &str)> = params
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    ordered.sort_by(|(name_a, value_a), (name_b, value_b)| {
+        name_a.cmp(name_b).then_with(|| value_a.cmp(value_b))
+    });
+    ordered.dedup();
 
     let mut capacity = url.len();
     for (name, value) in &ordered {
@@ -295,10 +307,23 @@ mod tests {
     /// (unicode boundary case), same recipe as above.
     const UNICODE_VALUE_SIGNATURE: &str = "DLL/FecOOE0jpcpnmuiNzzZ+GUA=";
 
-    /// Locally constructed with the field name `Body` sent twice
-    /// (`a` then `b`; duplicates keep received relative order under this
-    /// crate's stable sort), same recipe as above.
+    /// Locally constructed with the field name `Body` sent twice (`a` then
+    /// `b`; under a repeated name the values are sorted, so the signed string
+    /// is `...BodyaBodyb` whichever order they arrived in), same recipe as
+    /// above.
     const DUPLICATE_KEYS_SIGNATURE: &str = "Pb31hQflAm8COuKbY6mJvTRORg0=";
+
+    /// Locally constructed with `Body` sent twice as the *same* value (`a`,
+    /// `a`). `twilio-python` signs each distinct value under a repeated name
+    /// once (`for value in sorted(set(values))`), so the signed string is
+    /// `...Bodya` and not `...BodyaBodya`, same recipe as above.
+    const DEDUPLICATED_VALUES_SIGNATURE: &str = "K3Jb1Qrq6WGUVNRaQJOceDfSXUI=";
+
+    /// Locally constructed with a repeated `Tag` name arriving out of order and
+    /// with one repeated value (`b`, `a`, `a`) alongside a `Body` field: the
+    /// signed order is `Bodyx`, then `Taga`, then `Tagb` (values sorted and
+    /// de-duplicated), same recipe as above.
+    const MIXED_DUPLICATE_SIGNATURE: &str = "BTQiD7FaiaKg43vbe6eUNKX6+7U=";
 
     /// Locally constructed with mixed-case names pinned to byte-wise sorting
     /// (`Digits` < `api_version` < `StatusCallback`: digits sort before
@@ -674,15 +699,45 @@ mod tests {
     }
 
     #[test]
-    fn tampered_field_order_fails_when_signed_order_differs() {
-        // Duplicate names keep received relative order; reversing two values
-        // under one name changes the signed string and must fail.
+    fn duplicate_field_names_are_sorted_and_deduplicated() {
+        // `twilio-python` signs `for value in sorted(set(values))` under each
+        // repeated name, so a multiset of same-named values signs identically
+        // whatever order it arrived in, and a repeated value is signed once.
+        // Each assertion feeds a permutation (or duplicate) of the values its
+        // signature was built from.
         assert_eq!(
             verify_with(&[("Body", "a"), ("Body", "b")], DUPLICATE_KEYS_SIGNATURE),
             Ok(())
         );
         assert_eq!(
             verify_with(&[("Body", "b"), ("Body", "a")], DUPLICATE_KEYS_SIGNATURE),
+            Ok(()),
+            "received order must not matter"
+        );
+        assert_eq!(
+            verify_with(&[("Body", "a"), ("Body", "a")], DEDUPLICATED_VALUES_SIGNATURE),
+            Ok(()),
+            "the duplicate `a` is signed once"
+        );
+        assert_eq!(
+            verify_with(
+                &[("Tag", "b"), ("Tag", "a"), ("Body", "x"), ("Tag", "a")],
+                MIXED_DUPLICATE_SIGNATURE
+            ),
+            Ok(()),
+            "repeated out-of-order names with a repeated value"
+        );
+    }
+
+    #[test]
+    fn widening_a_duplicate_set_breaks_the_signature() {
+        // The set semantics are on the signed string, not a tolerance: adding a
+        // distinct third value under `Body` changes it and must fail.
+        assert_eq!(
+            verify_with(
+                &[("Body", "a"), ("Body", "b"), ("Body", "c")],
+                DUPLICATE_KEYS_SIGNATURE
+            ),
             Err(VerifyError::SignatureMismatch)
         );
     }

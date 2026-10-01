@@ -162,8 +162,10 @@ pub struct VerifyOptions {
     /// body. Pass **every** field as received — Twilio's own docs warn against
     /// verifying against a hardcoded subset, since providers may add
     /// parameters without notice. Sorting is applied here (it is part of the
-    /// signing scheme), so callers pass fields in any order. A duplicate field
-    /// name keeps its received relative order.
+    /// signing scheme), so callers pass fields in any order. Under a repeated
+    /// field name the values are sorted and de-duplicated as well, matching the
+    /// providers' reference implementations; the same multiset of fields
+    /// therefore verifies regardless of the order the caller received it in.
     ///
     /// An explicitly empty list is meaningful (Twilio's JSON-body variant signs
     /// the URL alone, leaving the body authenticated only by the `bodySHA256`
@@ -228,10 +230,11 @@ impl VerifyOptions {
 
     /// Sets [`VerifyOptions::form_params`], for schemes that sign parsed form
     /// fields (currently Twilio and Mandrill). Fields are sorted into signing
-    /// order during verification of those signed strings, so distinct field
-    /// names may be passed in any order. The one exception is duplicate field
-    /// names: each duplicate keeps its received relative order (the sort is
-    /// stable), so same-named fields must be passed exactly as they arrived.
+    /// order during verification of those signed strings, so fields may be
+    /// passed in any order. Under a repeated field name the values are sorted
+    /// and de-duplicated too, matching the providers' reference
+    /// implementations, so the same multiset of same-named values signs the
+    /// same string however it arrived.
     pub fn with_form_params<I, K, V>(mut self, params: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
