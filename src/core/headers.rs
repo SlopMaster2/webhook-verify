@@ -54,11 +54,33 @@ use std::collections::HashMap;
 /// # Slice caveat
 ///
 /// A [`slice`] also has an inherent `get` (indexing by `usize`) that shadows
-/// this trait method in method-call position. The slices the impls below cover
-/// (`[(&str, &str)]` and `[(String, String)]`) are usually passed as a `&[T]`
-/// to [`crate::verify()`], where unsized coercion selects the trait impl —
-/// there is no ambiguity in that position. Method-call syntax on the slice
-/// itself behaves like the maps above: use `HeaderMap::get(&slice, name)`.
+/// this trait method in method-call position, so method-call syntax on the
+/// slice itself behaves like the maps above: use `HeaderMap::get(&slice, name)`.
+///
+/// The two slice impls below (`[(&str, &str)]` and `[(String, String)]`) are
+/// reachable **only** that way — they cannot be handed to
+/// [`crate::verify()`] / [`crate::verify_any()`], because those take a
+/// `&dyn HeaderMap` and unsizing to a trait object requires a `Sized` source:
+/// passing a `&[T]` does not compile.
+///
+/// ```compile_fail
+/// # use webhook_verify::{Provider, Secret, verify};
+/// let table: &[(&str, &str)] = &[("X-Hub-Signature-256", "sha256=ab")];
+/// verify(
+///     Provider::GitHub,
+///     table, // error: the size for values of type `[(&str, &str)]`
+///            // cannot be known at compilation time
+///     b"the untouched request body",
+///     &Secret::new("your GitHub webhook secret"),
+///     Default::default(),
+/// )
+/// .ok();
+/// ```
+///
+/// To verify against a borrowed header table, pass a `Sized` one — an array
+/// `&[T; N]`, or an owning `Vec<T>` (which is what a subslice such as
+/// `&vec[..]` or `&array[1..]` should be converted to, since neither is
+/// `Sized` on its own).
 ///
 /// # `http::HeaderMap` support
 ///
@@ -156,9 +178,11 @@ impl HeaderMap for Vec<(&str, &str)> {
     }
 }
 
-/// Borrowed slice of str tuples — covers subsections of a header table
-/// (`&vec[..]`, `&array[1..]`, a function parameter that hands you `&[..]`)
-/// without an owning allocation alongside the array impl.
+/// Borrowed slice of str tuples, for the subsections of a header table that
+/// `verify()` cannot take as-is (`&vec[..]`, `&array[1..]`, a function
+/// parameter that hands you `&[..]` are all unsized, and `&dyn HeaderMap`
+/// needs a `Sized` source). Reachable through
+/// [`HeaderMap::get`](HeaderMap#get) — see the trait's slice caveat.
 impl HeaderMap for [(&str, &str)] {
     fn get(&self, name: &str) -> Option<&str> {
         self.iter()
@@ -168,7 +192,8 @@ impl HeaderMap for [(&str, &str)] {
 }
 
 /// Borrowed slice of owned strings, the unsized counterpart of the
-/// `[(String, String); N]` array impl.
+/// `[(String, String); N]` array impl, and like it reachable only through
+/// [`HeaderMap::get`](HeaderMap#get).
 impl HeaderMap for [(String, String)] {
     fn get(&self, name: &str) -> Option<&str> {
         self.iter()
@@ -409,11 +434,14 @@ mod tests {
         assert_eq!(result, Err(crate::VerifyError::SignatureMismatch));
     }
 
-    #[cfg(feature = "http")]
     #[test]
-    fn slices_verify_end_to_end() {
-        // The same GitHub vector passed as a plain slice reaches the same
-        // result as through the Vec/array forms.
+    fn str_tuple_arrays_verify_end_to_end() {
+        // The same GitHub vector passed as a `&[(&str, &str); 1]` *array*
+        // reference — a `Sized` value, so it is the array impl above that
+        // satisfies `verify()`'s `&dyn HeaderMap` parameter, on every feature
+        // combination. The unsized slice impls cannot be passed here at all
+        // (see the trait's slice caveat); they are covered by the
+        // `HeaderMap::get` tests above.
         use crate::{Provider, Secret, verify};
 
         let result = verify(
