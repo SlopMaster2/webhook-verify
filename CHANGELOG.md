@@ -425,6 +425,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Twilio's port inconsistency in the signed URL was documented nowhere** (#345).
+  `twilio-python`'s `RequestValidator.validate` signs the request URL **twice**
+  and accepts a match against either — `remove_port(uri)` and `add_port(uri)`,
+  the latter defaulting to `443` for `https` and `80` otherwise — commented
+  *"since sig generation on back end is inconsistent"*. `twilio.rs` signs
+  exactly one string, the `request_url` value the caller configured, verbatim,
+  and neither the module docs nor `spec.md` §3 said so.
+
+  So an operator who configured `https://example.com/webhook` when Twilio
+  signed `https://example.com:443/webhook` got `SignatureMismatch` on **every**
+  delivery — an active-attack-shaped error for what is a configuration
+  mismatch, with nothing in the docs to let them connect the two.
+
+  Documented rather than changed, which is the deliberate call here. The
+  crate's verbatim-URL contract is a real design choice, and upstream's fix
+  widens verification to *two* candidate signed strings, one of which the
+  caller never configured — a second branch for the signed-string audit story
+  to keep honest. What was missing was the diagnosis, not the retry, so the
+  port spelling is now called out at the three places an operator would look:
+  the module docs (a new `# The port in the signed URL` section), `spec.md` §3's
+  Twilio bullet (naming upstream's `remove_port`/`add_port` retry and why this
+  crate does not mirror it), and `VerifyOptions::request_url`, which is shared
+  across five providers and already carried the analogous note for HubSpot's
+  URL-decoding.
+
+  `twilio.rs`'s new `port_is_not_tried_alternately` pins the single-string
+  behavior in both directions — a signature valid over the port-stripped URL is
+  not rescued by retrying with the port added, and vice versa — so the
+  documented choice cannot drift into the two-URL behavior silently.
+
+  Documentation and one test. No verification behavior changes, no new
+  dependency, and no signed-string construction is touched.
+
 - **The `actix` and `tower` feature combinations without `sendgrid`/`paypal`
   warned on three items, and no CI job built either combination** (#335). The
   `clippy` job ran `--all-features`, where all three are used, so the warnings
