@@ -59,6 +59,33 @@
 //! the `bodySHA256` parameter above — pass the received bytes as `raw_body`
 //! either way.
 //!
+//! # The port in the signed URL
+//!
+//! Twilio's signing backend is known to be inconsistent about whether the port
+//! appears in the URL it signs, and the official SDKs absorb that by signing
+//! **twice**: `twilio-python`'s `RequestValidator.validate` computes the
+//! signature over both `remove_port(uri)` and `add_port(uri)` — the latter
+//! defaulting to `443` for `https` and `80` otherwise — and accepts a match
+//! against either, commented *"since sig generation on back end is
+//! inconsistent"* (`twilio/request_validator.py`).
+//!
+//! This crate signs **one** string: [`VerifyOptions::request_url`] verbatim,
+//! with no alternate-URL retry. That is the same verbatim-URL contract every
+//! URL-scoped provider here follows, and it keeps the signed string one
+//! auditable construction — accepting either form would mean verifying against
+//! two candidate signed strings, one of which the caller never configured.
+//!
+//! The consequence worth knowing how to diagnose: if Twilio signed
+//! `https://example.com:443/webhook` and `request_url` is
+//! `https://example.com/webhook` (or the reverse), **every** delivery fails
+//! with [`VerifyError::SignatureMismatch`] — an error shaped like an active
+//! attack for what is really a configuration mismatch. When a Twilio
+//! integration rejects all traffic with that variant and nothing else looks
+//! wrong, compare the port-qualified and port-stripped spellings against the
+//! URL configured in the Twilio console and pass the matching one.
+//! `port_is_not_tried_alternately` pins the single-string behavior so the
+//! documented choice cannot change silently.
+//!
 //! # Replay protection
 //!
 //! Twilio signs no timestamp, so [`VerifyOptions::max_age`] and the injected
@@ -606,6 +633,44 @@ mod tests {
             options,
         );
         assert_eq!(result, Err(VerifyError::SignatureMismatch));
+    }
+
+    #[test]
+    fn port_is_not_tried_alternately() {
+        // Twilio's signing backend is known to be inconsistent about whether
+        // the port appears in the signed URL, and the official SDKs absorb that
+        // by signing both spellings and accepting either
+        // (`twilio-python`: `valid_signature or valid_signature_with_port`,
+        // commented "since sig generation on back end is inconsistent"). This
+        // crate signs `request_url` verbatim and retries no alternate URL, so
+        // the port-qualified and port-stripped spellings are *not*
+        // interchangeable here. Pin both directions: a signature valid over one
+        // must not be rescued by the other, and a genuinely signed delivery
+        // must still verify. Without this, widening to two candidate signed
+        // strings — one the caller never configured — would be a silent
+        // behavior change rather than the documented choice.
+        //
+        // Signatures constructed with the documented recipe over an empty
+        // parameter list. The port-stripped URL is `verify_with`'s default, so
+        // that signature is the existing `EMPTY_PARAMS_SIGNATURE` rather than
+        // a second spelling of the same value:
+        //   printf '%s' "$url" | openssl dgst -sha1 -hmac '12345' -binary | base64
+        const PORT_URL: &str = "https://example.com:443/myapp";
+        const PORT_SIGNATURE: &str = "eR6XGaSSZgXExifpGrD4+fQoUwE=";
+
+        assert_eq!(verify_with(&[], EMPTY_PARAMS_SIGNATURE), Ok(()));
+        assert_eq!(verify_with_url(PORT_URL, &[], PORT_SIGNATURE), Ok(()));
+
+        assert_eq!(
+            verify_with_url(PORT_URL, &[], EMPTY_PARAMS_SIGNATURE),
+            Err(VerifyError::SignatureMismatch),
+            "a signature over the port-stripped URL is not retried with the port added"
+        );
+        assert_eq!(
+            verify_with(&[], PORT_SIGNATURE),
+            Err(VerifyError::SignatureMismatch),
+            "a signature over the port-qualified URL is not retried with the port stripped"
+        );
     }
 
     #[test]

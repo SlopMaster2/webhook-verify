@@ -1172,6 +1172,22 @@ worked example) and the reference implementations in Twilio's official SDKs
   pass fields in any order. A duplicate field name keeps its received
   relative order (the official SDKs use keyed dicts, which cannot represent
   duplicates). Omitting either option fails closed with `MissingContext`.
+- The signed URL is signed **verbatim**, and Twilio's signing backend is known
+  to be inconsistent about whether the port appears in it. The official SDKs
+  absorb that by signing **twice**: `twilio-python`'s `validate` compares
+  `compute_signature` over `remove_port(uri)` **and** over `add_port(uri)` (the
+  latter defaulting to `443` for `https`, `80` otherwise), returning
+  `valid_signature or valid_signature_with_port`, commented *"since sig
+  generation on back end is inconsistent"*. This crate signs one string and
+  retries no alternate URL, so a `request_url` whose port spelling differs from
+  the one Twilio signed fails **every** delivery with `SignatureMismatch` — an
+  error shaped like an active attack for what is a configuration mismatch. An
+  operator hitting it should pass whichever of the port-qualified /
+  port-stripped URLs matches what was configured in the Twilio console.
+  Accepting either form, as upstream does, would widen verification to two
+  candidate signed strings — one of them never configured by the caller — and
+  is deliberately not taken (issue #345). Pinned by
+  `twilio.rs`'s `port_is_not_tried_alternately`.
 - JSON-body variant: with an explicitly empty parameter list the request
   carries a `bodySHA256` query parameter and Twilio signs the URL **alone** —
   so the signature covers nothing of the body. This crate therefore

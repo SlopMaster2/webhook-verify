@@ -137,6 +137,17 @@ pub struct VerifyOptions {
     /// Supplying the configured constant from the provider dashboard is the
     /// intended use; reconstructing the URL from request headers behind a
     /// proxy is a common source of verification failures.
+    ///
+    /// Twilio has one extra trap here that is worth knowing about: its signing
+    /// backend is known to be inconsistent about whether the port appears in
+    /// the URL it signs, and the official SDKs sign both the port-qualified and
+    /// port-stripped spellings, accepting either. This crate signs the value
+    /// here verbatim and retries no alternate URL, so a Twilio integration
+    /// whose `request_url` port spelling differs from the signed one fails
+    /// every delivery with `SignatureMismatch`. That reads like an active
+    /// attack rather than a configuration mismatch, so if a Twilio receiver
+    /// rejects all traffic, try the other port spelling before suspecting
+    /// forgery. See `spec.md` §3's Twilio entry.
     pub request_url: Option<String>,
     /// HTTP request method (uppercase, e.g. `POST`), required by providers
     /// whose scheme signs it (currently HubSpot's v3 scheme, which signs
