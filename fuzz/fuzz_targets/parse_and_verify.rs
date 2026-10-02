@@ -224,8 +224,13 @@
 //!   gate, and timestamp-parse paths of `Provider::Custom` (`spec.md` §2.2).
 //! - `custom-raw-base64-signature` — the raw-body/base64 `CustomScheme`
 //!   target configuration (`X-Raw-Sig`, no prefix, no timestamp, three hash
-//!   algorithms), reaching base64 decode, the digest-length gate, and the
-//!   constant-time comparison for `Provider::Custom`.
+//!   algorithms crossed with all three base64-family encodings), reaching
+//!   base64 decode, the digest-length gate, and the constant-time comparison
+//!   for `Provider::Custom`. This is the only seed that reaches
+//!   `Encoding::Base64Url` and `Encoding::Base64NoPad` — the other two
+//!   `Custom` configurations hard-code `Encoding::Hex` — so the cross product
+//!   is what covers the `Encoding` dispatch in
+//!   `src/providers/custom.rs` arm for arm.
 //! - `custom-millis-timestamp-delivery` — the millisecond-unit `CustomScheme`
 //!   target configuration (`X-Ms-Signature` with a `sha256=` hex HMAC over
 //!   `{ts}:{body}`, plus the epoch-millisecond `X-Ms-Timestamp`), reaching the
@@ -861,23 +866,33 @@ fuzz_target!(|data: &[u8]| {
         &VerifyOptions::default(),
     );
 
-    let raw_b64 = |hash| CustomScheme {
+    // Both axes of the scheme are enumerated rather than one: `HashAlg`
+    // decides the digest-length gate the decoder's output must match, and
+    // `Encoding` decides *which* decoder runs, so a byte string that one
+    // engine decodes and another rejects is only found by trying the pair.
+    // `Encoding` is the axis that was missing — it was pinned to `Base64` here
+    // while the other two `Custom` seeds hard-code `Hex`, leaving `Base64Url`
+    // and `Base64NoPad` with no fuzz configuration at all despite §5.6 asking
+    // this target for every encoding-decoding path (issue #360).
+    let raw_b64 = |hash, encoding| CustomScheme {
         hash,
         signature_header: "X-Raw-Sig",
         timestamp_header: None,
         timestamp_unit: TimestampUnit::Seconds,
-        encoding: Encoding::Base64,
+        encoding,
         prefix: None,
         signed_string: |_headers, raw_body| raw_body.to_vec(),
     };
-    for hash in [HashAlg::Sha256, HashAlg::Sha1, HashAlg::Sha512] {
-        attempt(
-            Provider::Custom(raw_b64(hash)),
-            &headers,
-            body,
-            "fuzz-signing-secret",
-            &url_scoped_options.clone(),
-        );
+    for encoding in [Encoding::Base64, Encoding::Base64Url, Encoding::Base64NoPad] {
+        for hash in [HashAlg::Sha256, HashAlg::Sha1, HashAlg::Sha512] {
+            attempt(
+                Provider::Custom(raw_b64(hash, encoding)),
+                &headers,
+                body,
+                "fuzz-signing-secret",
+                &url_scoped_options.clone(),
+            );
+        }
     }
 
     // `TimestampUnit::Millis` is the one `CustomScheme` field neither

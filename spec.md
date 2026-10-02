@@ -3516,6 +3516,16 @@ A provider implementation is not mergeable until it has:
    yields, so it is the one place where attacker-supplied text picks which
    headers get looked up. Pinned by `fuzz_target_drives_the_ambiguity_scan` in
    `src/core/adapter_utils.rs` (issue #296).
+
+   `Provider::Custom` is not name-constructible, so it is driven only by the
+   target's hand-written `CustomScheme` configurations rather than by the
+   provider pool, and each of its declared enums needs its own pin. The
+   `TimestampUnit::Millis` dispatch and the full `Encoding` dispatch — all four
+   decoder arms (`hex`, and the `STANDARD` / `URL_SAFE` / `STANDARD_NO_PAD`
+   base64 engines) — are each required to be configured by at least one seed,
+   and the required set is itself checked against the `Encoding` dispatch's arm
+   count in `src/providers/custom.rs`, so a decoder arm added later cannot land
+   with no fuzz coverage (issues #275, #360).
 7. **Constant-time assertion** where feasible: a `dudect`-style statistical
    timing test on the comparison step, run in CI as a non-blocking
    (informational) job. *Implemented (2026-09): `constant_time_comparison` in
