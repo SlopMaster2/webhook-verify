@@ -425,6 +425,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Box: the module doc claimed a weaker security property than `spec.md` does
+  for the same rule**. Requiring both `BOX-SIGNATURE-PRIMARY` and
+  `BOX-SIGNATURE-SECONDARY` is the one place a provider module spells out *why*
+  a header is required as an attacker-facing argument, and the repo holds two
+  copies of that argument. `spec.md` §3 named the attacker who **knows one**
+  of Box's two signing keys; `box_webhooks.rs`'s module doc named one who
+  **knows neither key**.
+
+  The module doc was the wrong of the two. An attacker holding neither key
+  cannot forge a signature at all, with or without the requirement, so the
+  sentence was vacuous — and it sat in the module doc, which is the copy a
+  reader of `docs.rs` reaches for, while `spec.md`'s correct version was the
+  only record of the property. The two also contradicted
+  `single_signature_header_is_rejected` twenty lines below it in the same file,
+  whose comment already named "an attacker who knows one key but not the
+  other".
+
+  Corrected to `spec.md`'s claim, and expanded with the mechanism, which was
+  stated nowhere: `verify_hmac_sha256_any` compares both candidates against a
+  **single** expected digest derived from the caller's one key, so the two
+  headers are two spellings of one key's signature rather than two
+  independent verifications. Deleting the header the attacker cannot compute
+  is a `MissingHeader`; keeping it does not help, because a signature computed
+  under the other Box key matches neither candidate.
+
+  A new test,
+  `a_signature_under_the_other_box_key_does_not_satisfy_the_other_header`,
+  covers the half of that argument no test covered — the existing
+  `single_signature_header_is_rejected` covers stripping a header, but nothing
+  covered the attacker who keeps both headers and fills the one they cannot
+  compute with a well-formed value of their choosing. And a guard in
+  `src/providers/mod.rs`,
+  `box_both_headers_required_names_the_single_key_attacker_in_both_copies`,
+  reads both copies and pins the threat model rather than the surrounding
+  prose (which the two documents legitimately word differently): both must name
+  the single-key attacker, neither may name the vacuous one.
+
+  Documentation and two tests. No verification behavior changes, no
+  signed-string construction touched, no new dependency.
+
 - **`spec.md` §6 described a `cargo clippy` gate and a `cargo semver-checks`
   job CI no longer runs** (#349). §6 is normative and two of its eight
   bullets had drifted from `.github/workflows/ci.yml`:

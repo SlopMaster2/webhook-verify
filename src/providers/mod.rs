@@ -3798,6 +3798,50 @@ mod tests {
         }
     }
 
+    /// Box's `- Headers:` bullet is the one place in the repo where a
+    /// provider's *reason for requiring* a header is spelled out as a security
+    /// property, and the two copies of it — the normative `spec.md` §3 entry
+    /// and `box_webhooks.rs`'s module doc — had drifted into making different
+    /// claims. `spec.md` named the attacker who holds one of Box's two keys;
+    /// the module doc named one who holds neither, which is vacuous (an
+    /// attacker with neither key cannot forge a signature at all, with or
+    /// without the requirement) and so understated the property that
+    /// requirement actually buys.
+    ///
+    /// Pinned on the threat model rather than on the surrounding prose, which
+    /// the two documents legitimately word differently. Both must name the
+    /// single-key attacker; neither may name the vacuous one.
+    #[test]
+    fn box_both_headers_required_names_the_single_key_attacker_in_both_copies() {
+        let spec = include_str!("../../spec.md");
+        let start = spec.find("### Box").unwrap_or_else(|| {
+            panic!("spec.md §3 must keep a `### Box` heading naming Box's entry")
+        });
+        let spec_entry = &spec[start..];
+        let spec_entry = spec_entry
+            .split_once("\n### ")
+            .map_or(spec_entry, |(entry, _)| entry);
+        let module = module_doc("box_webhooks");
+
+        for (label, text) in [
+            ("spec.md §3's Box entry", spec_entry),
+            ("box_webhooks.rs's module doc", &module),
+        ] {
+            assert!(
+                text.contains("knows only one key") || text.contains("one of Box's two keys"),
+                "{label} must name the attacker who holds one of Box's two signing keys but not \
+                 the key the caller holds — that is the threat model requiring both signature \
+                 headers actually defends against"
+            );
+            assert!(
+                !text.contains("neither key"),
+                "{label} says an attacker who knows neither key is stopped by requiring both \
+                 headers, which is vacuous: with neither key there is no signature to forge, \
+                 with or without the requirement"
+            );
+        }
+    }
+
     /// The header a provider's signature is actually **read from** — the
     /// subset of the §4.4 ambiguity list that a caller has to look up.
     ///
