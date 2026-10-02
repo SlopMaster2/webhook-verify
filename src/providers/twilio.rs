@@ -50,9 +50,12 @@
 //! second check the signature would authenticate the URL alone, so an
 //! attacker who observes one legitimate JSON delivery could replay the same URL
 //! and signature with a fully attacker-chosen body. A malformed
-//! `bodySHA256` parameter is a comparison failure, never a skipped check; a URL
-//! with no `bodySHA256` parameter is unchanged, which is the
-//! form-encoded case where the signed form fields already cover the body.
+//! `bodySHA256` parameter is a comparison failure, never a skipped check —
+//! including the key with no `=` at all (`?bodySHA256`), which commits to no
+//! digest and is therefore **stricter** than upstream, whose `parse_qs` drops
+//! such a pair and skips the check. A URL with no `bodySHA256` parameter is
+//! unchanged, which is the form-encoded case where the signed form fields
+//! already cover the body.
 //!
 //! # Caller-supplied context
 //!
@@ -192,28 +195,57 @@ pub(crate) fn verify(
     // a malformed parameter is a comparison failure rather than a skipped
     // check (`twilio-python` compares the two as opaque strings, so a
     // wrong-length or non-hex value simply does not match).
-    if let Some(provided) = body_sha256_param(url) {
-        // A parameter that is not a hex digest cannot equal a SHA-256 digest,
-        // so this fails the comparison below. Spelled as an early return rather
-        // than `unwrap_or_default()` so the fail-closed path is visible.
-        let Ok(expected) = hex::decode(provided) else {
-            return Err(VerifyError::SignatureMismatch);
-        };
-        if !verify_sha256_digest(raw_body, &expected) {
-            return Err(VerifyError::SignatureMismatch);
+    match body_sha256_param(url) {
+        Some(BodyHashParam::Value(provided)) => {
+            // A parameter that is not a hex digest cannot equal a SHA-256
+            // digest, so this fails the comparison below. Spelled as an early
+            // return rather than `unwrap_or_default()` so the fail-closed path
+            // is visible.
+            let Ok(expected) = hex::decode(provided) else {
+                return Err(VerifyError::SignatureMismatch);
+            };
+            if !verify_sha256_digest(raw_body, &expected) {
+                return Err(VerifyError::SignatureMismatch);
+            }
         }
+        // A key with no `=` commits to no digest, so it can never equal
+        // `sha256_hexdigest(raw_body)`. Treating it as a failed comparison rather
+        // than as an absent parameter keeps the check un-skippable: reading it as
+        // "no `bodySHA256`" would hand an attacker-chosen body a clean `Ok(())`.
+        Some(BodyHashParam::Malformed) => return Err(VerifyError::SignatureMismatch),
+        None => {}
     }
 
     Ok(())
 }
 
-/// Returns the value of the `bodySHA256` query parameter of `url`, if present.
+/// The `bodySHA256` query parameter of the signed URL, as it appears there.
+///
+/// The distinction between [`Value`] and [`Malformed`] is load-bearing: both
+/// mean the parameter is present, so both are checked, and only the first can
+/// ever match a digest.
+///
+/// [`Value`]: BodyHashParam::Value
+/// [`Malformed`]: BodyHashParam::Malformed
+enum BodyHashParam<'a> {
+    /// The parameter carries a digest, which may or may not be a well-formed
+    /// SHA-256 hex string — both outcomes are comparison failures.
+    Value(&'a str),
+    /// The parameter is present as a bare key with no `=` (e.g. `?bodySHA256`).
+    /// No shape Twilio sends, and a shape `parse_qs` drops upstream, but here it
+    /// commits to nothing and must not be mistaken for an absent parameter.
+    Malformed,
+}
+
+/// Returns the `bodySHA256` query parameter of `url`, if present.
 ///
 /// The query string is everything after the first `?` up to the first `#`: a
 /// fragment is never sent to the server, so a `bodySHA256` after one is not a
 /// query parameter. Parameters are matched on their exact key, as `parse_qs`
 /// does upstream, and the first occurrence wins (again matching upstream's
-/// `query["bodySHA256"][0]`).
+/// `query["bodySHA256"][0]`) — valued or not, so a bare `bodySHA256` ahead of a
+/// properly valued one is reported as [`BodyHashParam::Malformed`] rather than
+/// searched past.
 ///
 /// No percent-decoding is applied. The key `bodySHA256` consists entirely of
 /// unreserved characters, so a conformant encoding leaves it intact, and the
@@ -221,13 +253,15 @@ pub(crate) fn verify(
 /// a bypass surface: `url` is covered by the HMAC verified before this runs, so
 /// an attacker cannot substitute a differently-spelled parameter without also
 /// forging the signature over it.
-fn body_sha256_param(url: &str) -> Option<&str> {
+fn body_sha256_param(url: &str) -> Option<BodyHashParam<'_>> {
     let (_, after_query) = url.split_once('?')?;
     let query = after_query.split('#').next()?;
-    query.split('&').find_map(|pair| {
-        let (name, value) = pair.split_once('=')?;
-        (name == BODY_HASH_PARAM).then_some(value)
-    })
+    query
+        .split('&')
+        .find_map(|pair| match pair.split_once('=') {
+            Some((name, value)) => (name == BODY_HASH_PARAM).then_some(BodyHashParam::Value(value)),
+            None => (pair == BODY_HASH_PARAM).then_some(BodyHashParam::Malformed),
+        })
 }
 
 /// Returns the HMAC key bytes: the Auth Token exactly as configured.
@@ -512,6 +546,11 @@ mod tests {
                 "https://example.com/myapp?bodySHA256=",
                 "PZ2ZB8j1sTWZk/inD7lFpKm8iPA=",
             ),
+            // Bare key, no `=` and so no digest at all.
+            (
+                "https://example.com/myapp?bodySHA256",
+                "WQzTl5Duh9HVXAoU0tgUrW/YDX4=",
+            ),
         ];
         for &(url, signature) in cases {
             assert_eq!(
@@ -520,6 +559,42 @@ mod tests {
                 "url: {url:?}"
             );
         }
+    }
+
+    #[test]
+    fn body_sha256_without_a_value_is_not_an_absent_parameter() {
+        // `?bodySHA256` with no `=` commits to no digest. `parse_qs` drops such a
+        // pair, so upstream reads it as "no body hash"; here it must not, because
+        // that would skip the only thing authenticating the body of a JSON-body
+        // delivery. Signature validly computed over this exact URL with the
+        // documented recipe, so `Ok(())` would mean the check was skipped.
+        const URL: &str = "https://example.com/myapp?bodySHA256";
+        const SIGNATURE: &str = "WQzTl5Duh9HVXAoU0tgUrW/YDX4=";
+        assert_eq!(
+            verify_json_body(URL, JSON_BODY.as_bytes(), SIGNATURE),
+            Err(VerifyError::SignatureMismatch)
+        );
+        assert_eq!(
+            verify_json_body(URL, b"attacker-chosen", SIGNATURE),
+            Err(VerifyError::SignatureMismatch),
+            "an attacker-chosen body must not ride in on a digest-less parameter"
+        );
+    }
+
+    #[test]
+    fn the_first_body_sha256_occurrence_wins() {
+        // A bare key ahead of a properly valued one is still the first
+        // occurrence, so it is the malformed shape that decides the outcome —
+        // not a search that walks past it to find the value that follows.
+        const URL: &str = concat!(
+            "https://example.com/myapp?bodySHA256&bodySHA256=",
+            "0a1ff7634d9ab3b95db5c9a2dfe9416e41502b283a80c7cf19632632f96e6620"
+        );
+        const SIGNATURE: &str = "Db6tT+UQQDFTF/JYaB4oO8eHEfI=";
+        assert_eq!(
+            verify_json_body(URL, JSON_BODY.as_bytes(), SIGNATURE),
+            Err(VerifyError::SignatureMismatch)
+        );
     }
 
     #[test]

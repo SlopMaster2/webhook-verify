@@ -1205,9 +1205,12 @@ worked example) and the reference implementations in Twilio's official SDKs
   wrong-length `bodySHA256` is a comparison failure (`SignatureMismatch`), not
   a skipped check, matching upstream's opaque-string comparison; the parameter
   is matched on its exact key, first occurrence wins, and the value is compared
-  as decoded bytes, so a case-folded hex spelling is accepted. A URL with no
-  `bodySHA256` parameter is unchanged — the form-encoded case, where the signed
-  fields already cover the body.
+  as decoded bytes, so a case-folded hex spelling is accepted. A key present
+  with no `=` at all (`?bodySHA256`) commits to no digest and is likewise a
+  comparison failure rather than an absent parameter — deliberately **stricter**
+  than upstream, where `parse_qs` drops such a pair and the body check is
+  skipped. A URL with no `bodySHA256` parameter is unchanged — the
+  form-encoded case, where the signed fields already cover the body.
 - No timestamp in the signature scheme (`max_age` has no effect).
 
 ### Mailchimp Transactional (Mandrill)

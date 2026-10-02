@@ -425,6 +425,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Twilio: a `bodySHA256` query parameter with no `=` skipped the one check
+  that authenticates the body.** `body_sha256_param` walked the query with
+  `find_map(|pair| { let (name, value) = pair.split_once('=')?; ... })`, and the
+  `?` on a pair with no `=` advanced to the next pair instead of reporting a
+  malformed parameter. So a `request_url` of `https://example.com/myapp?bodySHA256`
+  — the bare key, no digest — made `body_sha256_param` return `None`, the
+  `if let Some(...)` guarding the body check was skipped entirely, and
+  `verify()` returned `Ok(())` for **any** `raw_body`.
+
+  That is the exact bypass the JSON-body check exists to close. The signature
+  covers the URL alone there (the form-field list is empty), so the
+  `bodySHA256` parameter is the only thing binding the body; a caller who
+  configured a digest-less URL — or an attacker who could get one signed — got
+  `Ok(())` with a body of their choosing, while the module doc, `spec.md` §3,
+  and the existing `malformed_body_sha256_fails_closed` test all promised the
+  opposite ("a malformed parameter is a comparison failure rather than a
+  skipped check"). Three sibling shapes (`?bodySHA256=`, a non-hex value, a
+  wrong-length value) already failed closed; only the valueless one did not,
+  which is what made it read as settled.
+
+  `body_sha256_param` now returns a `BodyHashParam` that distinguishes *absent*
+  from *present but valueless*, and the valueless case returns
+  `SignatureMismatch` rather than falling through. This is deliberately
+  **stricter** than upstream: `twilio-python` feeds the query to `parse_qs`,
+  which drops a pair with no `=`, so upstream reads `?bodySHA256` as "no body
+  hash" and skips the check. Preferring the stricter reading here is the point
+  — the cost is bounded to URLs Twilio never sends (it always appends
+  `bodySHA256=<hex>`), and `url` is HMAC-covered before this runs, so the shape
+  cannot be substituted by an attacker without forging the signature too.
+
+  Three tests: the valueless case joins the existing
+  `malformed_body_sha256_fails_closed` table, `body_sha256_without_a_value_is_not_an_absent_parameter`
+  asserts both the real and an attacker-chosen body are rejected, and
+  `the_first_body_sha256_occurrence_wins` pins that a bare key *ahead* of a
+  properly valued one still decides the outcome (first occurrence wins, valued
+  or not), so the lookup cannot grow a search-past-malformed later. No new
+  dependency; `spec.md` §3 and the module doc record the divergence from
+  `parse_qs`.
+
 - **The Fuzz workflow built the fuzz target with `-O`, which compiles the
   overflow and debug assertions out.** Both steps of `.github/workflows/fuzz.yml`
   passed `-O` (`--release`) to `cargo fuzz build` / `cargo fuzz run`. That flag
