@@ -3671,6 +3671,27 @@ mod tests {
         );
     }
 
+    /// The text of `spec.md` §3, the per-provider signing-scheme section.
+    ///
+    /// The section is delimited by its own `## ` heading and the next top-level
+    /// `## ` heading, so a guard that only needs the section's prose does not
+    /// have to attribute its `### ` entries to providers — which is what
+    /// [`spec_section_three_entries`] exists for, and which is gated behind the
+    /// adapters because its caller checks `signature_header_names`. Ungated, so
+    /// a guard that scans §3 as one blob runs in every feature configuration
+    /// rather than only the adapter ones; the `panic!` names the section marker
+    /// this depends on.
+    fn spec_section_three(spec: &str) -> &str {
+        let start = match spec.find("## 3. Per-provider signing schemes") {
+            Some(start) => start,
+            None => panic!("spec.md must keep its `## 3. Per-provider signing schemes` heading"),
+        };
+        let end = spec[start..]
+            .find("\n## ")
+            .map_or(spec.len(), |at| start + at);
+        &spec[start..end]
+    }
+
     /// One `spec.md` §3 entry: its `### ` heading, the provider brand it
     /// documents (`None` when the heading names no single provider), and its
     /// body.
@@ -3684,30 +3705,20 @@ mod tests {
     /// Parses §3's `### ` entries and attributes each to the provider it
     /// documents.
     ///
-    /// The section is delimited by its own `## 3. Per-provider signing schemes`
-    /// heading and the next top-level `## ` heading, so the guard reads only the
-    /// provider entries and not §2 or §4. An entry's body runs from its heading
-    /// to the next `### ` (or the end of §3). Attribution uses the same
-    /// `Display`-brand matching as the README/crate-doc table guard, so a
+    /// The section is delimited by [`spec_section_three`], so the guard reads
+    /// only the provider entries and not §2 or §4. An entry's body runs from
+    /// its heading to the next `### ` (or the end of §3). Attribution uses the
+    /// same `Display`-brand matching as the README/crate-doc table guard, so a
     /// heading may qualify the brand (`Tally (form webhooks)`, `X (formerly
     /// Twitter)`, `Standard Webhooks spec`, `Mailchimp Transactional
     /// (Mandrill)`) but must not name two providers or none. Test helper over
-    /// compile-time `include_str!` data; the `panic!` names the section marker
-    /// this depends on.
+    /// compile-time `include_str!` data.
     #[cfg(any(feature = "tower", feature = "actix"))]
     fn spec_section_three_entries(spec: &str) -> Vec<SpecEntry> {
-        let start = match spec.find("## 3. Per-provider signing schemes") {
-            Some(start) => start,
-            None => panic!("spec.md must keep its `## 3. Per-provider signing schemes` heading"),
-        };
-        let end = spec[start..]
-            .find("\n## ")
-            .map_or(spec.len(), |at| start + at);
-
         let mut entries: Vec<SpecEntry> = Vec::new();
         let mut pending: Option<String> = None;
         let mut body = String::new();
-        for line in spec[start..end].lines() {
+        for line in spec_section_three(spec).lines() {
             if let Some(heading) = line.strip_prefix("### ") {
                 if let Some(previous) = pending.take() {
                     entries.push(spec_entry(previous, core::mem::take(&mut body)));
@@ -7044,7 +7055,6 @@ pub struct S {
     /// the guard's vacuity floor requires `spec.md` to keep naming both of
     /// these — a scheme documenting a third encoding has to be added here rather
     /// than silently skipped.
-    #[cfg(any(feature = "tower", feature = "actix"))]
     const ENCODING_WORDS: [&str; 2] = ["base64", "hex"];
 
     /// The offending phrase if `text` attaches an encoding to a *key*'s bytes
@@ -7076,7 +7086,6 @@ pub struct S {
     /// reason: `**hex**-encoded` renders as `hex-encoded`, and quoting the
     /// markers — doubled, when the line join split the pair — showed the reader
     /// something the source does not literally say (issue #339).
-    #[cfg(any(feature = "tower", feature = "actix"))]
     fn encoding_attached_to_key_bytes(source: &str) -> Option<String> {
         // One bullet's worth of context, quoted on failure. Bullets carry
         // several claims each, so quoting to the end of the file would bury the
@@ -7113,7 +7122,6 @@ pub struct S {
     /// so a quote cannot run past the end of the bullet or paragraph it sits in.
     /// Markdown emphasis is dropped, so the quote reads as the rendered page
     /// does (issue #339).
-    #[cfg(any(feature = "tower", feature = "actix"))]
     fn clause_within_unit(flat: &str, unit_starts: &[usize], at: usize) -> String {
         let unit_end = unit_starts
             .iter()
@@ -7140,7 +7148,6 @@ pub struct S {
     /// break stays a boundary instead of flattening into a run of spaces. The
     /// offsets are what let [`clause_within_unit`] stop a quote at the end of
     /// its bullet.
-    #[cfg(any(feature = "tower", feature = "actix"))]
     fn flatten_prose_with_unit_starts(source: &str) -> (String, Vec<usize>) {
         let mut flat = String::with_capacity(source.len());
         let mut unit_starts = Vec::new();
@@ -7174,7 +7181,6 @@ pub struct S {
     /// produced a quote spanning the bullet into the paragraph after it, and the
     /// `**hex**` there split across the join into `hex**-encoded`, so both
     /// artifacts are pinned on one input shaped like that module's.
-    #[cfg(any(feature = "tower", feature = "actix"))]
     #[test]
     fn encoding_on_key_quotes_only_its_own_bullet() {
         let source = "\
@@ -7227,25 +7233,26 @@ pub struct S {
     /// affected — they already split `- Algorithm:` from `- Key:` — so outside
     /// Typeform and X this was the module-doc template's shape, not the spec's.
     ///
-    /// Both prose surfaces a scheme is described in are scanned: each §3 entry
-    /// (via [`spec_section_three_entries`]) and each provider module doc. They
-    /// drift independently — the X entry and `x_twitter.rs`'s module doc carried
-    /// the identical sentence, so fixing only the spec would have left the
-    /// rustdoc copy wrong.
+    /// Both prose surfaces a scheme is described in are scanned: `spec.md` §3
+    /// (via [`spec_section_three`]) and each provider module doc. They drift
+    /// independently — the X entry and `x_twitter.rs`'s module doc carried the
+    /// identical sentence, so fixing only the spec would have left the rustdoc
+    /// copy wrong. §3 is scanned as one blob rather than entry by entry: this
+    /// guard reads prose, never attributes an entry to a provider, and taking
+    /// the entries would have pinned the whole guard to the configurations
+    /// where [`spec_section_three_entries`] is compiled (issue #353).
     ///
     /// Textual, so it cannot know what a sentence *means*: it rejects one shape
     /// because the shape is what carries the misreading. A rewording that
     /// moves the encoding onto the digest passes; one that re-attaches it to the
     /// key in different words ("the secret's bytes, base64") is caught, but a
     /// genuinely different phrasing would need this read by eye.
-    #[cfg(any(feature = "tower", feature = "actix"))]
     #[test]
     fn no_scheme_prose_attaches_the_encoding_to_the_key() {
-        let mut sites: Vec<(String, String)> =
-            spec_section_three_entries(include_str!("../../spec.md"))
-                .into_iter()
-                .map(|entry| (format!("spec.md §3 `{}`", entry.heading), entry.body))
-                .collect();
+        let mut sites: Vec<(String, String)> = vec![(
+            "spec.md §3".to_string(),
+            spec_section_three(include_str!("../../spec.md")).to_string(),
+        )];
         for stem in provider_module_stems() {
             sites.push((
                 format!("`src/providers/{stem}.rs` module docs"),
