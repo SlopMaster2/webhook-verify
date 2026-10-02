@@ -425,6 +425,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Fuzz workflow built the fuzz target with `-O`, which compiles the
+  overflow and debug assertions out.** Both steps of `.github/workflows/fuzz.yml`
+  passed `-O` (`--release`) to `cargo fuzz build` / `cargo fuzz run`. That flag
+  is not just an optimization request: cargo-fuzz's own help states its default
+  profile is optimized *with* `debug assertions and overflow checks enabled`,
+  and that `-O` replaces it with a plain release build. The flags it hands the
+  compiler confirm it — the default build's `RUSTFLAGS` contains
+  `-Cdebug-assertions`, the `-O` build's does not, and the resulting binaries
+  differ by ~1.1 MiB, the overflow-check panic paths being the largest part of
+  it.
+
+  So the nightly run was fuzzing the crate with the one class of check that
+  would surface an arithmetic mistake in exactly the code the target exists to
+  attack: provider modules compute byte offsets, split digests, and slice
+  index buffers by hand from attacker-chosen header values, and an overflow
+  there is a panic (a denial of service in an adapter that verifies
+  synchronously) that no corpus input could otherwise report. `cargo fuzz
+  build`'s default already keeps the optimizations — `-O` was buying speed the
+  target did not need; the timed run still sustains ~965 exec/sec, so the 600s
+  budget and the 2560 MiB `rss_limit_mb` are unaffected.
+
+  Two command-line flags removed and a comment recording why, so the next
+  person to add `-O` for throughput can see what it costs. No crate code,
+  dependency, or `spec.md` requirement changes.
+
 - **Box: the module doc claimed a weaker security property than `spec.md` does
   for the same rule**. Requiring both `BOX-SIGNATURE-PRIMARY` and
   `BOX-SIGNATURE-SECONDARY` is the one place a provider module spells out *why*

@@ -27,10 +27,17 @@ jobs:
           workspaces: |
             .
             fuzz
+      # No `-O`/`--release` here: cargo-fuzz already builds optimized, but its
+      # default profile is the one that keeps `-Cdebug-assertions`, and
+      # `-O` swaps that for a plain release build with the checks compiled
+      # out. Provider modules do their own byte-offset arithmetic and index
+      # slicing on attacker-controlled header values, so overflow checks are
+      # exactly what this target wants; `-print_final_stats=1` and the 600s
+      # budget below are unaffected either way.
       - name: Build fuzz target (every PR)
-        run: cargo fuzz build --target x86_64-unknown-linux-gnu -O
+        run: cargo fuzz build --target x86_64-unknown-linux-gnu
       - name: Timed fuzz run (nightly only)
         if: github.event_name == 'schedule'
         run: >
-          cargo fuzz run parse_and_verify --target x86_64-unknown-linux-gnu -O -- -max_total_time=600
+          cargo fuzz run parse_and_verify --target x86_64-unknown-linux-gnu -- -max_total_time=600
           -rss_limit_mb=2560 -print_final_stats=1
