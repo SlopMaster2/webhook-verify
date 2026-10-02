@@ -2213,10 +2213,15 @@ the timestamp string, and the example delivery used below).
   matching the docs' reference `hmac.new(hmac_secret, ...)`.
 - Timestamp validation routes through a strict IMF-fixdate parser
   (RFC 7231 §7.1.1.1, RFC 1123 four-digit-year spelling only): exactly 29
-  characters, a weekday name that must also match the date (as Go's
-  `time.Parse` and the `httpdate` crate enforce), a valid calendar day
-  (leap-year aware), 00–59 hour/minute/second (IMF-fixdate has no leap-second
-  `60`), a literal `GMT` designator, and a non-negative unix instant.
+  characters, a weekday name that must also match the date (required by RFC
+  7231 §7.1.1.1 → RFC 5322 §3.3 "the day-of-week (if included) MUST be the day
+  implied by the date", and enforced by the `httpdate` crate — *not* by Go's
+  `time.Parse`/`http.ParseTime`, so the crate is stricter than Go here), a
+  valid calendar day (leap-year aware, including the century rule), 00–59
+  hour/minute/second (RFC 5322 §3.3 permits a leap-second `60`; rejecting it
+  is a deliberate choice stricter than the RFC, since a `Klaviyo-Timestamp`
+  the provider never emits should not be silently normalized into a replayable
+  instant), a literal `GMT` designator, and a non-negative unix instant.
   Anything else — including the RFC 3339 spelling, non-`GMT` zones, and the
   two-digit-year variants — fails closed as `MalformedHeader`.
 - Replay protection: the timestamp is HMAC-covered, so the shared symmetric

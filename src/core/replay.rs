@@ -245,12 +245,23 @@ pub(crate) fn parse_rfc3339_timestamp(
 ///
 /// Validation is strict and fail-closed:
 /// - the weekday name must be one of the seven canonical English names *and*
-///   match the weekday of the parsed date (RFC 7231 requires the day name to
-///   be accurate; Go's `time.Parse` and the `httpdate` crate reject a
-///   mismatched name the same way),
+///   match the weekday of the parsed date. RFC 7231 §7.1.1.1 defines
+///   IMF-fixdate as a "fixed length/zone/capitalization subset" of RFC 5322
+///   §3.3, which requires that "the day-of-week (if included) MUST be the day
+///   implied by the date"; the `httpdate` crate enforces that too. Go does
+///   *not* — `time.Parse`'s documentation says "the day of the week is checked
+///   for syntax but it is otherwise ignored", and `http.ParseTime` delegates
+///   to it — so on this point the crate is deliberately stricter than Go.
 /// - the day must be valid for the month, including leap years,
-/// - hour/minutes/seconds must be in 00–59 (IMF-fixdate's grammar is
-///   `second = 2DIGIT`, so unlike RFC 3339 it has no leap-second value 60),
+/// - hour/minutes/seconds must be in 00–59. RFC 5322 §3.3 actually *permits*
+///   a leap second ("the time-of-day MUST be in the range 00:00:00 through
+///   23:59:60"), and the `second = 2DIGIT` grammar is the same shape as RFC
+///   3339's, so rejecting `60` is a deliberate choice stricter than the RFC —
+///   a header the provider never emits should not be silently normalized into
+///   a replayable instant, and a `60` that is not a real leap second has no
+///   unambiguous instant to normalize *to* (see [`parse_rfc3339_timestamp`],
+///   which keeps RFC 3339's `:60` but only at a genuine UTC-midnight
+///   leap-second insertion),
 /// - the four-digit year must map to a non-negative unix timestamp (dates
 ///   before 1970-01-01 are rejected). The grammar's `dddd` admits `0000` to
 ///   `9999`, so the upper end is 9999-12-31T23:59:59Z and every year in
@@ -362,9 +373,11 @@ pub(crate) fn parse_imf_fixdate(header: &'static str, value: &str) -> Result<u64
         return Err(malformed());
     }
 
-    // RFC 7231 requires the day name to be accurate for the date, exactly as
-    // Go's `time.Parse` and the `httpdate` crate enforce it. 1970-01-01 was a
-    // Thursday (Sunday-anchored index 4), so `days + 4` mod 7 is the weekday.
+    // RFC 7231 §7.1.1.1 imports RFC 5322 §3.3's requirement that "the
+    // day-of-week (if included) MUST be the day implied by the date" (Go's
+    // `time.Parse` and `http.ParseTime` do *not* enforce it; the `httpdate`
+    // crate does). 1970-01-01 was a Thursday (Sunday-anchored index 4), so
+    // `days + 4` mod 7 is the weekday.
     let computed_weekday = (days + 4).rem_euclid(7);
     if computed_weekday != weekday {
         return Err(malformed());
@@ -616,6 +629,20 @@ mod tests {
                 parse_header("Mon, 29 Feb 2016 00:00:00 GMT"),
                 Ok(1_456_704_000)
             );
+            // The century rule: divisible by 400 is a leap year (2000), while a
+            // plain divisible-by-100 century is not (2100). Both day names are
+            // the ones the date *would* have if the rule were absent, and 2100
+            // is post-epoch, so each assertion isolates the century branch from
+            // the weekday check and the pre-epoch guard: dropping either half of
+            // the rule turns the matching case into `Ok` and fails here.
+            assert_eq!(
+                parse_header("Tue, 29 Feb 2000 00:00:00 GMT"),
+                Ok(951_782_400)
+            );
+            assert_eq!(
+                parse_header("Mon, 29 Feb 2100 00:00:00 GMT"),
+                malformed("Mon, 29 Feb 2100 00:00:00 GMT")
+            );
             // A far-future date well inside the four-digit-year range; a
             // header the provider never emits still has to convert, because
             // the value is HMAC-covered and only `check_replay` decides
@@ -647,9 +674,10 @@ mod tests {
 
         #[test]
         fn weekday_name_must_match_the_date() {
-            // RFC 7231 requires an accurate day name; 2024-01-04 was a
-            // Thursday, so Wed/Thu-spelling mismatches fail closed even though
-            // every other field is a well-formed calendar date.
+            // RFC 7231 §7.1.1.1 → RFC 5322 §3.3: an accurate day name is
+            // required (which Go does not enforce — see this module's docs),
+            // so 2024-01-04's Wed/Thu-spelling mismatches fail closed even
+            // though every other field is a well-formed calendar date.
             assert_eq!(
                 parse_header("Wed, 04 Jan 2024 18:05:25 GMT"),
                 malformed("Wed, 04 Jan 2024 18:05:25 GMT")
@@ -683,7 +711,7 @@ mod tests {
                 "Thu, 29 Feb 2023 18:05:25 GMT",  // 2023 is not a leap year
                 "Thu, 04 Jan 2024 24:05:25 GMT",  // hour out of range
                 "Thu, 04 Jan 2024 18:60:25 GMT",  // minute out of range
-                "Thu, 04 Jan 2024 18:05:60 GMT",  // IMF-fixdate has no :60 (unlike RFC 3339)
+                "Thu, 04 Jan 2024 18:05:60 GMT",  // leap second, rejected as stricter than the RFC
                 "Thu, 04 Jan 2024 18:05:25",      // truncated seconds
                 "Thu, 04 Jan 2024 18:05:25 GTM",  // transposed zone
                 "Thu, 04 Jan 20224 18:05:25 GMT", // five-digit year
