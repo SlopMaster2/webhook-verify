@@ -5121,6 +5121,204 @@ mod tests {
         assert_eq!(fuzz_millis_timestamp_unit_hits(target), 0);
     }
 
+    /// Every `Encoding` variant is a decoder the fuzz target must configure
+    /// (issue #360).
+    ///
+    /// The sibling guard above pins `TimestampUnit::Millis`; this one pins the
+    /// other `CustomScheme` enum, which rotted the same way and for the same
+    /// reason. `src/providers/custom.rs` dispatches `Encoding` over four decoder
+    /// arms — `hex::decode`, and the `STANDARD` / `URL_SAFE` /
+    /// `STANDARD_NO_PAD` base64 engines — but the target's three
+    /// `CustomScheme` configurations each pinned `encoding` to a single variant
+    /// (`Hex` twice, `Base64` once), so the two base64 variants added in #330
+    /// were driven by no fuzz configuration at all. `spec.md` §5.6 asks for each
+    /// provider's *encoding-decoding* path to be reachable from this target, and
+    /// those two arms are the ones whose alphabet and padding rules differ from
+    /// the third, which is exactly where a decoder mishandles adversarial bytes.
+    /// Their unit tests are hand-written tables of well-formed digests, so
+    /// arbitrary input is what they do not cover.
+    ///
+    /// The requirement is checked against the `Encoding` dispatch's own arm
+    /// count rather than against a hand-written list alone, so a *fifth* variant
+    /// added later cannot land with no fuzz coverage: adding an arm to
+    /// `src/providers/custom.rs` without adding it to the list fails
+    /// [`custom_encoding_dispatch_arm_count_matches_the_variant_list`], which
+    /// runs even where this one cannot (it needs `fuzz/`). That matters because
+    /// the `Encoding::Base64NoPad` docs record the remaining cell — URL-safe
+    /// *and* unpadded — as an anticipated one-line follow-up, so the list is
+    /// expected to grow.
+    ///
+    /// Per variant it is a floor of one, not an exact count: what matters is
+    /// that the decoder is driven, and a second configuration is a gain, not
+    /// drift.
+    ///
+    /// `fuzz/` is excluded from the crates.io tarball (Cargo.toml `exclude`), so
+    /// in a packaged checkout the file does not exist and this guard is skipped —
+    /// it is a repo-internal test, not part of the shipped crate's contract.
+    #[test]
+    fn fuzz_target_configures_every_custom_encoding_variant() {
+        use std::fs;
+        use std::path::Path;
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let target = match fs::read_to_string(root.join("fuzz/fuzz_targets/parse_and_verify.rs")) {
+            Ok(src) => src,
+            // `fuzz/` not present (e.g. the publish tarball): nothing to guard
+            // against here, and the crate's own tests must not fail on a file it
+            // does not ship.
+            Err(_) => return,
+        };
+
+        for variant in custom_encoding_variant_names() {
+            assert!(
+                fuzz_encoding_variant_hits(&target, variant) > 0,
+                "fuzz target must configure at least one `CustomScheme` with \
+                 `Encoding::{variant}` — no other configuration sets it, so that decoder arm in \
+                 `src/providers/custom.rs` is driven by no fuzz input at all and `spec.md` §5.6 is \
+                 unmet for it"
+            );
+        }
+    }
+
+    /// Every variant `src/providers/custom.rs`'s `Encoding` dispatch decodes
+    /// with, as `Variant` spellings.
+    ///
+    /// Hand-maintained, and pinned against the dispatch's own arm count by
+    /// [`fuzz_target_configures_every_custom_encoding_variant`] so it cannot fall
+    /// behind the enum. Written as strings rather than matched on the enum
+    /// because Rust offers no way to enumerate an enum's variants, and the target
+    /// names them textually (`Encoding::Base64Url`), which is what the fuzz
+    /// coverage is actually expressed in.
+    fn custom_encoding_variant_names() -> Vec<&'static str> {
+        vec!["Hex", "Base64", "Base64Url", "Base64NoPad"]
+    }
+
+    /// How many arms `src/providers/custom.rs`'s `Encoding` decode dispatch has.
+    ///
+    /// Counted from the source rather than asserted as a literal, because the
+    /// literal is the thing that rots: an arm added to the `match` is the change
+    /// that needs new fuzz coverage, and this is what notices. Scoped to the
+    /// dispatch by its two anchors so the `Display` impl's arms over the same
+    /// enum — and every other mention of a variant in the module — are not
+    /// counted in. Both anchors are load-bearing: losing the opening one means
+    /// this silently reports zero arms and the list-length check fails loudly
+    /// rather than passing.
+    fn custom_encoding_dispatch_arm_count() -> usize {
+        use std::fs;
+        use std::path::Path;
+
+        const OPEN: &str = "let bytes = match scheme.encoding {";
+        const CLOSE: &str = "    };";
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/providers/custom.rs");
+        let Ok(src) = fs::read_to_string(path) else {
+            // The crate's own module: unreadable only if the manifest dir is
+            // wrong, which no other test in this file survives either.
+            return 0;
+        };
+        let Some(start) = src.find(OPEN) else {
+            return 0;
+        };
+        let after_open = &src[start + OPEN.len()..];
+        let Some(end) = after_open.find(CLOSE) else {
+            return 0;
+        };
+        after_open[..end]
+            .lines()
+            .filter(|line| strip_comment(line).contains("Encoding::"))
+            .count()
+    }
+
+    /// The count of code (non-comment) lines in the fuzz target that name
+    /// `Encoding::<variant>`. Whole-line `//` comments and trailing `// …`
+    /// comments are dropped first: the target documents each configuration's
+    /// rationale in prose that names the very variants this counts, so a raw line
+    /// count would be satisfied by a comment alone. A `//` inside a string
+    /// literal would be mis-trimmed; the fuzz target has none, and this is a
+    /// floor check over a repo-internal file, not a parser.
+    fn fuzz_encoding_variant_hits(target: &str, variant: &str) -> usize {
+        target
+            .lines()
+            .filter(|line| names_encoding_variant(strip_comment(line), variant))
+            .count()
+    }
+
+    /// Whether `line` names `Encoding::<variant>` as a whole path segment.
+    ///
+    /// A plain substring search is not enough here, and the failure it allows is
+    /// exactly the one this guard exists to catch: `Encoding::Base64` is a
+    /// prefix of both `Encoding::Base64Url` and `Encoding::Base64NoPad`, so a
+    /// target that configured only the two variants would satisfy a
+    /// substring-based check for the third — under-reporting coverage rather
+    /// than over-reporting it, which is the direction a reader would never
+    /// notice. Requiring the next character to not continue an identifier makes
+    /// each variant independently required.
+    fn names_encoding_variant(line: &str, variant: &str) -> bool {
+        let needle = format!("Encoding::{variant}");
+        line.match_indices(&needle).any(|(at, _)| {
+            line[at + needle.len()..]
+                .chars()
+                .next()
+                .is_none_or(|next| !next.is_alphanumeric() && next != '_')
+        })
+    }
+
+    /// `line` reduced to its code: a whole-line `//` comment and a trailing
+    /// `// …` comment are both removed, so the result is the empty string when
+    /// the line is nothing but prose and a substring search over it comes back
+    /// false.
+    ///
+    /// Shared by [`fuzz_encoding_variant_hits`] and
+    /// [`custom_encoding_dispatch_arm_count`], which both need to ignore prose.
+    fn strip_comment(line: &str) -> &str {
+        let line = line.trim_start();
+        if line.starts_with("//") {
+            return "";
+        }
+        match line.find("//") {
+            Some(at) => &line[..at],
+            None => line,
+        }
+    }
+
+    #[test]
+    fn fuzz_encoding_variant_hits_ignores_prose() {
+        // The positive side: a struct-literal configuration and a list element
+        // naming the variant in code.
+        let target = "\
+            let a = CustomScheme { encoding: Encoding::Base64Url, ..d };
+            for encoding in [Encoding::Base64, Encoding::Base64NoPad] {
+        ";
+        assert_eq!(fuzz_encoding_variant_hits(target, "Base64Url"), 1);
+        assert_eq!(fuzz_encoding_variant_hits(target, "Base64NoPad"), 1);
+        // A prefix is not a variant: `Base64Url` must not satisfy `Base64`.
+        assert_eq!(fuzz_encoding_variant_hits(target, "Base64"), 1);
+
+        // The negative side: only a module-doc bullet, a prose comment, and a
+        // trailing mention — none of which configure the variant.
+        let target = "\
+//! - `custom-raw-base64-signature` — also reaching Encoding::Base64Url.
+// The Base64Url arm picks up the URL_SAFE engine.
+            let d = CustomScheme { encoding: Encoding::Base64, ..e }; // was Encoding::Base64Url
+        ";
+        assert_eq!(fuzz_encoding_variant_hits(target, "Base64Url"), 0);
+        assert_eq!(fuzz_encoding_variant_hits(target, "Base64NoPad"), 0);
+    }
+
+    /// The positive side of [`custom_encoding_dispatch_arm_count`]: the real
+    /// dispatch has one arm per listed variant today, and comments mentioning
+    /// variants inside the match are not counted as extra arms.
+    #[test]
+    fn custom_encoding_dispatch_arm_count_matches_the_variant_list() {
+        assert_eq!(
+            custom_encoding_variant_names().len(),
+            custom_encoding_dispatch_arm_count(),
+            "the hand-maintained variant list must match `src/providers/custom.rs`'s `Encoding` \
+             decode dispatch — `Display`'s arms over the same enum must not be counted, and a new \
+             decoder arm must be added to the list"
+        );
+    }
+
     #[test]
     fn fuzz_seed_bullets_and_corpus_agree() {
         use std::fs;

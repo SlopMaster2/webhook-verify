@@ -425,6 +425,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Encoding::Base64Url` and `Encoding::Base64NoPad` had no fuzz coverage**
+  (issue #360). `spec.md` §5.6 requires each provider's *encoding-decoding*
+  path to be reachable from the shared `cargo fuzz` target, and
+  `Provider::Custom` dispatches `Encoding` over four decoder arms —
+  `hex::decode`, and the `STANDARD` / `URL_SAFE` / `STANDARD_NO_PAD` base64
+  engines. All three `CustomScheme` configurations in
+  `fuzz/fuzz_targets/parse_and_verify.rs` pinned `encoding` to a single variant
+  (`Hex` twice, `Base64` once), so the two variants added in #330 were driven by
+  no fuzz input at all. That is the direction most likely to hide a bug: the two
+  uncovered arms are precisely the ones whose alphabet and padding rules differ
+  from the third, which is where a decoder mishandles adversarial bytes, and
+  their unit tests are hand-written tables of well-formed digests.
+
+  The `custom-raw-base64-signature` seed now takes the encoding as well as the
+  hash and crosses all three base64-family variants with all three hash
+  algorithms, so the `Encoding` dispatch is covered arm for arm. Both axes are
+  enumerated rather than one because `HashAlg` sets the digest-length gate the
+  decoder's output must match, so a byte string one engine decodes and another
+  rejects is only found by trying the pair.
+
+  Pinned by `fuzz_target_configures_every_custom_encoding_variant` in
+  `src/providers/mod.rs`, following the existing
+  `TimestampUnit::Millis` guard (#275). The required set is checked against the
+  `Encoding` dispatch's own arm count, so a *fifth* variant cannot later land
+  with no fuzz coverage and a green build — which matters because the
+  `Encoding::Base64NoPad` docs already record the remaining URL-safe-and-unpadded
+  cell as an anticipated follow-up. The guard's matcher requires a full path
+  segment rather than a substring, since `Encoding::Base64` is a prefix of both
+  `Encoding::Base64Url` and `Encoding::Base64NoPad` and a substring search would
+  report coverage the target does not have.
+
+  Test-only: no verification behavior, signature, or public API changes, and no
+  new dependency.
+
 - **Twilio: a `bodySHA256` query parameter with no `=` skipped the one check
   that authenticates the body.** `body_sha256_param` walked the query with
   `find_map(|pair| { let (name, value) = pair.split_once('=')?; ... })`, and the
