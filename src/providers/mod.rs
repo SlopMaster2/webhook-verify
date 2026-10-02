@@ -1428,17 +1428,19 @@ pub(crate) fn provider_sent_duplicate_headers(provider: &Provider) -> &'static [
 /// or a NUL is used exactly as configured, byte for byte — the key is never
 /// trimmed before the MAC, because that would silently break every deployment
 /// that signs with a padded secret instead of reporting the problem.
+#[must_use = "ignoring the verification result can let forged webhooks through"]
+#[inline]
 pub fn verify(
     provider: Provider,
     headers: &dyn HeaderMap,
     raw_body: &[u8],
     secret: &Secret,
-    options: VerifyOptions,
+    opts: VerifyOptions,
 ) -> Result<(), VerifyError> {
     // The by-value signature is pure ergonomics: no provider mutates its
     // options, so delegate to the borrowing dispatch below immediately rather
     // than ever cloning the caller's options.
-    verify_ref(provider, headers, raw_body, secret, &options)
+    verify_ref(provider, headers, raw_body, secret, &opts)
 }
 
 /// The shared verification dispatch, taking `options` by reference.
@@ -1451,6 +1453,8 @@ pub fn verify(
 /// otherwise copy `request_url`, `form_params`, `webhook_id`, and the
 /// `verifying_material` key/certificate bytes each time, despite `verify`
 /// only ever reading them.
+#[inline]
+#[must_use = "ignoring the verification result can let forged webhooks through"]
 pub(crate) fn verify_ref(
     provider: Provider,
     headers: &dyn HeaderMap,
@@ -1717,17 +1721,19 @@ fn unusable_secret_reason(secret: &Secret) -> Option<&'static str> {
 /// [`VerifyError::InvalidSecret`], so an all-garbled configuration is
 /// reported as an operator-configuration error rather than disguised as a
 /// forgery.
+#[must_use = "ignoring the verification result can let forged webhooks through"]
+#[inline]
 pub fn verify_any(
     provider: Provider,
     headers: &dyn HeaderMap,
     raw_body: &[u8],
     secrets: &[Secret],
-    options: VerifyOptions,
+    opts: VerifyOptions,
 ) -> Result<(), VerifyError> {
     // The by-value signature is pure ergonomics (no provider mutates its
     // options), so delegate to the borrowing dispatch below immediately rather
     // than ever cloning the caller's options.
-    verify_any_ref(provider, headers, raw_body, secrets, &options)
+    verify_any_ref(provider, headers, raw_body, secrets, &opts)
 }
 
 /// The shared multi-secret dispatch, taking `options` by reference.
@@ -1742,6 +1748,8 @@ pub fn verify_any(
 ///
 /// The aggregation rules documented on [`verify_any`] live here, so a
 /// caller-supplied secret list and an adapter-supplied one cannot diverge.
+#[inline]
+#[must_use = "ignoring the verification result can let forged webhooks through"]
 pub(crate) fn verify_any_ref(
     provider: Provider,
     headers: &dyn HeaderMap,
