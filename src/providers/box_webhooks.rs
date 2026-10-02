@@ -14,7 +14,13 @@
 //!   secondary key needs no downtime: a delivery verifies when **either**
 //!   header matches the [`Secret`](crate::core::secret::Secret) the caller
 //!   holds. Both headers are required (Box always sends both); an attacker
-//!   who knows neither key cannot strip one to dodge a mismatch.
+//!   who knows one of Box's two keys but not the key the caller holds cannot
+//!   strip a header to dodge a mismatch — deleting it is a
+//!   [`VerifyError::MissingHeader`], and keeping it does not help, because both
+//!   headers are compared against a **single** expected digest derived from the
+//!   caller's one key rather than verified independently. A signature computed
+//!   under the other key matches neither candidate, so it cannot stand in for
+//!   the header the attacker is unable to compute.
 //! - Signed string: `"{raw_body}{delivery_timestamp}"` — the raw body bytes
 //!   followed by the delivery timestamp **exactly as it appears in its
 //!   header**, with no separators (Box's reference implementation
@@ -222,6 +228,13 @@ mod tests {
     const PRIMARY_SECRET: &str = "SamplePrimaryKey";
     const SECONDARY_SECRET: &str = "SampleSecondaryKey";
 
+    /// A syntactically well-formed signature that no Box key produces: 32
+    /// zero bytes in standard base64. Stands in for the header an attacker
+    /// who holds only one of the two keys can supply for the *other* header,
+    /// which they cannot compute. It decodes to the right length so the
+    /// rejection is a signature mismatch, not a `BadEncoding` one.
+    const FOREIGN_SIGNATURE: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
     /// Signatures over `BODY || TIMESTAMP` for the replay-window boundary
     /// tests. Each is keyed by `PRIMARY_SECRET`, locally constructed with
     /// OpenSSL over the concatenation, mirroring the frozen vector's method:
@@ -329,6 +342,47 @@ mod tests {
             Err(VerifyError::MissingHeader {
                 header: PRIMARY_SIGNATURE_HEADER
             })
+        );
+    }
+
+    #[test]
+    fn a_signature_under_the_other_box_key_does_not_satisfy_the_other_header() {
+        // `single_signature_header_is_rejected` covers the strip-the-header
+        // half of the module docs' attacker claim. This covers the other half:
+        // the attacker keeps both headers and fills the one they cannot
+        // compute with a well-formed value of their choosing.
+        //
+        // `verify_hmac_sha256_any` compares both candidates against a single
+        // expected digest derived from the caller's one key, so a signature
+        // made under the *other* Box key matches neither candidate. Note the
+        // genuine delivery is the mirror image and must still verify: there,
+        // the other key's signature is present and correctly does not match,
+        // which is what `official_delivery_verifies_with_primary_key` and
+        // `official_delivery_verifies_with_secondary_key` cover. Requiring a
+        // match in both headers would break the rotation these two headers
+        // exist to support.
+        assert_eq!(
+            verify_with(
+                BODY,
+                FOREIGN_SIGNATURE,
+                SECONDARY_SIGNATURE,
+                TIMESTAMP,
+                PRIMARY_SECRET,
+                clocked_at(1_577_862_000, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+
+        assert_eq!(
+            verify_with(
+                BODY,
+                PRIMARY_SIGNATURE,
+                FOREIGN_SIGNATURE,
+                TIMESTAMP,
+                SECONDARY_SECRET,
+                clocked_at(1_577_862_000, Some(Duration::from_secs(300))),
+            ),
+            Err(VerifyError::SignatureMismatch)
         );
     }
 
