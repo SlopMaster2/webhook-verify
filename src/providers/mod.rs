@@ -7044,6 +7044,7 @@ pub struct S {
     /// the guard's vacuity floor requires `spec.md` to keep naming both of
     /// these — a scheme documenting a third encoding has to be added here rather
     /// than silently skipped.
+    #[cfg(any(feature = "tower", feature = "actix"))]
     const ENCODING_WORDS: [&str; 2] = ["base64", "hex"];
 
     /// The offending phrase if `text` attaches an encoding to a *key*'s bytes
@@ -7075,6 +7076,7 @@ pub struct S {
     /// reason: `**hex**-encoded` renders as `hex-encoded`, and quoting the
     /// markers — doubled, when the line join split the pair — showed the reader
     /// something the source does not literally say (issue #339).
+    #[cfg(any(feature = "tower", feature = "actix"))]
     fn encoding_attached_to_key_bytes(source: &str) -> Option<String> {
         // One bullet's worth of context, quoted on failure. Bullets carry
         // several claims each, so quoting to the end of the file would bury the
@@ -7111,6 +7113,7 @@ pub struct S {
     /// so a quote cannot run past the end of the bullet or paragraph it sits in.
     /// Markdown emphasis is dropped, so the quote reads as the rendered page
     /// does (issue #339).
+    #[cfg(any(feature = "tower", feature = "actix"))]
     fn clause_within_unit(flat: &str, unit_starts: &[usize], at: usize) -> String {
         let unit_end = unit_starts
             .iter()
@@ -7137,6 +7140,7 @@ pub struct S {
     /// break stays a boundary instead of flattening into a run of spaces. The
     /// offsets are what let [`clause_within_unit`] stop a quote at the end of
     /// its bullet.
+    #[cfg(any(feature = "tower", feature = "actix"))]
     fn flatten_prose_with_unit_starts(source: &str) -> (String, Vec<usize>) {
         let mut flat = String::with_capacity(source.len());
         let mut unit_starts = Vec::new();
