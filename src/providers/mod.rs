@@ -7781,6 +7781,146 @@ pub struct S {
         }
     }
 
+    /// Both framework adapters' module docs name every provider whose scheme
+    /// signs caller-supplied request context, and name the adapter's own
+    /// `with_options` constructor alongside them.
+    ///
+    /// [`context_option_field_docs_name_every_provider_that_reads_the_option`]
+    /// covers the *field* docs and `spec.md` §3 plus the README provider table
+    /// cover the *scheme*, but neither reaches the page a framework user
+    /// actually reads: `webhook_verify::tower` and `webhook_verify::actix`.
+    /// Those two module docs described the buffering, the ambiguity check, the
+    /// status-code table, rotation, and the body-size limit, and mentioned the
+    /// context options only in passing — as the reason
+    /// `VerifyLayer::with_options` takes an `options` argument. A reader
+    /// configuring Square, Twilio, Mandrill, HubSpot, or Contentful through an
+    /// adapter therefore had no way to learn from the adapter's own docs that
+    /// the context must be supplied *at construction*, or that omitting it is a
+    /// `500`, not a `401`.
+    ///
+    /// The second half of the gap is worse than an omission, because the docs
+    /// invite the wrong fix. Unlike `request_url` and `request_method` — one
+    /// endpoint and one method, i.e. constants of the deployment —
+    /// `form_params` is the parsed `application/x-www-form-urlencoded` **body**,
+    /// so it differs on every delivery, while both adapters hold their
+    /// `VerifyOptions` behind one `Arc` fixed when the layer/config is built.
+    /// Configuring fields on a layer would pin every delivery to one delivery's
+    /// field set and reject the rest, which reads like a broken integration
+    /// rather than a design limitation. Both module docs now say so and point
+    /// those two providers at [`crate::verify`] instead; this guard keeps both
+    /// adapters and the README's adapter section in step with the code, so a
+    /// provider that starts reading a context option cannot ship undocumented.
+    #[test]
+    fn framework_adapter_docs_name_every_provider_that_needs_request_context() {
+        /// A provider's `Display` brand, its module stem, and which of the
+        /// three request-context options its implementation reads.
+        fn readers() -> Vec<(String, String, Vec<&'static str>)> {
+            provider_list()
+                .into_iter()
+                .map(|provider| {
+                    let stem = provider_module_stem(provider);
+                    let implementation = module_implementation(&stem);
+                    let mut reads = Vec::new();
+                    for field in ["request_url", "request_method", "form_params"] {
+                        if reads_context_option_field(&implementation, field) {
+                            reads.push(field);
+                        }
+                    }
+                    (provider.to_string(), stem, reads)
+                })
+                .filter(|(_, _, reads)| !reads.is_empty())
+                .collect()
+        }
+
+        let readers = readers();
+        // Vacuity floor: the scan must find the five providers it finds today,
+        // or a broken derivation turns every assertion below into a pass. Kept
+        // as an exact count so a *new* reader is also a failure here rather
+        // than only tripping the per-provider assertions.
+        assert_eq!(
+            readers.len(),
+            5,
+            "expected exactly the five providers that sign caller-supplied request \
+             context (Contentful, HubSpot, Square, Twilio, Mandrill), found: {readers:?}"
+        );
+
+        // Both adapter module docs, plus the README's adapter section. The
+        // module docs are the landing page for `webhook_verify::tower` /
+        // `webhook_verify::actix`; the README section is what a reader
+        // skims before choosing an integration.
+        let tower_doc = stripped_module_doc(include_str!("../tower.rs"));
+        let actix_doc = stripped_module_doc(include_str!("../actix.rs"));
+        let readme = include_str!("../../README.md");
+        let adapters_section = readme
+            .split_once("\n## Framework adapters\n")
+            .map(|(_, rest)| rest.split_once("\n## ").map_or(rest, |(end, _)| end))
+            .unwrap_or_else(|| {
+                panic!("README.md no longer has a top-level `## Framework adapters` section")
+            });
+
+        for (brand, stem, reads) in &readers {
+            for (surface, text) in [
+                ("src/tower.rs module doc", tower_doc.as_str()),
+                ("src/actix.rs module doc", actix_doc.as_str()),
+                ("README.md `## Framework adapters`", adapters_section),
+            ] {
+                assert!(
+                    text.contains(brand.as_str()),
+                    "providers/{stem}.rs signs caller-supplied request context ({reads:?}), \
+                     but the {surface} never names {brand}. An adapter user configuring {brand} \
+                     has no way to learn the context must be supplied when the layer/config is \
+                     built, and every delivery fails closed with \
+                     `VerifyError::MissingContext` — a 500, not a 401"
+                );
+            }
+        }
+
+        for (surface, text, constructor) in [
+            (
+                "src/tower.rs module doc",
+                tower_doc.as_str(),
+                "VerifyLayer::with_options",
+            ),
+            (
+                "src/actix.rs module doc",
+                actix_doc.as_str(),
+                "WebhookConfig::with_options",
+            ),
+            (
+                "README.md `## Framework adapters`",
+                adapters_section,
+                "with_options",
+            ),
+        ] {
+            for needle in [constructor, "form_params"] {
+                assert!(
+                    text.contains(needle),
+                    "the {surface} must mention `{needle}`: it is the only place an adapter \
+                     user learns how to supply the request context, and `form_params` is the \
+                     one context option an adapter cannot supply at all (it is the per-request \
+                     form body, while the adapter's options are fixed at construction)"
+                );
+            }
+        }
+
+        // The per-request limitation is the part a reader will get wrong, so
+        // both adapter docs must state the conclusion rather than only the
+        // prerequisites. Checked as a phrase the prose cannot lose without also
+        // dropping the words around it.
+        for (surface, text) in [
+            ("src/tower.rs module doc", tower_doc.as_str()),
+            ("src/actix.rs module doc", actix_doc.as_str()),
+        ] {
+            assert!(
+                text.contains("cannot be verified through"),
+                "the {surface} must say that the `form_params` providers cannot be verified \
+                 through the adapter, not merely which options they need: naming `form_params` \
+                 without that conclusion invites configuring it on the layer, which pins every \
+                 delivery to one delivery's field set and rejects the rest"
+            );
+        }
+    }
+
     /// The providers that ignore [`Secret`] name each other in their own
     /// `# Security model` prose.
     ///

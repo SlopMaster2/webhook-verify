@@ -425,6 +425,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The two framework adapters never said which providers need
+  caller-supplied request context, and invited the one fix that cannot work.**
+  `webhook_verify::tower`'s and `webhook_verify::actix`'s module docs described
+  raw-body fidelity, the ambiguity check, the status-code table, rotation, and
+  the body-size limit, and mentioned `VerifyOptions` only in passing — as the
+  reason `VerifyLayer::with_options` / `WebhookConfig::with_options` takes an
+  `options` argument. Five providers (`Contentful`, `HubSpot`, `Square`,
+  `Twilio`, `Mandrill`) sign a URL, a method, or a parsed form body that comes
+  from the caller and is **not** derivable from the incoming request: what
+  those schemes sign is the value the provider signed, which behind a reverse
+  proxy or an https-terminating load balancer is not the URI the process
+  receives. A reader configuring one of them through an adapter had no way to
+  learn from the adapter's own docs that the context must be supplied when the
+  layer/config is built, or that omitting it fails closed as `500`
+  (`MissingContext`) rather than `401`.
+
+  `form_params` is worse than an omission, because naming it without its
+  consequence invites the wrong fix: it is the parsed
+  `application/x-www-form-urlencoded` **body**, so it differs on every
+  delivery, while both adapters hold their `VerifyOptions` behind a single
+  `Arc` fixed at construction. Configuring fields on a layer pins every
+  delivery to one delivery's field set and rejects the rest, which reads like a
+  broken integration rather than a design limitation. Both module docs now
+  state that `Twilio` and `Mandrill` cannot be verified through an adapter and
+  point them at `verify()` called directly after buffering the body; the
+  remaining three are covered by `with_options`, with a worked Square example
+  and the reason the URL must be configured rather than derived. The README's
+  `## Framework adapters` section carries the same table and warning.
+
+  Documentation only: no verification behavior, signature, or public API
+  changes, and no new dependency. Pinned by
+  `providers::tests::framework_adapter_docs_name_every_provider_that_needs_request_context`,
+  which derives the provider set from the provider sources (via the existing
+  `reads_context_option_field` scan `context_option_field_docs_name_every_provider_that_reads_the_option`
+  uses) rather than a hand-written list, so a provider that starts reading
+  `request_url`, `request_method`, or `form_params` fails CI until both adapter
+  docs and the README name it. The exact-count assertion keeps a broken
+  derivation from turning the per-provider assertions vacuous, and the
+  `cannot be verified through` assertion keeps the conclusion — not just the
+  prerequisites — from being dropped.
+
 - **`Encoding::Base64Url` and `Encoding::Base64NoPad` had no fuzz coverage**
   (issue #360). `spec.md` §5.6 requires each provider's *encoding-decoding*
   path to be reachable from the shared `cargo fuzz` target, and

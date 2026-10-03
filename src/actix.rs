@@ -76,6 +76,41 @@
 //! surfaces as `400 Bad Request` — an incomplete request, never a
 //! verification outcome.
 //!
+//! # Providers that need request context
+//!
+//! The extractor verifies with the single [`VerifyOptions`] the
+//! [`WebhookConfig`] was built with — [`WebhookConfig::new`] supplies
+//! [`VerifyOptions::default()`], [`WebhookConfig::with_options`] whatever you
+//! pass — and **nothing from the incoming request is fed into it**. It does not
+//! derive the URL, the method, or the form fields, because what these schemes
+//! sign is the value **the provider signed**, not the one this process
+//! received: behind a reverse proxy, a path-prefix mount, or an
+//! https-terminating load balancer the request's own URI is not the webhook
+//! URL the provider signed, so deriving it would verify a different string than
+//! the signer produced.
+//!
+//! Five built-in providers need that context configured, and omitting a
+//! required value fails closed with [`VerifyError::MissingContext`] — the `500`
+//! row above, never a `401` that would read as a forgery:
+//!
+//! - `Contentful` and `HubSpot` need both
+//!   [`VerifyOptions::request_method`] and [`VerifyOptions::request_url`];
+//! - `Square` needs [`VerifyOptions::request_url`];
+//! - `Twilio` and `Mandrill` need [`VerifyOptions::request_url`] **and**
+//!   [`VerifyOptions::form_params`].
+//!
+//! Every one of them but the last pair is a constant of the deployment — one
+//! endpoint, one method — so [`WebhookConfig::with_options`] covers it.
+//!
+//! [`VerifyOptions::form_params`] is the exception, and the one to know about
+//! before wiring an endpoint up: it is the parsed
+//! `application/x-www-form-urlencoded` **body**, so it differs on every
+//! delivery, while the config's options are fixed once at registration — so
+//! **Twilio and Mandrill cannot be verified through this extractor.**
+//! Configuring fields there would silently pin every delivery to one
+//! delivery's field set, which rejects the rest. Verify those two providers by
+//! calling [`crate::verify()`] yourself once you have buffered the raw body.
+//!
 //! # Example
 //!
 //! ```no_run
