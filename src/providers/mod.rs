@@ -21,6 +21,11 @@ mod dropbox;
 mod expo;
 mod fastspring;
 mod fintoc;
+/// `application/x-www-form-urlencoded` decoding, shared by the two schemes that
+/// sign parsed form fields rather than the body bytes. Not a provider itself:
+/// it has no `Provider` variant and no dispatch arm, only the two callers
+/// below.
+mod form;
 mod github;
 mod gocardless;
 mod hubspot;
@@ -7798,18 +7803,23 @@ pub struct S {
     /// the context must be supplied *at construction*, or that omitting it is a
     /// `500`, not a `401`.
     ///
-    /// The second half of the gap is worse than an omission, because the docs
-    /// invite the wrong fix. Unlike `request_url` and `request_method` — one
+    /// The second half of the gap was worse than an omission, because the docs
+    /// invited the wrong fix. Unlike `request_url` and `request_method` — one
     /// endpoint and one method, i.e. constants of the deployment —
     /// `form_params` is the parsed `application/x-www-form-urlencoded` **body**,
     /// so it differs on every delivery, while both adapters hold their
     /// `VerifyOptions` behind one `Arc` fixed when the layer/config is built.
-    /// Configuring fields on a layer would pin every delivery to one delivery's
-    /// field set and reject the rest, which reads like a broken integration
-    /// rather than a design limitation. Both module docs now say so and point
-    /// those two providers at [`crate::verify`] instead; this guard keeps both
-    /// adapters and the README's adapter section in step with the code, so a
-    /// provider that starts reading a context option cannot ship undocumented.
+    /// Configuring fields there pins every delivery to one delivery's field set
+    /// and rejects the rest, which reads like a broken integration rather than
+    /// a design limitation. It is now not merely documented away: the two
+    /// providers decode those fields from the `raw_body` the adapter already
+    /// buffers (`src/providers/form.rs`), so both verify through an adapter with
+    /// only `request_url` set (issue #363). What the docs must therefore state
+    /// is the *instruction* — leave `form_params` unset — because a reader who
+    /// configures it gets one delivery's field set pinned, and nothing at
+    /// runtime says so. This guard keeps both adapters and the README's adapter
+    /// section in step with the code, so a provider that starts reading a
+    /// context option cannot ship undocumented.
     #[test]
     fn framework_adapter_docs_name_every_provider_that_needs_request_context() {
         /// A provider's `Display` brand, its module stem, and which of the
@@ -7897,26 +7907,30 @@ pub struct S {
                     text.contains(needle),
                     "the {surface} must mention `{needle}`: it is the only place an adapter \
                      user learns how to supply the request context, and `form_params` is the \
-                     one context option an adapter cannot supply at all (it is the per-request \
-                     form body, while the adapter's options are fixed at construction)"
+                     one context option an adapter user must leave unset (it is the per-request \
+                     form body, and the adapter decodes it from the buffered bytes itself)"
                 );
             }
         }
 
-        // The per-request limitation is the part a reader will get wrong, so
-        // both adapter docs must state the conclusion rather than only the
-        // prerequisites. Checked as a phrase the prose cannot lose without also
-        // dropping the words around it.
+        // The per-request option is the part a reader will get wrong, so both
+        // adapter docs must give the instruction rather than only naming the
+        // option: configuring it pins every delivery to one delivery's field
+        // set. Checked as a phrase the prose cannot lose without also dropping
+        // the words around it, and required of the README section too — that is
+        // the page a reader skims before choosing an integration.
         for (surface, text) in [
             ("src/tower.rs module doc", tower_doc.as_str()),
             ("src/actix.rs module doc", actix_doc.as_str()),
+            ("README.md `## Framework adapters`", adapters_section),
         ] {
             assert!(
-                text.contains("cannot be verified through"),
-                "the {surface} must say that the `form_params` providers cannot be verified \
-                 through the adapter, not merely which options they need: naming `form_params` \
-                 without that conclusion invites configuring it on the layer, which pins every \
-                 delivery to one delivery's field set and rejects the rest"
+                text.contains("Do not** set"),
+                "the {surface} must say not to configure `form_params` on an adapter, not \
+                 merely which options the providers need: it is the per-request form body, and \
+                 an adapter's options are fixed at construction, so configuring it there pins \
+                 every delivery to one delivery's field set and rejects the rest — which reads \
+                 like a provider-side misconfiguration rather than a configuration mistake"
             );
         }
     }

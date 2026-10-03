@@ -27,24 +27,32 @@
 //!
 //! As with Twilio, the signature covers the parsed form fields, not the body
 //! bytes: `mandrill_events` (a JSON array of batched events, up to 1,000) is
-//! historically the only field. Callers parse the
-//! `application/x-www-form-urlencoded` body themselves and pass every
-//! received field via [`VerifyOptions::form_params`]; the URL goes in
-//! [`VerifyOptions::request_url`]. Sorting is part of the signing scheme and
-//! is applied here; callers pass fields in any order. Mailchimp's reference
-//! verifier iterates a keyed object (`Object.keys(params)`), so it cannot
-//! represent a repeated field name at all; this crate handles that case by
-//! sorting and de-duplicating the values under a repeated name (the same rule
-//! Twilio's reference implementation uses), so each distinct value is signed
-//! once and two deliveries carrying the same multiset of fields sign
-//! identically regardless of the order the caller received them in.
+//! historically the only field. With [`VerifyOptions::form_params`] unset —
+//! the normal case — the fields are decoded from the `raw_body` argument
+//! (`application/x-www-form-urlencoded`, one field per `&`-separated element,
+//! `+` read as a space and `%XX` as the byte it names), and the URL goes in
+//! [`VerifyOptions::request_url`]. That is what makes this provider verifiable
+//! through a framework adapter, which holds one `VerifyOptions` for every
+//! delivery: a field list configured on a layer could only ever describe one
+//! delivery's body (issue #363). A caller whose own framework parser is
+//! authoritative can still pass every received field through
+//! [`VerifyOptions::form_params`], which overrides the derivation when set.
+//!
+//! Sorting is part of the signing scheme and is applied here; fields arrive in
+//! any order. Mailchimp's reference verifier iterates a keyed object
+//! (`Object.keys(params)`), which cannot represent a repeated field name; this
+//! crate handles that case by sorting and de-duplicating the values under a
+//! repeated name (the same rule Twilio's reference implementation uses), so
+//! each distinct value is signed once and two deliveries carrying the same
+//! multiset of fields sign identically regardless of the order the fields
+//! arrived in.
 //!
 //! # Caller-supplied context
 //!
-//! Verification needs both [`VerifyOptions::request_url`] (the full URL,
-//! exactly as configured with Mailchimp, including any query string) and
-//! [`VerifyOptions::form_params`]. Omitting either fails closed with
-//! [`VerifyError::MissingContext`] rather than degrading into a weaker check.
+//! Verification needs [`VerifyOptions::request_url`] (the full URL,
+//! exactly as configured with Mailchimp, including any query string);
+//! omitting it fails closed with [`VerifyError::MissingContext`] rather than
+//! degrading into a weaker check.
 //!
 //! # Replay protection
 //!
@@ -63,6 +71,8 @@ use crate::core::headers::HeaderMap;
 use crate::core::secret::Secret;
 use base64::Engine;
 
+use super::form;
+
 /// The header carrying Mailchimp Transactional's signature.
 pub(crate) const SIGNATURE_HEADER: &str = "X-Mandrill-Signature";
 
@@ -71,7 +81,7 @@ const SIGNATURE_LEN_BYTES: usize = 20;
 
 pub(crate) fn verify(
     headers: &dyn HeaderMap,
-    _raw_body: &[u8],
+    raw_body: &[u8],
     secret: &Secret,
     options: &VerifyOptions,
 ) -> Result<(), VerifyError> {
@@ -92,12 +102,22 @@ pub(crate) fn verify(
         .ok_or(VerifyError::MissingContext {
             reason: "Mailchimp Transactional signs the webhook URL; set VerifyOptions::request_url",
         })?;
-    let params = options
-        .form_params
-        .as_ref()
-        .ok_or(VerifyError::MissingContext {
-            reason: "Mailchimp Transactional signs the sorted POST form fields; set VerifyOptions::form_params",
-        })?;
+    // `form_params` is the per-delivery *body*, so it cannot come from a
+    // `VerifyOptions` that a framework adapter fixed at construction time
+    // (issue #363). When the caller supplied one it wins, which is the
+    // escape hatch for a framework whose own parser is authoritative;
+    // otherwise the fields are decoded from the `raw_body` already handed to
+    // this function, which is the same bytes every raw-body scheme verifies
+    // and the adapter buffers verbatim; nothing is re-serialized
+    // (`spec.md` §4.2).
+    let derived;
+    let params = match options.form_params.as_deref() {
+        Some(supplied) => supplied,
+        None => {
+            derived = form::parse_form_urlencoded(raw_body)?;
+            derived.as_slice()
+        }
+    };
 
     let provided = parse_signature(value)?;
     let key = webhook_key_bytes(secret.as_bytes())?;
@@ -484,18 +504,147 @@ mod tests {
             Err(VerifyError::MissingContext { .. })
         ));
 
-        // Missing form params.
-        let no_params = VerifyOptions::default().with_request_url(CHECK_URL);
+        // Missing form params is no longer a missing context (issue #363): the fields
+        // are decoded from `raw_body`, so the only option still required here
+        // is the URL. `derived_form_fields_*` pins the derived path.
+    }
+
+    #[test]
+    fn official_check_scenario_verifies_from_the_form_body_alone() {
+        // Mailchimp's own webhook-URL-check POST as it arrives on the wire,
+        // verified with nothing but `request_url` configured: the fields are
+        // decoded from the body the adapter already buffered, which is what
+        // makes this provider usable through one (issue #363).
+        assert_eq!(
+            verify(
+                crate::Provider::Mandrill,
+                &mandrill_headers(CHECK_SIGNATURE),
+                b"mandrill_events=[]",
+                &Secret::new(CHECK_KEY),
+                VerifyOptions::default().with_request_url(CHECK_URL),
+            ),
+            Ok(())
+        );
+        // …and it agrees with the caller-supplied path, so moving from one to
+        // the other does not change what the signer has to produce.
+        assert_eq!(
+            verify_with_url(CHECK_URL, &CHECK_PARAMS, CHECK_SIGNATURE),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn derived_form_fields_follow_the_signing_scheme() {
+        // The same vectors the explicit-list tests pin, reached through the
+        // body: the empty list, a unicode value, byte-wise name ordering, and a
+        // repeated name sorted and de-duplicated. Each case carries the key its
+        // signature was constructed with, like `boundary_param_lists_verify`.
+        let body = [
+            ("", CHECK_KEY, EMPTY_PARAMS_SIGNATURE),
+            (
+                "mandrill_events=h%C3%A9llo%2C%20%F0%9F%A6%80%20world%21",
+                EVENTS_KEY,
+                UNICODE_VALUE_SIGNATURE,
+            ),
+            (
+                "eventname=open&msg_id=d&mandrill_events=%5B%5D",
+                EVENTS_KEY,
+                SORTED_MULTI_SIGNATURE,
+            ),
+            (
+                // The repeated value is signed once, so this is the same
+                // signed string the single-field check vector signs.
+                "mandrill_events=%5B%5D&mandrill_events=%5B%5D",
+                CHECK_KEY,
+                CHECK_SIGNATURE,
+            ),
+            (
+                "mandrill_events=x&mandrill_events=x",
+                CHECK_KEY,
+                DEDUPLICATED_VALUES_SIGNATURE,
+            ),
+            (
+                // A repeated name with *different* values signs both, sorted.
+                "mandrill_events=b&mandrill_events=a",
+                CHECK_KEY,
+                DUPLICATE_KEYS_SIGNATURE,
+            ),
+        ];
+        for (body, key, signature) in body {
+            assert_eq!(
+                verify(
+                    crate::Provider::Mandrill,
+                    &mandrill_headers(signature),
+                    body.as_bytes(),
+                    &Secret::new(key),
+                    VerifyOptions::default().with_request_url(CHECK_URL),
+                ),
+                Ok(()),
+                "body {body:?} must produce the same signed string as its field list"
+            );
+        }
+    }
+
+    #[test]
+    fn a_derived_field_set_still_rejects_a_tampered_body() {
+        for body in [
+            // The signed field, with one byte changed.
+            "mandrill_events=%5B%7D",
+            // A second field nobody signed: every field's name and value go
+            // into the signed string, so an extra one is not invisible.
+            "mandrill_events=%5B%5D&eventname=forged",
+            // A field with the right value under the wrong name.
+            "mandrill_events=%5B%5D%5B%5D",
+            // Nothing at all.
+            "",
+        ] {
+            assert_eq!(
+                verify(
+                    crate::Provider::Mandrill,
+                    &mandrill_headers(CHECK_SIGNATURE),
+                    body.as_bytes(),
+                    &Secret::new(CHECK_KEY),
+                    VerifyOptions::default().with_request_url(CHECK_URL),
+                ),
+                Err(VerifyError::SignatureMismatch),
+                "body {body:?} must not verify"
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_field_that_cannot_be_decoded_is_rejected_as_malformed() {
+        // `%FF` is a well-formed escape whose byte is not UTF-8, so no field
+        // pair can represent it: a malformed request (400), not a lossy decode.
         assert!(matches!(
             verify(
                 crate::Provider::Mandrill,
-                &headers,
-                b"unused",
+                &mandrill_headers(CHECK_SIGNATURE),
+                b"mandrill_events=%FF",
                 &Secret::new(CHECK_KEY),
-                no_params,
+                VerifyOptions::default().with_request_url(CHECK_URL),
             ),
-            Err(VerifyError::MissingContext { .. })
+            Err(VerifyError::BadEncoding { .. })
         ));
+    }
+
+    #[test]
+    fn supplied_form_params_win_over_the_body() {
+        // The option is an override, not a cross-check: a caller whose own
+        // framework parser is authoritative can still say so, whatever the
+        // body holds.
+        assert_eq!(
+            verify(
+                crate::Provider::Mandrill,
+                &mandrill_headers(CHECK_SIGNATURE),
+                b"eventname=not-a-mandrill-field",
+                &Secret::new(CHECK_KEY),
+                VerifyOptions::default()
+                    .with_request_url(CHECK_URL)
+                    .with_form_params(CHECK_PARAMS.iter().copied()),
+            ),
+            Ok(())
+        );
     }
 
     #[test]

@@ -22,23 +22,32 @@
 //!
 //! Twilio and Mailchimp Transactional ([`crate::Provider::Mandrill`]) are
 //! the two shipped schemes that do **not** hash the raw body: the signature
-//! covers the parsed form fields instead. Callers parse the
-//! `application/x-www-form-urlencoded` body themselves and pass every received
-//! field via [`VerifyOptions::form_params`] — Twilio's docs explicitly warn
-//! against validating against a hardcoded subset of parameters, since new ones
-//! may be added without notice. Sorting is part of the signing scheme and is
-//! applied here; callers pass fields in any order. Under a repeated field name
-//! the values are sorted and de-duplicated too, matching `twilio-python`'s
-//! `for value in sorted(set(values))` — its `get_values` helper reads
-//! duplicates from Flask `MultiDict`s and Django `QueryDict`s, so the reference
-//! implementation does represent them. Two deliveries carrying the same
-//! multiset of fields therefore sign identically regardless of the order the
-//! caller received them in.
+//! covers the parsed form fields instead. With [`VerifyOptions::form_params`]
+//! unset — the normal case — those fields are decoded from the `raw_body`
+//! argument: `application/x-www-form-urlencoded`, one field per `&`-separated
+//! element, `+` read as a space and `%XX` as the byte it names. Sorting is part
+//! of the signing scheme and is applied here; fields arrive in any order. Under
+//! a repeated field name the values are sorted and de-duplicated too, matching
+//! `twilio-python`'s `for value in sorted(set(values))` — its `get_values`
+//! helper reads duplicates from Flask `MultiDict`s and Django `QueryDict`s, so
+//! the reference implementation does represent them. Two deliveries carrying
+//! the same multiset of fields therefore sign identically regardless of the
+//! order they arrived in.
+//!
+//! Deriving the fields from the body is what makes this provider verifiable
+//! through a framework adapter, which holds one `VerifyOptions` for every
+//! delivery: a field list configured on a layer could only ever describe one
+//! delivery's body, and would reject the rest (issue #363). A caller whose own
+//! framework parser is authoritative can still pass every received field
+//! through [`VerifyOptions::form_params`] — Twilio's docs warn against
+//! verifying against a hardcoded subset, since new parameters may be added
+//! without notice — and it overrides the derivation when set.
 //!
 //! # The JSON-body variant
 //!
 //! Twilio's JSON-body variant signs the **URL alone**: the body is not form
-//! fields, so there is nothing for the signature to cover. Pass an explicitly
+//! fields, so there is nothing for the signature to cover, and decoding it as
+//! form fields would produce a *different* signed string. Ask for the explicit
 //! empty parameter list for that shape ([`VerifyOptions::with_form_params`]
 //! with no items), and the body is authenticated by the `bodySHA256` query
 //! parameter Twilio appends to the URL — the SHA-256 hex digest of the body it
@@ -59,12 +68,13 @@
 //!
 //! # Caller-supplied context
 //!
-//! Verification needs both [`VerifyOptions::request_url`] (the full URL,
-//! including any query string) and [`VerifyOptions::form_params`]. Omitting
-//! either fails closed with [`VerifyError::MissingContext`] rather than
-//! degrading into a weaker check. The body itself is only consulted through
-//! the `bodySHA256` parameter above — pass the received bytes as `raw_body`
-//! either way.
+//! Verification needs [`VerifyOptions::request_url`] (the full URL,
+//! including any query string); omitting it fails closed with
+//! [`VerifyError::MissingContext`] rather than degrading into a weaker check.
+//! The form fields are derived from `raw_body` unless
+//! [`VerifyOptions::form_params`] overrides them (see above). The body is also
+//! consulted through the `bodySHA256` parameter above — pass the received bytes
+//! as `raw_body` either way.
 //!
 //! # The port in the signed URL
 //!
@@ -110,6 +120,8 @@ use crate::core::headers::HeaderMap;
 use crate::core::secret::Secret;
 use base64::Engine;
 
+use super::form;
+
 /// The header carrying Twilio's signature.
 pub(crate) const SIGNATURE_HEADER: &str = "X-Twilio-Signature";
 
@@ -143,12 +155,22 @@ pub(crate) fn verify(
         .ok_or(VerifyError::MissingContext {
             reason: "Twilio signs the full request URL; set VerifyOptions::request_url",
         })?;
-    let params = options
-        .form_params
-        .as_ref()
-        .ok_or(VerifyError::MissingContext {
-            reason: "Twilio signs the sorted POST form fields; set VerifyOptions::form_params",
-        })?;
+    // `form_params` is the per-delivery *body*, so it cannot come from a
+    // `VerifyOptions` that a framework adapter fixed at construction time
+    // (issue #363). When the caller supplied one it wins — that is the
+    // JSON-body variant's only spelling, and it is also the escape hatch for a
+    // framework whose own parser is authoritative. Otherwise the fields are
+    // decoded from the `raw_body` already handed to this function, which is the
+    // same bytes every raw-body scheme verifies and the adapter buffers
+    // verbatim; nothing is re-serialized (`spec.md` §4.2).
+    let derived;
+    let params = match options.form_params.as_deref() {
+        Some(supplied) => supplied,
+        None => {
+            derived = form::parse_form_urlencoded(raw_body)?;
+            derived.as_slice()
+        }
+    };
 
     let provided = parse_signature(value)?;
     let key = auth_token_bytes(secret.as_bytes())?;
@@ -330,6 +352,15 @@ mod tests {
     ];
     const OFFICIAL_SIGNATURE: &str = "L/OH5YylLD5NRKLltdqwSvS0BnU=";
 
+    /// The same five fields as they arrive over the wire: the body Twilio
+    /// POSTs for [`OFFICIAL_PARAMS`], in its own `application/x-www-form-urlencoded`
+    /// spelling (`+` percent-escaped, since a bare `+` in a form body means a
+    /// space). Verifying [`OFFICIAL_SIGNATURE`] against *this* body with
+    /// nothing but `request_url` configured is what pins the derivation: it is
+    /// the same published signature, reached through the decoded fields.
+    const OFFICIAL_BODY: &str = "CallSid=CA1234567890ABCDE&To=%2B18005551212\
+                              &From=%2B14158675310&Caller=%2B14158675310&Digits=1234";
+
     /// Locally constructed over the same recipe with an *empty* parameter
     /// list (boundary case; matches how Twilio's SDKs sign their JSON-body
     /// variant, where only the URL is covered):
@@ -461,11 +492,158 @@ mod tests {
     }
 
     #[test]
+    fn official_vector_verifies_from_the_form_body_alone() {
+        // The official vector again, with `form_params` left unset: the fields
+        // come from the body the adapter already buffered, which is what makes
+        // this provider usable through one (issue #363). No options are cloned
+        // per delivery and no field list has to be threaded to the layer.
+        assert_eq!(
+            verify(
+                crate::Provider::Twilio,
+                &twilio_headers(OFFICIAL_SIGNATURE),
+                OFFICIAL_BODY.as_bytes(),
+                &Secret::new(OFFICIAL_TOKEN),
+                VerifyOptions::default().with_request_url(OFFICIAL_URL),
+            ),
+            Ok(())
+        );
+        // …and it agrees with the caller-supplied path byte for byte, so a
+        // deployment can move from one to the other without a signature ever
+        // changing hands.
+        assert_eq!(
+            verify_with_url(OFFICIAL_URL, &OFFICIAL_PARAMS, OFFICIAL_SIGNATURE),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn derived_form_fields_follow_the_signing_scheme() {
+        // Everything the explicit-list tests pin, reached through the body:
+        // the empty list (the URL alone), a unicode value, a repeated name
+        // sorted and de-duplicated, and byte-wise name ordering.
+        let body = [
+            ("", EMPTY_PARAMS_SIGNATURE),
+            (
+                // `héllo, 🦀 world!` percent-escaped, as a sender must spell it.
+                "Body=h%C3%A9llo%2C%20%F0%9F%A6%80%20world%21",
+                UNICODE_VALUE_SIGNATURE,
+            ),
+            ("Body=a&Body=b", DUPLICATE_KEYS_SIGNATURE),
+            ("Body=a&Body=a", DEDUPLICATED_VALUES_SIGNATURE),
+            (
+                "StatusCallback=https%3A%2F%2Fcb&api_version=2010&Digits=1234",
+                BYTE_SORT_ORDER_SIGNATURE,
+            ),
+            ("Tag=b&Tag=a&Tag=a&Body=x", MIXED_DUPLICATE_SIGNATURE),
+        ];
+        for (body, signature) in body {
+            assert_eq!(
+                verify(
+                    crate::Provider::Twilio,
+                    &twilio_headers(signature),
+                    body.as_bytes(),
+                    &Secret::new(OFFICIAL_TOKEN),
+                    VerifyOptions::default().with_request_url("https://example.com/myapp"),
+                ),
+                Ok(()),
+                "body {body:?} must produce the same signed string as its field list"
+            );
+        }
+    }
+
+    #[test]
+    fn a_derived_field_set_still_rejects_a_tampered_body() {
+        // Deriving the fields is not a way around the signature: a body whose
+        // fields differ from the ones signed signs a different string, and one
+        // that merely *adds* a field does too (every field's name and value go
+        // into the string, so an extra field is not invisible).
+        for body in [
+            "CallSid=CA9999999999ABCDE&To=%2B18005551212&From=%2B14158675310\
+             &Caller=%2B14158675310&Digits=1234",
+            "CallSid=CA1234567890ABCDE&To=%2B18005551212&From=%2B14158675310\
+             &Caller=%2B14158675310&Digits=1234&Extra=forged",
+            // Same field multiset, one byte of the name changed.
+            "CallSid=CA1234567890ABCDE&To=%2B18005551212&From=%2B14158675310\
+             &Caller=%2B14158675310&Digit=1234",
+            // A field deleted entirely.
+            "To=%2B18005551212&From=%2B14158675310&Caller=%2B14158675310&Digits=1234",
+        ] {
+            assert_eq!(
+                verify(
+                    crate::Provider::Twilio,
+                    &twilio_headers(OFFICIAL_SIGNATURE),
+                    body.as_bytes(),
+                    &Secret::new(OFFICIAL_TOKEN),
+                    VerifyOptions::default().with_request_url(OFFICIAL_URL),
+                ),
+                Err(VerifyError::SignatureMismatch),
+                "body {body:?} must not verify"
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_that_is_not_form_encoded_is_a_mismatch_not_a_context_error() {
+        // The JSON-body variant without the explicit empty list: `form_params`
+        // is derived, and a JSON document is not a form body, so the derived
+        // field set is not the empty one and the signature over the URL alone
+        // does not match. Reported as an auth signal (401) rather than as the
+        // 500 `MissingContext` this path used to give — which is why
+        // `verify_json_body` still passes the empty list explicitly.
+        assert_eq!(
+            verify(
+                crate::Provider::Twilio,
+                &twilio_headers(JSON_BODY_SIGNATURE),
+                JSON_BODY.as_bytes(),
+                &Secret::new(OFFICIAL_TOKEN),
+                VerifyOptions::default().with_request_url(JSON_BODY_URL),
+            ),
+            Err(VerifyError::SignatureMismatch)
+        );
+    }
+
+    #[test]
+    fn a_body_field_that_cannot_be_decoded_is_rejected_as_malformed() {
+        // `%FF` is a well-formed escape whose byte is not UTF-8, so no field
+        // pair can represent it. Rejected as a malformed request (400) rather
+        // than decoded lossily, which would change the signed string.
+        assert_eq!(
+            verify(
+                crate::Provider::Twilio,
+                &twilio_headers(OFFICIAL_SIGNATURE),
+                b"Body=%FF",
+                &Secret::new(OFFICIAL_TOKEN),
+                VerifyOptions::default().with_request_url(OFFICIAL_URL),
+            ),
+            Err(VerifyError::BadEncoding {
+                reason: "request body is not decodable application/x-www-form-urlencoded (a \
+                         percent-escaped field is not valid UTF-8)"
+            })
+        );
+    }
+
+    #[test]
+    fn supplied_form_params_win_over_the_body() {
+        // The option is an override, not a cross-check: a caller whose own
+        // framework parser is authoritative can still say so, whatever the body
+        // holds. This is the JSON-body variant, whose empty list is the only
+        // way to express "the body is not fields" — the very request the
+        // derived path rejects in
+        // `a_body_that_is_not_form_encoded_is_a_mismatch_not_a_context_error`.
+        assert_eq!(
+            verify_json_body(JSON_BODY_URL, JSON_BODY.as_bytes(), JSON_BODY_SIGNATURE),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn raw_body_is_irrelevant_to_the_scheme() {
         // The signature covers the parsed fields, not the body bytes; pin that
         // passing arbitrary body bytes alongside valid context verifies fine.
         // (Only true while the signed URL carries no `bodySHA256`: see
-        // `json_body_variant_*`.)
+        // `json_body_variant_*`. And only while `form_params` is supplied —
+        // with it unset, the body *is* the field source; see
+        // `official_vector_verifies_from_the_form_body_alone`.)
         let options = VerifyOptions::default()
             .with_request_url(OFFICIAL_URL)
             .with_form_params(OFFICIAL_PARAMS);
@@ -897,21 +1075,9 @@ mod tests {
             })
         );
 
-        // No form params at all (distinct from an explicit empty list, which
-        // is meaningful and covered by `boundary_param_lists_verify`).
-        let result = verify(
-            crate::Provider::Twilio,
-            &twilio_headers(OFFICIAL_SIGNATURE),
-            b"",
-            &Secret::new(OFFICIAL_TOKEN),
-            VerifyOptions::default().with_request_url(OFFICIAL_URL),
-        );
-        assert_eq!(
-            result,
-            Err(VerifyError::MissingContext {
-                reason: "Twilio signs the sorted POST form fields; set VerifyOptions::form_params"
-            })
-        );
+        // `form_params` is no longer required context (issue #363): absent, the fields
+        // are decoded from `raw_body`, so the option that *is* still required
+        // here is the URL. `derived_form_fields_*` pins the derived path.
 
         // An explicitly empty URL is equally unusable.
         let result = verify(

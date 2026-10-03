@@ -96,20 +96,27 @@
 //! - `Contentful` and `HubSpot` need both
 //!   [`VerifyOptions::request_method`] and [`VerifyOptions::request_url`];
 //! - `Square` needs [`VerifyOptions::request_url`];
-//! - `Twilio` and `Mandrill` need [`VerifyOptions::request_url`] **and**
-//!   [`VerifyOptions::form_params`].
+//! - `Twilio` and `Mandrill` need [`VerifyOptions::request_url`].
 //!
-//! Every one of them but the last pair is a constant of the deployment — one
-//! endpoint, one method — so [`WebhookConfig::with_options`] covers it.
+//! Every one of them is a constant of the deployment — one endpoint, one
+//! method — so [`WebhookConfig::with_options`] covers it.
 //!
-//! [`VerifyOptions::form_params`] is the exception, and the one to know about
-//! before wiring an endpoint up: it is the parsed
-//! `application/x-www-form-urlencoded` **body**, so it differs on every
-//! delivery, while the config's options are fixed once at registration — so
-//! **Twilio and Mandrill cannot be verified through this extractor.**
-//! Configuring fields there would silently pin every delivery to one
-//! delivery's field set, which rejects the rest. Verify those two providers by
-//! calling [`crate::verify()`] yourself once you have buffered the raw body.
+//! [`VerifyOptions::form_params`] is the one context option to leave alone. It
+//! is the parsed `application/x-www-form-urlencoded` **body**, so it differs on
+//! every delivery while this config's options are fixed once at registration —
+//! so configuring fields there would pin every delivery to one delivery's field
+//! set and reject the rest, which reads like a broken integration rather than a
+//! design limitation. Left unset, `Twilio` and `Mandrill` decode those fields
+//! from the request body this extractor already buffers verbatim
+//! (`application/x-www-form-urlencoded`: one field per `&`-separated element,
+//! `+` read as a space, `%XX` read as the byte it names), so **both providers
+//! verify through this extractor** with only `request_url` configured.
+//!
+//! **Do not** set `form_params` on a config: it pins every delivery to one
+//! delivery's field set and rejects the rest. Set it only when calling
+//! [`crate::verify()`] yourself — to use your own parser, or for Twilio's
+//! JSON-body variant, which signs the URL alone and so needs an explicitly
+//! empty field list (issue #363).
 //!
 //! # Example
 //!
@@ -614,6 +621,18 @@ mod tests {
     const CONTENTFUL_SIGNATURE: &str =
         "f1562694dd6b6582839a8fbe7ad9881e5c1feb68d3206be9b49385f7c080f1d4";
 
+    /// Twilio's documented worked example
+    /// (<https://www.twilio.com/docs/usage/security#validating-requests>) as a
+    /// delivery the extractor receives — same constants as the tower adapter
+    /// tests, so the two frameworks cannot drift on this path.
+    const TWILIO_TOKEN: &str = "12345";
+    const TWILIO_URL: &str = "https://example.com/myapp.php?foo=1&bar=2";
+    const TWILIO_CALL_BODY: &str = "CallSid=CA1234567890ABCDE&To=%2B18005551212\
+                                    &From=%2B14158675310&Caller=%2B14158675310&Digits=1234";
+    const TWILIO_CALL_SIGNATURE: &str = "L/OH5YylLD5NRKLltdqwSvS0BnU=";
+    const TWILIO_MESSAGE_BODY: &str = "Body=hello";
+    const TWILIO_MESSAGE_SIGNATURE: &str = "auPCBlqYuOXiaJO3vsvFsrY0XQU=";
+
     /// Handler echoing how many body bytes it received, so tests assert the
     /// verified bytes reach handlers byte-for-byte.
     async fn echo_len(body: VerifiedBody) -> HttpResponse {
@@ -686,6 +705,63 @@ mod tests {
     }
 
     // --- negative: tampered payload -----------------------------------------
+
+    /// Twilio verifies through this extractor with only `request_url`
+    /// configured (issue #363): `form_params` is the per-delivery body, so
+    /// before the field list was decoded per request this extractor could not
+    /// verify Twilio at all — `MissingContext` (500) unset, and one delivery's
+    /// field set pinned when set. Two *different* deliveries go through the
+    /// same registered config below, which is the property that was missing.
+    #[actix_web::test]
+    async fn twilio_deliveries_verify_with_only_the_url_configured() {
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::with_options(
+                    Provider::Twilio,
+                    Secret::new(TWILIO_TOKEN),
+                    VerifyOptions::default().with_request_url(TWILIO_URL),
+                ))
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+
+        for (body, signature) in [
+            (TWILIO_CALL_BODY, TWILIO_CALL_SIGNATURE),
+            (TWILIO_MESSAGE_BODY, TWILIO_MESSAGE_SIGNATURE),
+        ] {
+            let expected_len = body.len().to_string();
+            let req = aw_test::TestRequest::post()
+                .insert_header(("X-Twilio-Signature", signature))
+                .set_payload(Bytes::from(body.to_string()))
+                .to_request();
+            let res = aw_test::call_service(&app, req).await;
+            assert_eq!(res.status(), StatusCode::OK, "body {body}");
+            assert_eq!(aw_test::read_body(res).await, Bytes::from(expected_len));
+        }
+    }
+
+    #[actix_web::test]
+    async fn a_twilio_delivery_whose_body_was_changed_in_transit_is_unauthorized() {
+        // The per-request field list must still be checked, not merely parsed:
+        // one byte of a signed field changed after signing.
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::with_options(
+                    Provider::Twilio,
+                    Secret::new(TWILIO_TOKEN),
+                    VerifyOptions::default().with_request_url(TWILIO_URL),
+                ))
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-Twilio-Signature", TWILIO_MESSAGE_SIGNATURE))
+            .set_payload(Bytes::from(TWILIO_MESSAGE_BODY.replace("hello", "HELLO")))
+            .to_request();
+        let res = aw_test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
 
     #[actix_web::test]
     async fn tampered_body_is_unauthorized_and_never_reaches_handler() {

@@ -114,8 +114,8 @@ hand-copied signing-string logic to get wrong.
 | FastSpring (commerce webhooks) | HMAC-SHA256 over raw body, base64, `X-FS-Signature` (per-webhook HMAC secret, no prefix, no timestamp; header may arrive with varying case) | ✅ |
 | GoCardless | HMAC-SHA256 over raw body, hex, `Webhook-Signature` (endpoint secret used verbatim, no prefix, no timestamp) | ✅ |
 | Mollie (next-gen webhooks) | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Mollie-Signature` (per-webhook signing secret, no timestamp) | ✅ |
-| Twilio | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Twilio-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
-| Mailchimp Transactional (Mandrill) | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Mandrill-Signature` (needs `VerifyOptions::request_url` + `form_params`) | ✅ |
+| Twilio | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Twilio-Signature` (form params decoded from the raw body; needs `VerifyOptions::request_url`) | ✅ |
+| Mailchimp Transactional (Mandrill) | HMAC-SHA1 over URL + sorted form params, **base64**, `X-Mandrill-Signature` (form params decoded from the raw body; needs `VerifyOptions::request_url`) | ✅ |
 | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) | ✅ |
 | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp replay window | ✅ |
 | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` | ✅ |
@@ -416,30 +416,35 @@ library — with no features (pure core) and with `--features sendgrid`:
 ### Request context is configuration, not something the adapter reads
 
 Both adapters verify with the single `VerifyOptions` they were built with and
-derive **nothing** from the incoming request. That is deliberate: what these
-schemes sign is the value the *provider* signed, which behind a reverse proxy,
-a path-prefix mount, or an https-terminating load balancer is not the URI this
-process receives. So five providers need that context configured up front, via
+derive **no** endpoint URL, method, or asymmetric key material from the
+incoming request. That is deliberate: what these schemes sign is the value the
+*provider* signed, which behind a reverse proxy, a path-prefix mount, or an
+https-terminating load balancer is not the URI this process receives. So five
+providers need that context configured up front, via
 `VerifyLayer::with_options` / `WebhookConfig::with_options`:
 
 | Provider | Needs |
 |---|---|
 | `Contentful`, `HubSpot` | `request_method` **and** `request_url` |
 | `Square` | `request_url` |
-| `Twilio`, `Mandrill` | `request_url` **and** `form_params` |
+| `Twilio`, `Mandrill` | `request_url` (`form_params` optional — see below) |
 
 A missing value fails closed with `VerifyError::MissingContext`, which both
 adapters report as `500 Internal Server Error` — a misconfiguration, not a
 `401` forgery.
 
-> ⚠️ **`form_params` cannot work through an adapter.** It is the parsed
-> `application/x-www-form-urlencoded` **body**, so it differs on every
-> delivery, while an adapter's options are fixed once at construction —
-> configuring fields there would pin every delivery to one delivery's field set
-> and reject the rest. **Verify Twilio and Mandrill by calling `verify()`
-> yourself**, from a middleware or handler, after buffering the raw body. Every
-> other provider on the list is fine: an endpoint's URL and method are
-> constants of the deployment.
+**`form_params` needs no configuring.** Twilio and Mandrill sign the *parsed*
+form fields rather than the body bytes, and those fields are the body — so
+they differ on every delivery, and an adapter's options are fixed once at
+construction. Leaving `VerifyOptions::form_params` unset therefore has the
+providers decode them from the request body the adapter already buffers
+verbatim (`application/x-www-form-urlencoded`: one field per `&`-separated
+element, `+` as a space, `%XX` as the byte it names). **Do not** set
+`form_params` on a layer or config: it pins every delivery to one delivery's
+field set and rejects the rest, which reads like a broken integration rather
+than a design limitation. Set it only when driving `verify()` yourself — to use
+your framework's own parser, or for Twilio's JSON-body variant, which signs the
+URL alone and therefore needs an explicitly *empty* field list (issue #363).
 
 ### Tower (also Axum)
 

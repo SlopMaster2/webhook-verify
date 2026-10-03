@@ -55,11 +55,11 @@
 //!
 //! The layer verifies with the single [`VerifyOptions`] it was built with —
 //! [`VerifyLayer::new`] supplies [`VerifyOptions::default()`],
-//! [`VerifyLayer::with_options`] whatever you pass — and **nothing from the
-//! incoming request is fed into it**. The middleware does not derive the URL,
-//! the method, or the form fields from the request it is verifying, because
-//! what these schemes sign is the value **the provider signed**, not the one
-//! this process received: behind a reverse proxy, a path-prefix mount, or an
+//! [`VerifyLayer::with_options`] whatever you pass — and **no endpoint URL,
+//! method, or key material is read out of the incoming request**. It does not
+//! derive them from the request it is verifying, because what these schemes
+//! sign is the value **the provider signed**, not the one this process
+//! received: behind a reverse proxy, a path-prefix mount, or an
 //! https-terminating load balancer the request's own URI is not the webhook
 //! URL the provider signed, so deriving it would verify a different string
 //! than the signer produced.
@@ -71,11 +71,10 @@
 //! - `Contentful` and `HubSpot` need both
 //!   [`VerifyOptions::request_method`] and [`VerifyOptions::request_url`];
 //! - `Square` needs [`VerifyOptions::request_url`];
-//! - `Twilio` and `Mandrill` need [`VerifyOptions::request_url`] **and**
-//!   [`VerifyOptions::form_params`].
+//! - `Twilio` and `Mandrill` need [`VerifyOptions::request_url`].
 //!
-//! Every one of them but the last pair is a constant of the deployment — one
-//! endpoint, one method — so [`VerifyLayer::with_options`] covers it:
+//! Every one of them is a constant of the deployment — one endpoint, one
+//! method — so [`VerifyLayer::with_options`] covers it:
 //!
 //! ```rust
 //! use bytes::Bytes;
@@ -86,17 +85,30 @@
 //! let options = VerifyOptions::default().with_request_url("https://example.com/webhooks/square");
 //! let layer: VerifyLayer<Bytes> =
 //!     VerifyLayer::with_options(Provider::Square, Secret::new("sq0csp-..."), options);
+//!
+//! // Twilio signs the public webhook URL plus the sorted POST form fields.
+//! // Leave `form_params` unset: see below.
+//! let options = VerifyOptions::default().with_request_url("https://example.com/webhooks/twilio");
+//! let layer: VerifyLayer<Bytes> =
+//!     VerifyLayer::with_options(Provider::Twilio, Secret::new("auth-token"), options);
 //! ```
 //!
-//! [`VerifyOptions::form_params`] is the exception, and the one to know about
-//! before wiring an endpoint up: it is the parsed
-//! `application/x-www-form-urlencoded` **body**, so it differs on every
-//! delivery, while this layer's options are fixed once at construction — so
-//! **Twilio and Mandrill cannot be verified through it.** Configuring fields
-//! there would silently pin every delivery to one delivery's field set, which
-//! rejects the rest. Verify those two providers by calling
-//! [`crate::verify()`] from a middleware or handler of your own, after
-//! buffering the raw body yourself.
+//! [`VerifyOptions::form_params`] is the one context option to leave alone. It
+//! is the parsed `application/x-www-form-urlencoded` **body**, so it differs on
+//! every delivery while this layer's options are fixed once at construction —
+//! so configuring fields there would pin every delivery to one delivery's field
+//! set and reject the rest, which reads like a broken integration rather than a
+//! design limitation. Left unset, `Twilio` and `Mandrill` decode those fields
+//! from the request body this layer already buffers verbatim
+//! (`application/x-www-form-urlencoded`: one field per `&`-separated element,
+//! `+` read as a space, `%XX` read as the byte it names), so **both providers
+//! verify through this layer** with only `request_url` configured.
+//!
+//! **Do not** set `form_params` on a layer: it pins every delivery to one
+//! delivery's field set and rejects the rest. Set it only when calling
+//! [`crate::verify()`] yourself — to use your own parser, or for Twilio's
+//! JSON-body variant, which signs the URL alone and so needs an explicitly
+//! empty field list (issue #363).
 //!
 //! # Example
 //!
@@ -542,6 +554,24 @@ mod tests {
     const CONTENTFUL_UNIX: u64 = 1_704_391_525;
     const CONTENTFUL_SIGNATURE: &str =
         "f1562694dd6b6582839a8fbe7ad9881e5c1feb68d3206be9b49385f7c080f1d4";
+
+    /// Twilio's documented worked example
+    /// (<https://www.twilio.com/docs/usage/security#validating-requests>) as a
+    /// delivery the layer receives: Auth Token `12345`, the configured webhook
+    /// URL, and the five documented fields as the form body Twilio POSTs for
+    /// them — `+` percent-escaped, since a bare `+` in a form body is a space.
+    const TWILIO_TOKEN: &str = "12345";
+    const TWILIO_URL: &str = "https://example.com/myapp.php?foo=1&bar=2";
+    const TWILIO_CALL_BODY: &str = "CallSid=CA1234567890ABCDE&To=%2B18005551212\
+                                    &From=%2B14158675310&Caller=%2B14158675310&Digits=1234";
+    const TWILIO_CALL_SIGNATURE: &str = "L/OH5YylLD5NRKLltdqwSvS0BnU=";
+    /// A second, *different* delivery over the same URL — the one that could
+    /// never be configured on a layer. Locally constructed with Twilio's
+    /// documented recipe (`printf '%s' \
+    /// 'https://example.com/myapp.php?foo=1&bar=2Bodyhello' | openssl dgst
+    /// -sha1 -hmac '12345' -binary | base64`).
+    const TWILIO_MESSAGE_BODY: &str = "Body=hello";
+    const TWILIO_MESSAGE_SIGNATURE: &str = "auPCBlqYuOXiaJO3vsvFsrY0XQU=";
 
     type TestBody = Full<Bytes>;
 
@@ -1221,6 +1251,59 @@ mod tests {
                 .await
                 .unwrap_or_else(|error| panic!("{error}"));
             assert_eq!(response.status(), StatusCode::OK);
+        });
+    }
+
+    #[test]
+    fn twilio_deliveries_verify_with_only_the_url_configured() {
+        // Issue #363. `VerifyOptions::form_params` is the *body*, so before the
+        // field list was decoded per request this layer could not verify Twilio
+        // at all: unset, every delivery failed closed as `MissingContext` (500);
+        // set, the layer pinned one delivery's field set and rejected the rest.
+        // Both deliveries below go through the same configured layer, which is
+        // the property that is missing otherwise.
+        let options = VerifyOptions::default().with_request_url(TWILIO_URL);
+        let svc = VerifyLayer::with_options(Provider::Twilio, Secret::new(TWILIO_TOKEN), options)
+            .layer(EchoLen);
+        block_on(async {
+            for (body, signature) in [
+                (TWILIO_CALL_BODY, TWILIO_CALL_SIGNATURE),
+                (TWILIO_MESSAGE_BODY, TWILIO_MESSAGE_SIGNATURE),
+            ] {
+                let request = Request::builder()
+                    .header("X-Twilio-Signature", signature)
+                    .body(TestBody::new(Bytes::from(body.to_string())))
+                    .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+                let response = svc
+                    .clone()
+                    .oneshot(request)
+                    .await
+                    .unwrap_or_else(|error| panic!("{body} should verify: {error}"));
+                assert_eq!(response.status(), StatusCode::OK, "body {body}");
+            }
+        });
+    }
+
+    #[test]
+    fn a_twilio_delivery_whose_body_was_changed_in_transit_is_unauthorized() {
+        // The per-request field list must still be checked, not merely parsed:
+        // one byte of a signed field changed after signing, signature and URL
+        // untouched.
+        let options = VerifyOptions::default().with_request_url(TWILIO_URL);
+        let svc = VerifyLayer::with_options(Provider::Twilio, Secret::new(TWILIO_TOKEN), options)
+            .layer(EchoLen);
+        let request = Request::builder()
+            .header("X-Twilio-Signature", TWILIO_MESSAGE_SIGNATURE)
+            .body(TestBody::new(Bytes::from(
+                TWILIO_MESSAGE_BODY.replace("hello", "HELLO"),
+            )))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+        block_on(async {
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         });
     }
 

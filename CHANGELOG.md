@@ -275,6 +275,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Twilio and Mandrill now decode their form fields from the request body, so
+  both verify through `VerifyLayer` / `WebhookConfig`** (issue #363).
+  `VerifyOptions::form_params` is the parsed
+  `application/x-www-form-urlencoded` **body** — so it differs on every
+  delivery — while both framework adapters hold one `VerifyOptions` behind a
+  single `Arc` fixed at construction. Configuring it on a layer therefore
+  verified one delivery's field set and rejected every other, and leaving it
+  unset failed closed with `MissingContext` (a `500`), so the two form-signed
+  providers were only verifiable by calling `verify()` directly after buffering
+  the body. With the option unset they now decode the fields from the `raw_body`
+  the adapters already buffer verbatim — `application/x-www-form-urlencoded`,
+  one field per `&`-separated element, `+` read as a space, `%XX` read as the
+  byte it names, following `urllib.parse.parse_qs`/`unquote` — so only
+  `request_url` has to be configured. One implementation
+  (`src/providers/form.rs`) serves both providers and both frameworks, which is
+  why it lives in the providers rather than in the adapters: decoding the body
+  is part of constructing the signed string, and AGENTS.md keeps signing logic
+  out of the framework glue. The alternatives the issue weighed — a per-request
+  options hook, and adapter-side parsing — are recorded in `spec.md` §7.
+
+  Nothing about the signed string changes, and nothing is re-encoded, so
+  `spec.md` §4.2 is unaffected: the signature is verified against exactly the
+  fields the provider signed. A body whose fields differ signs a different
+  string and is rejected; a field that decodes to non-UTF-8 bytes fails closed
+  with `VerifyError::BadEncoding` (a `400`, malformed request) rather than
+  being decoded lossily.
+
+  **Behavior change, stated plainly:** a Twilio or Mandrill delivery that
+  previously failed with `MissingContext` (a `500`, "no context supplied")
+  because `form_params` was unset now fails with `SignatureMismatch` (a `401`)
+  when its body does not decode to the signed field set — the same result any
+  other wrong field set produces. `VerifyOptions::form_params` remains as an
+  override (and is still *required* for Twilio's JSON-body variant, whose
+  explicitly empty field list is the only way to say the body is not fields),
+  but nothing now forces a caller to reach for it.
+
 - **a `CustomScheme` header name that is not a valid HTTP field name is
   documented as a fail-closed outage, and pinned** (issue #286). Every built-in
   provider's header names are in-crate constants, and
