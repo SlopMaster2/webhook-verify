@@ -83,8 +83,8 @@
 //! | FastSpring | HMAC-SHA256 over raw body, base64, `X-FS-Signature` (per-webhook HMAC secret, no timestamp; header may arrive with varying case) |
 //! | GoCardless | HMAC-SHA256 over raw body, hex, `Webhook-Signature` (endpoint secret used verbatim, no prefix, no timestamp) |
 //! | Mollie (next-gen webhooks) | HMAC-SHA256 over raw body, hex, `sha256=` prefix, `X-Mollie-Signature` (per-webhook signing secret, no timestamp) |
-//! | Twilio | HMAC-SHA1 (base64) over URL + sorted form params, `X-Twilio-Signature` (needs `VerifyOptions::request_url` + `form_params`) |
-//! | Mandrill (Mailchimp Transactional) | HMAC-SHA1 (base64) over URL + sorted form params, `X-Mandrill-Signature` (needs `VerifyOptions::request_url` + `form_params`) |
+//! | Twilio | HMAC-SHA1 (base64) over URL + sorted form params, `X-Twilio-Signature` (form params decoded from the raw body; needs `VerifyOptions::request_url`) |
+//! | Mandrill (Mailchimp Transactional) | HMAC-SHA1 (base64) over URL + sorted form params, `X-Mandrill-Signature` (form params decoded from the raw body; needs `VerifyOptions::request_url`) |
 //! | LINE (Messaging API) | HMAC-SHA256 over raw body, base64, `x-line-signature` (channel-secret key, no timestamp) |
 //! | Twitch | HMAC-SHA256 over `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix, `Twitch-Eventsub-Message-Signature` + RFC 3339 timestamp tolerance window |
 //! | Typeform | HMAC-SHA256, base64, `sha256=` prefix, `Typeform-Signature` |

@@ -1166,17 +1166,29 @@ worked example) and the reference implementations in Twilio's official SDKs
 - Key: the account's Auth Token as its UTF-8 bytes; an empty token fails
   closed with `InvalidSecret`.
 - Not a raw-body scheme: the signature covers the parsed form fields, not
-  the body bytes. Callers pass every received field via
-  [`VerifyOptions::form_params`] (decided API shape; the URL goes in
-  `VerifyOptions::request_url`). Sorting is applied by this crate — callers
-  pass fields in any order. Under a repeated field name the values are sorted
-  and de-duplicated as well, exactly as `twilio-python`'s
+  the body bytes. With [`VerifyOptions::form_params`] unset — the normal case
+  — the fields are decoded from the `raw_body` argument (`application/x-www-form-urlencoded`:
+  one field per `&`-separated element, `+` read as a space, `%XX` read as the
+  byte it names, an element with no `=` a name with an empty value, empty
+  elements dropped, order and duplicates preserved). Sorting is applied by this
+  crate, so fields arrive in any order. Under a repeated field name the values
+  are sorted and de-duplicated as well, exactly as `twilio-python`'s
   `for value in sorted(set(values))` does; its `get_values` helper reads
   duplicates from Flask `MultiDict`s and Django `QueryDict`s, so the reference
   implementation does represent them. Two deliveries carrying the same
   multiset of fields therefore sign identically regardless of the order the
-  caller received them in. Omitting either option fails closed with
-  `MissingContext`.
+  fields arrived in. Decoding is the only transformation: nothing is
+  re-encoded, so §4.2 is unaffected — there is no body hashing here to protect,
+  and the signed string is built from the decoded names and values. A field
+  that decodes to non-UTF-8 bytes fails closed with `BadEncoding` (a `400`,
+  malformed request) rather than being decoded lossily.
+  `VerifyOptions::form_params` overrides the derivation — the escape hatch for
+  a caller whose own framework parser is authoritative, and the only way to
+  express the JSON-body variant's explicitly empty field set. It exists
+  because the field set is the **body**: both framework adapters hold one
+  `VerifyOptions` for every delivery, so a field list configured on a layer
+  could only ever describe one delivery's body and would reject the rest
+  (issue #363). Omitting `request_url` fails closed with `MissingContext`.
 - The signed URL is signed **verbatim**, and Twilio's signing backend is known
   to be inconsistent about whether the port appears in it. The official SDKs
   absorb that by signing **twice**: `twilio-python`'s `validate` compares
@@ -1195,7 +1207,10 @@ worked example) and the reference implementations in Twilio's official SDKs
   `twilio.rs`'s `port_is_not_tried_alternately`.
 - JSON-body variant: with an explicitly empty parameter list the request
   carries a `bodySHA256` query parameter and Twilio signs the URL **alone** —
-  so the signature covers nothing of the body. This crate therefore
+  so the signature covers nothing of the body. The explicit list is required
+  rather than optional here: a JSON document decoded as form fields is one
+  field whose name is the whole document, so the derived field set is not the
+  empty one and the signature does not match. This crate therefore
   additionally requires `sha256_hexdigest(raw_body)` to equal the
   `bodySHA256` value whenever the configured `request_url` carries that
   parameter, compared in constant time, ANDed into the result exactly as
@@ -1241,18 +1256,20 @@ generic key Mailchimp uses for webhook-URL-check POSTs: the value
   viewable/resettable from the Webhooks page or the Transactional API) as its
   UTF-8 bytes; an empty key fails closed with `InvalidSecret`.
 - Not a raw-body scheme: the signature covers the parsed form fields
-  (`mandrill_events`, historically the only field), not the body bytes.
-  Callers pass every received field via [`VerifyOptions::form_params`], and
-  the URL via `VerifyOptions::request_url`, exactly as with Twilio. Sorting
-  is applied by this crate — callers pass fields in any order. The reference
+  (`mandrill_events`, historically the only field), not the body bytes. As
+  with Twilio, [`VerifyOptions::form_params`] left unset — the normal case —
+  derives them from the `raw_body` argument with the same
+  `application/x-www-form-urlencoded` rules, and setting it overrides that
+  (issue #363); the URL goes in `VerifyOptions::request_url`, which must be
+  supplied or verification fails closed with `MissingContext`. Sorting
+  is applied by this crate, so fields arrive in any order. The reference
   `generateSignature` iterates a keyed object (`Object.keys(params).sort()`
   then `params[key]`), which cannot represent a repeated field name; this
   crate handles that case by sorting and de-duplicating the values under a
   repeated name (the same rule Twilio's reference implementation uses), so
   each distinct value is signed once and two deliveries carrying the same
-  multiset of fields sign identically regardless of the order the caller
-  received them in. Both options must be supplied or verification fails
-  closed with `MissingContext`.
+  multiset of fields sign identically regardless of the order the fields
+  arrived in.
 - No timestamp in the signature scheme (`max_age` has no effect).
 
 ### Twitch
@@ -3203,6 +3220,19 @@ ambiguity).
 2. **Verify against raw bytes only.** No implementation may re-serialize,
    re-encode, or normalize the body before hashing. The `raw_body: &[u8]`
    passed in is hashed exactly as received.
+
+   This constrains *hashing*, and the scope is worth stating because two
+   providers do not hash the body at all. Twilio and Mailchimp
+   Transactional/Mandrill sign the **parsed form fields** (sorted by name,
+   then value) concatenated after the request URL — see their §3 rows and
+   `src/providers/form.rs` (issue #363) — so for them `raw_body` is not hashed,
+   and decoding `application/x-www-form-urlencoded` out of it is the
+   construction of the signed string, not a normalization of hashed bytes.
+   Nothing is re-encoded on the way: the decoded names and values go into the
+   signed string verbatim, so a body whose fields differ from the signed set
+   produces a different string and is rejected. A field that decodes to
+   non-UTF-8 bytes fails closed with `VerifyError::BadEncoding` rather than
+   being decoded lossily.
 3. **No secret material in errors, logs, panics, or `Debug` output.**
    Enforced by the `Secret` wrapper type and by a clippy lint / grep check
    in CI (see §6).
@@ -3720,6 +3750,43 @@ A provider implementation is not mergeable until it has:
   automated key rotation handling is ever requested — it stays out of this
   crate either way.
 
+- **Per-request form fields for the form-signed schemes (Twilio,
+  Mandrill).** *Resolved (2026-10).* `VerifyOptions::form_params` is the
+  parsed `application/x-www-form-urlencoded` **body**, so it differs on every
+  delivery while both framework adapters hold one `VerifyOptions` behind a
+  single `Arc` fixed at construction — configuring it on a layer verifies one
+  delivery's field set and rejects every other, which reads like a
+  provider-side misconfiguration (issue #363). The options weighed were a
+  per-request options hook, adapter-side form parsing, documentation only, and
+  derivation from `raw_body`. Derivation won:
+
+  1. **A hook fails open silently.** `Arc<dyn Fn(&Request) -> VerifyOptions>`
+    pushes the "never re-serialize the body" discipline (§4.2) onto the caller,
+    and a hook returning the wrong field set is a `SignatureMismatch`, not a
+    loud error — the crate's stated bias is loud over silent (§4).
+  2. **Adapter-side parsing puts signing logic in the adapters**, which is
+    where §4 must not reach: form decoding is part of constructing the signed
+    string. It also would have needed the Content-Type fallback for Twilio's
+    JSON-body variant, whose *explicit* empty field list is the only correct
+    answer, and a provider-specific arm in two adapters.
+  3. **`verify()` already receives `raw_body`.** Derivation is one
+    implementation in one place (`src/providers/form.rs`), shared by both
+    providers, that fixes the direct caller and both adapters at once and
+    cannot drift between frameworks.
+  4. **It is not a widening.** The signed string is unchanged — the decoded
+    fields are what a caller's own parser would have supplied. A body whose
+    fields differ signs a different string and is rejected; a field that
+    cannot be decoded fails closed with `BadEncoding`.
+
+  The one behavior change to state plainly: with `form_params` unset, a
+  Twilio/Mandrill delivery that *previously* failed closed with
+  `MissingContext` (a `500`) now fails with `SignatureMismatch` (a `401`)
+  when the body does not decode to the signed field set. That is the trade the
+  issue's analysis called for — the derivation is correct, so the loud
+  "you forgot to parse the body" diagnosis no longer has a distinct trigger —
+  and `VerifyOptions::form_params` remains available for a caller who wants to
+  supply fields explicitly (including Twilio's JSON-body variant, which still
+  requires the empty list).
 - **Secret rotation UX.** *Resolved (2026-09).* Stripe/Standard
   Webhooks allow multiple valid signatures during a rotation window
   (`v1=...,v1=...`). `verify()` keeps `Secret` singular in the core

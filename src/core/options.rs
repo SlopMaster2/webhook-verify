@@ -156,23 +156,38 @@ pub struct VerifyOptions {
     /// actually sent for the delivery. Providers whose scheme does not sign
     /// the method document that this option has no effect on them.
     pub request_method: Option<String>,
-    /// Parsed `application/x-www-form-urlencoded` fields, required by Twilio and
-    /// Mailchimp Transactional (Mandrill): their signatures cover the request
-    /// URL concatenated with the sorted form-field names/values, not the raw
-    /// body. Pass **every** field as received — Twilio's own docs warn against
-    /// verifying against a hardcoded subset, since providers may add
-    /// parameters without notice. Sorting is applied here (it is part of the
-    /// signing scheme), so callers pass fields in any order. Under a repeated
-    /// field name the values are sorted and de-duplicated as well, matching the
-    /// providers' reference implementations; the same multiset of fields
-    /// therefore verifies regardless of the order the caller received it in.
+    /// Form fields for the two schemes that sign *parsed* fields rather than
+    /// the body bytes (Twilio and Mailchimp Transactional/Mandrill): their
+    /// signatures cover the request URL concatenated with the sorted form-field
+    /// names/values.
     ///
-    /// An explicitly empty list is meaningful (Twilio's JSON-body variant signs
-    /// the URL alone, leaving the body authenticated only by the `bodySHA256`
-    /// query parameter — which Twilio then verifies against `raw_body`); omitting
-    /// the option entirely fails closed with
-    /// [`crate::VerifyError::MissingContext`] so a caller that forgot to parse
-    /// the body cannot be confused with an attacker-supplied input.
+    /// **Leaving this unset is the normal case.** When it is `None` the fields
+    /// are decoded from the `raw_body` argument, which is the same bytes every
+    /// raw-body scheme verifies — `application/x-www-form-urlencoded`, one
+    /// field per `&`-separated element, `+` read as a space and `%XX` as the
+    /// byte it names, then sorted as below. That is what makes those two
+    /// providers verifiable through a framework adapter: both adapters hold
+    /// **one** `VerifyOptions` for every delivery, so a field list configured
+    /// on a layer could only ever describe one delivery's body (issue #363).
+    /// Set it only to override the derivation — to supply fields from a
+    /// framework's own parser, or to express "this body is not fields".
+    ///
+    /// Whichever source is used, pass **every** field as received — Twilio's
+    /// docs explicitly warn against verifying against a hardcoded subset,
+    /// since providers may add parameters without notice. Sorting is applied
+    /// here (it is part of the signing scheme), so fields arrive in any order.
+    /// Under a repeated field name the values are sorted and de-duplicated as
+    /// well, matching the providers' reference implementations; the same
+    /// multiset of fields therefore verifies regardless of the order it
+    /// arrived in.
+    ///
+    /// An explicitly empty list is meaningful and is *not* the same as leaving
+    /// the option out: it is how Twilio's JSON-body variant is expressed (the
+    /// body is not form fields, so the signature covers the URL alone, leaving
+    /// the body authenticated only by the `bodySHA256` query parameter Twilio
+    /// appends to the URL — which is then verified against `raw_body`).
+    /// Decoding a JSON body as form fields instead produces a different signed
+    /// string, so that variant still has to ask for the empty list.
     pub form_params: Option<Vec<(String, String)>>,
     /// Verification material for providers whose scheme checks a signature
     /// against a configured public key/certificate rather than a shared secret
@@ -228,13 +243,16 @@ impl VerifyOptions {
         self
     }
 
-    /// Sets [`VerifyOptions::form_params`], for schemes that sign parsed form
-    /// fields (currently Twilio and Mandrill). Fields are sorted into signing
+    /// Sets [`VerifyOptions::form_params`] for the schemes that sign parsed
+    /// form fields (currently Twilio and Mandrill), overriding the derivation
+    /// from `raw_body` described on the field. Fields are sorted into signing
     /// order during verification of those signed strings, so fields may be
     /// passed in any order. Under a repeated field name the values are sorted
     /// and de-duplicated too, matching the providers' reference
     /// implementations, so the same multiset of same-named values signs the
-    /// same string however it arrived.
+    /// same string however it arrived. Passing no items is the explicit
+    /// *empty* field set — Twilio's JSON-body variant — which is not the same
+    /// as leaving the option unset.
     pub fn with_form_params<I, K, V>(mut self, params: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
