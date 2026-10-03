@@ -51,6 +51,53 @@
 //! server-side logging keyed off the structured [`crate::VerifyError`], whose
 //! `Display`/`Debug` never carry secret material (`spec.md` §2.1).
 //!
+//! # Providers that need request context
+//!
+//! The layer verifies with the single [`VerifyOptions`] it was built with —
+//! [`VerifyLayer::new`] supplies [`VerifyOptions::default()`],
+//! [`VerifyLayer::with_options`] whatever you pass — and **nothing from the
+//! incoming request is fed into it**. The middleware does not derive the URL,
+//! the method, or the form fields from the request it is verifying, because
+//! what these schemes sign is the value **the provider signed**, not the one
+//! this process received: behind a reverse proxy, a path-prefix mount, or an
+//! https-terminating load balancer the request's own URI is not the webhook
+//! URL the provider signed, so deriving it would verify a different string
+//! than the signer produced.
+//!
+//! Five built-in providers need that context configured, and omitting a
+//! required value fails closed with [`VerifyError::MissingContext`] — the `500`
+//! row above, never a `401` that would read as a forgery:
+//!
+//! - `Contentful` and `HubSpot` need both
+//!   [`VerifyOptions::request_method`] and [`VerifyOptions::request_url`];
+//! - `Square` needs [`VerifyOptions::request_url`];
+//! - `Twilio` and `Mandrill` need [`VerifyOptions::request_url`] **and**
+//!   [`VerifyOptions::form_params`].
+//!
+//! Every one of them but the last pair is a constant of the deployment — one
+//! endpoint, one method — so [`VerifyLayer::with_options`] covers it:
+//!
+//! ```rust
+//! use bytes::Bytes;
+//! use webhook_verify::tower::VerifyLayer;
+//! use webhook_verify::{Provider, Secret, VerifyOptions};
+//!
+//! // Square signs the public webhook URL plus the raw body.
+//! let options = VerifyOptions::default().with_request_url("https://example.com/webhooks/square");
+//! let layer: VerifyLayer<Bytes> =
+//!     VerifyLayer::with_options(Provider::Square, Secret::new("sq0csp-..."), options);
+//! ```
+//!
+//! [`VerifyOptions::form_params`] is the exception, and the one to know about
+//! before wiring an endpoint up: it is the parsed
+//! `application/x-www-form-urlencoded` **body**, so it differs on every
+//! delivery, while this layer's options are fixed once at construction — so
+//! **Twilio and Mandrill cannot be verified through it.** Configuring fields
+//! there would silently pin every delivery to one delivery's field set, which
+//! rejects the rest. Verify those two providers by calling
+//! [`crate::verify()`] from a middleware or handler of your own, after
+//! buffering the raw body yourself.
+//!
 //! # Example
 //!
 //! ```rust

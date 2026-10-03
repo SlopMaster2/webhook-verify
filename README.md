@@ -413,6 +413,34 @@ library — with no features (pure core) and with `--features sendgrid`:
 
 ## Framework adapters
 
+### Request context is configuration, not something the adapter reads
+
+Both adapters verify with the single `VerifyOptions` they were built with and
+derive **nothing** from the incoming request. That is deliberate: what these
+schemes sign is the value the *provider* signed, which behind a reverse proxy,
+a path-prefix mount, or an https-terminating load balancer is not the URI this
+process receives. So five providers need that context configured up front, via
+`VerifyLayer::with_options` / `WebhookConfig::with_options`:
+
+| Provider | Needs |
+|---|---|
+| `Contentful`, `HubSpot` | `request_method` **and** `request_url` |
+| `Square` | `request_url` |
+| `Twilio`, `Mandrill` | `request_url` **and** `form_params` |
+
+A missing value fails closed with `VerifyError::MissingContext`, which both
+adapters report as `500 Internal Server Error` — a misconfiguration, not a
+`401` forgery.
+
+> ⚠️ **`form_params` cannot work through an adapter.** It is the parsed
+> `application/x-www-form-urlencoded` **body**, so it differs on every
+> delivery, while an adapter's options are fixed once at construction —
+> configuring fields there would pin every delivery to one delivery's field set
+> and reject the rest. **Verify Twilio and Mandrill by calling `verify()`
+> yourself**, from a middleware or handler, after buffering the raw body. Every
+> other provider on the list is fine: an endpoint's URL and method are
+> constants of the deployment.
+
 ### Tower (also Axum)
 
 `webhook-verify::tower::VerifyLayer` is a generic `tower::Layer`. It buffers
