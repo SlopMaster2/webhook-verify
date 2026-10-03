@@ -78,13 +78,14 @@
 //! endpoint, one method — so [`VerifyLayer::with_options`] covers it:
 //!
 //! ```rust
+//! use bytes::Bytes;
 //! use webhook_verify::tower::VerifyLayer;
 //! use webhook_verify::{Provider, Secret, VerifyOptions};
 //!
 //! // Square signs the public webhook URL plus the raw body.
 //! let options = VerifyOptions::default().with_request_url("https://example.com/webhooks/square");
-//! let layer: VerifyLayer<bytes::Bytes> =
-//!     VerifyLayer::with_options(Provider::Square, Secret::new("sq0csp-…"), options);
+//! let layer: VerifyLayer<Bytes> =
+//!     VerifyLayer::with_options(Provider::Square, Secret::new("sq0csp-..."), options);
 //! ```
 //!
 //! [`VerifyOptions::form_params`] is the exception, and the one to know about
