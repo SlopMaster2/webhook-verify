@@ -255,8 +255,9 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
 /// Reject with
 /// [`VerifyError::MalformedHeader`](crate::VerifyError::MalformedHeader)
 /// carrying the returned `header` and a `reason` of your choosing — the
-/// adapters use [`VerifyError::AMBIGUOUS_HEADER_REASON`], which is the
-/// exported spelling of that one string. Call it
+/// adapters use
+/// [`VerifyError::AMBIGUOUS_HEADER_REASON`](crate::VerifyError::AMBIGUOUS_HEADER_REASON),
+/// which is the exported spelling of that one string. Call it
 /// *before* [`verify()`](crate::verify()):
 ///
 /// ```
