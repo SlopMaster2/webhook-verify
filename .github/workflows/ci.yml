@@ -57,6 +57,15 @@ jobs:
       # link, so the minimum configuration is documented with the same
       # `-D warnings` bar.
       - run: cargo doc --no-default-features --no-deps
+      # `--no-default-features` drops both `std` and every adapter feature, so
+      # it cannot see a link that breaks only when `http` is *present* while
+      # the adapter crates are absent: that configuration is the one where
+      # `ambiguous_signature_header` is documented but `core::adapter_utils`'s
+      # adapter-gated `VerifyError` import is not, so a bare
+      # `[VerifyError::…]` link there resolves under `--all-features` and fails
+      # with `unresolved link` here. It is a configuration a downstream user
+      # reaches with `default-features = false, features = ["http"]`.
+      - run: cargo doc --no-default-features --features http --no-deps
 
   clippy:
     name: clippy (-D warnings, ${{ matrix.features }})

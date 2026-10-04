@@ -461,6 +461,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A bare intra-doc link that only broke with `http` on and every adapter
+  feature off.** The earlier `### Added` entry added
+  `cargo doc --no-default-features` to the `doc` job so links that break when a
+  feature-gated item is *absent* are caught, but that configuration also drops
+  `http`, so it structurally cannot see the mirror case: a link that breaks
+  when `http` is *present* while the adapter crates are absent.
+  `ambiguous_signature_header` is documented there, and its docs linked
+  ``[`VerifyError::AMBIGUOUS_HEADER_REASON`]`` with no path, relying on an
+  import in `core::adapter_utils` that is gated on `tower`/`actix`. Under
+  `--no-default-features --features http` — what a downstream
+  `default-features = false, features = ["http"]` build reaches — that import
+  is absent and the link fails as `unresolved link`, exactly the
+  feature-absence defect the original change was meant to end, just along a
+  different axis. Fully qualified the link and added
+  `cargo doc --no-default-features --features http --no-deps` to the same job
+  under the same `-D warnings` bar, with spec §6 naming the configuration so
+  the gate inventory cannot drift from what CI builds.
+
 - **The two framework adapters never said which providers need
   caller-supplied request context, and invited the one fix that cannot work.**
   `webhook_verify::tower`'s and `webhook_verify::actix`'s module docs described

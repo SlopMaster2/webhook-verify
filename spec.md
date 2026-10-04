@@ -3635,14 +3635,22 @@ A provider implementation is not mergeable until it has:
   user-facing docs. (docs.rs itself builds with `-D warnings`, so a broken link
   still fails the docs.rs build; shipped as the `doc` CI job,
   `.github/workflows/ci.yml`.) The same job also runs
-  `cargo doc --no-default-features --no-deps` under the same flag, because
-  `--all-features` structurally cannot see a link that only breaks when a
-  feature-gated item is *absent*: an intra-doc link to a
+  `cargo doc --no-default-features --no-deps` and
+  `cargo doc --no-default-features --features http --no-deps` under the same
+  flag, because `--all-features` structurally cannot see a link that only
+  breaks when a feature-gated item is *absent*: an intra-doc link to a
   feature-gated function resolves with that feature on and fails as
   `unresolved link` with it off, which is the configuration a `no_std` or
-  framework-free reader is reading. Links from unconditionally-compiled doc
-  contexts to a feature-gated item are therefore spelled as plain text, the
-  convention `ambiguous_signature_header_in`'s own docs already state.
+  framework-free reader is reading. `--no-default-features` alone is not
+  enough, though: it drops `http` too, so it cannot see a link that breaks
+  only when `http` is *present* while the adapter features are off — the
+  configuration `default-features = false, features = ["http"]` reaches,
+  where `ambiguous_signature_header` is documented but the adapter-gated
+  `VerifyError` import that a bare `[VerifyError::…]` link relies on is not.
+  Links from unconditionally-compiled doc contexts to a
+  feature-gated item are therefore spelled as plain text, the
+  convention `ambiguous_signature_header_in`'s own docs already state, and a
+  link to an item whose *import* is feature-gated is fully qualified.
 - `cargo fuzz build` (build-only in normal CI; timed fuzz runs in a
   scheduled nightly job).
 - A grep-based CI backstop (`secret-leak-grep`) that fails the build if any
