@@ -347,7 +347,7 @@ pub struct CustomScheme {
     pub signature_header: &'static str,
     pub timestamp_header: Option<&'static str>,
     pub timestamp_unit: TimestampUnit, // Seconds (default) | Millis
-    pub encoding: Encoding,            // Hex | Base64 | Base64Url | Base64NoPad
+    pub encoding: Encoding,            // Hex | Base64 | Base64Url | Base64NoPad | Base64UrlNoPad
     pub prefix: Option<&'static str>,  // e.g. "sha256=" or "v0="
     pub signed_string: fn(&dyn HeaderMap, &[u8]) -> Vec<u8>,
 }
@@ -394,16 +394,19 @@ when `timestamp_header` is `None`, since no replay check runs.
 **Encoding requirement.** `Encoding` names one exact decoder, not a family of
 acceptable spellings: `Hex` (either case), `Base64` (RFC 4648 §4 alphabet,
 canonical padding required), `Base64Url` (RFC 4648 §5 alphabet, canonical
-padding required), and `Base64NoPad` (RFC 4648 §4 alphabet, padding omitted). A
-value the configured variant cannot decode fails closed with `BadEncoding`, and
-a variant must **not** fall back to another engine — the scheme is the caller's
+padding required), `Base64NoPad` (RFC 4648 §4 alphabet, padding omitted), and
+`Base64UrlNoPad` (RFC 4648 §5 alphabet, padding omitted). A value the
+configured variant cannot decode fails closed with `BadEncoding`, and a variant
+must **not** fall back to another engine — the scheme is the caller's
 declaration of the sender's wire format, so accepting a sibling spelling would
-verify a delivery under a configuration nobody asked for. The one cell of the
-alphabet × padding matrix no variant names is URL-safe *and* unpadded
-(`URL_SAFE_NO_PAD`); adding it is a purely additive follow-up, and until then a
-scheme needing it has no in-crate expression. Every decoded signature must still
-match the scheme's digest length exactly, as `BadEncoding` requires, so no
-engine's trailing-bit slack can admit a shorter or longer signature.
+verify a delivery under a configuration nobody asked for. Between them the
+variants cover the whole alphabet × padding matrix a base64 sender can spell a
+digest with; the last cell, URL-safe *and* unpadded (`URL_SAFE_NO_PAD`), was
+named here as a pending follow-up when `Base64NoPad` landed and closed by
+`Base64UrlNoPad` (issue #366), which is purely additive because `Encoding` is
+`#[non_exhaustive]`. Every decoded signature must still match the scheme's
+digest length exactly, as `BadEncoding` requires, so no engine's trailing-bit
+slack can admit a shorter or longer signature.
 
 **Replay-check caveat.** Setting `timestamp_header` runs the shared replay
 window (`|now - t| <= max_age`) against the header value, but the check only
@@ -3550,12 +3553,12 @@ A provider implementation is not mergeable until it has:
    `Provider::Custom` is not name-constructible, so it is driven only by the
    target's hand-written `CustomScheme` configurations rather than by the
    provider pool, and each of its declared enums needs its own pin. The
-   `TimestampUnit::Millis` dispatch and the full `Encoding` dispatch — all four
-   decoder arms (`hex`, and the `STANDARD` / `URL_SAFE` / `STANDARD_NO_PAD`
-   base64 engines) — are each required to be configured by at least one seed,
-   and the required set is itself checked against the `Encoding` dispatch's arm
-   count in `src/providers/custom.rs`, so a decoder arm added later cannot land
-   with no fuzz coverage (issues #275, #360).
+   `TimestampUnit::Millis` dispatch and the full `Encoding` dispatch — all five
+   decoder arms (`hex`, and the `STANDARD` / `URL_SAFE` / `STANDARD_NO_PAD` /
+   `URL_SAFE_NO_PAD` base64 engines) — are each required to be configured by at
+   least one seed, and the required set is itself checked against the `Encoding`
+   dispatch's arm count in `src/providers/custom.rs`, so a decoder arm added
+   later cannot land with no fuzz coverage (issues #275, #360, #366).
 7. **Constant-time assertion** where feasible: a `dudect`-style statistical
    timing test on the comparison step, run in CI as a non-blocking
    (informational) job. *Implemented (2026-09): `constant_time_comparison` in
