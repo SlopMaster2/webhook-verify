@@ -224,10 +224,11 @@
 //!   gate, and timestamp-parse paths of `Provider::Custom` (`spec.md` §2.2).
 //! - `custom-raw-base64-signature` — the raw-body/base64 `CustomScheme`
 //!   target configuration (`X-Raw-Sig`, no prefix, no timestamp, three hash
-//!   algorithms crossed with all three base64-family encodings), reaching
+//!   algorithms crossed with all four base64-family encodings), reaching
 //!   base64 decode, the digest-length gate, and the constant-time comparison
 //!   for `Provider::Custom`. This is the only seed that reaches
-//!   `Encoding::Base64Url` and `Encoding::Base64NoPad` — the other two
+//!   `Encoding::Base64Url`, `Encoding::Base64NoPad` and
+//!   `Encoding::Base64UrlNoPad` — the other two
 //!   `Custom` configurations hard-code `Encoding::Hex` — so the cross product
 //!   is what covers the `Encoding` dispatch in
 //!   `src/providers/custom.rs` arm for arm.
@@ -874,6 +875,9 @@ fuzz_target!(|data: &[u8]| {
     // while the other two `Custom` seeds hard-code `Hex`, leaving `Base64Url`
     // and `Base64NoPad` with no fuzz configuration at all despite §5.6 asking
     // this target for every encoding-decoding path (issue #360).
+    // `Base64UrlNoPad` joined them for the same reason (issue #366): it is a
+    // distinct engine from both of the others, so a byte string only it
+    // decodes — or only it rejects — is what exercises its padding rule.
     let raw_b64 = |hash, encoding| CustomScheme {
         hash,
         signature_header: "X-Raw-Sig",
@@ -883,7 +887,12 @@ fuzz_target!(|data: &[u8]| {
         prefix: None,
         signed_string: |_headers, raw_body| raw_body.to_vec(),
     };
-    for encoding in [Encoding::Base64, Encoding::Base64Url, Encoding::Base64NoPad] {
+    for encoding in [
+        Encoding::Base64,
+        Encoding::Base64Url,
+        Encoding::Base64NoPad,
+        Encoding::Base64UrlNoPad,
+    ] {
         for hash in [HashAlg::Sha256, HashAlg::Sha1, HashAlg::Sha512] {
             attempt(
                 Provider::Custom(raw_b64(hash, encoding)),

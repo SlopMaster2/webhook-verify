@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Encoding::Base64UrlNoPad`** (issue #366). `Encoding` names one exact
+  decoder — an alphabet and a padding rule — and three of the four base64 cells
+  had a variant: `Base64` (standard, padded), `Base64Url` (URL-safe, padded),
+  and `Base64NoPad` (standard, unpadded). The fourth — URL-safe *and* unpadded,
+  the `base64` crate's `URL_SAFE_NO_PAD`, and the shape JWS §2 calls
+  "base64url" that most JWT libraries emit — had none, so a long-tail sender
+  that puts a digest in a URL or a header and omits the `=` padding could not
+  be prototyped with `Provider::Custom(..)` at all. `spec.md` §2.2 named this
+  as a pending follow-up when `Base64NoPad` landed, and
+  `Encoding::Base64NoPad`'s own docs recorded it as "a one-line, purely
+  additive follow-up whenever a real sender needs it"; between them the
+  variants now cover the whole matrix.
+
+  The variant is exact like the rest: it accepts only the unpadded URL-safe
+  alphabet, so the padded spelling (`Base64Url`'s), the standard alphabet's
+  `+`/`/` (`Base64NoPad`'s), and both at once are all `BadEncoding`, and every
+  decoded signature must still match the scheme's digest length. Its confusion
+  partner is `Base64Url`, not `Base64NoPad` — and unlike the alphabet axis,
+  the padding axis differs on *every* digest, so a scheme configured with
+  `Base64Url` where the sender omits padding is caught by its first
+  authentic delivery every time rather than by chance.
+
+  Purely additive: `Encoding` is `#[non_exhaustive]`, so a new variant cannot
+  break a downstream `match`, and `Cargo.toml`'s `constructible_struct_adds_field`
+  lint does not apply. No provider list change, no new dependency, and no
+  behavior change for any pre-existing `Encoding` value.
+
+  Fuzz coverage was required rather than optional, and the repo's existing
+  guards enforced that: `custom_encoding_dispatch_arm_count_matches_the_variant_list`
+  in `src/providers/mod.rs` counts the arms in `src/providers/custom.rs`'s
+  `Encoding` dispatch, so adding a fifth arm without adding it to
+  `custom_encoding_variant_names()` fails the build, and
+  `fuzz_target_configures_every_custom_encoding_variant` then requires the
+  `custom-raw-base64-signature` seed in `fuzz/fuzz_targets/parse_and_verify.rs`
+  to configure the new engine — which it does, as the fourth encoding in the
+  existing three-hashes × encodings cross product. `spec.md` §2.2 and §5.6 are
+  updated to match.
+
 - **`VerifyError::AMBIGUOUS_HEADER_REASON`**. `spec.md` §4.4 obliges every
   caller of `verify()` to reject a request whose signature header arrived more
   than once with differing values, and it fixes a single `reason` for that

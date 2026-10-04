@@ -5144,14 +5144,14 @@ mod tests {
     /// arbitrary input is what they do not cover.
     ///
     /// The requirement is checked against the `Encoding` dispatch's own arm
-    /// count rather than against a hand-written list alone, so a *fifth* variant
-    /// added later cannot land with no fuzz coverage: adding an arm to
+    /// count rather than against a hand-written list alone, so a *further*
+    /// variant added later cannot land with no fuzz coverage: adding an arm to
     /// `src/providers/custom.rs` without adding it to the list fails
     /// [`custom_encoding_dispatch_arm_count_matches_the_variant_list`], which
     /// runs even where this one cannot (it needs `fuzz/`). That matters because
-    /// the `Encoding::Base64NoPad` docs record the remaining cell — URL-safe
-    /// *and* unpadded — as an anticipated one-line follow-up, so the list is
-    /// expected to grow.
+    /// the list has already had to grow twice: `Base64NoPad` in #330, and
+    /// `Base64UrlNoPad` in #366 — the cell the former's docs had recorded as an
+    /// anticipated one-line follow-up.
     ///
     /// Per variant it is a floor of one, not an exact count: what matters is
     /// that the decoder is driven, and a second configuration is a gain, not
@@ -5195,7 +5195,13 @@ mod tests {
     /// names them textually (`Encoding::Base64Url`), which is what the fuzz
     /// coverage is actually expressed in.
     fn custom_encoding_variant_names() -> Vec<&'static str> {
-        vec!["Hex", "Base64", "Base64Url", "Base64NoPad"]
+        vec![
+            "Hex",
+            "Base64",
+            "Base64Url",
+            "Base64NoPad",
+            "Base64UrlNoPad",
+        ]
     }
 
     /// How many arms `src/providers/custom.rs`'s `Encoding` decode dispatch has.
