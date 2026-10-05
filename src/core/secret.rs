@@ -1,6 +1,8 @@
 //! The [`Secret`] wrapper: keeps signing material out of logs, errors, and
 //! debug output.
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use alloc::string::String;
 use core::fmt;
 

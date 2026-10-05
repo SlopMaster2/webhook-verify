@@ -4,6 +4,8 @@
 //! security guarantees are implemented once (`spec.md` §4). Providers must not
 //! call `hmac`/`sha2`/`sha1`/`subtle` directly; they call these helpers.
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use ed25519_dalek::{Signature, VerifyingKey};
 use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;

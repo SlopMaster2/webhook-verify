@@ -2,6 +2,8 @@
 //! timestamped provider. Extracted to avoid duplicating identical logic
 //! across provider modules (`spec.md` §5.4).
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use crate::core::error::VerifyError;
 use crate::core::options::VerifyOptions;
 

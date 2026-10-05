@@ -5,6 +5,8 @@
 //! vectors. Feature-disabled providers fail closed with
 //! [`VerifyError::UnsupportedProvider`].
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 mod adyen;
 mod airwallex;
 mod bitbucket;

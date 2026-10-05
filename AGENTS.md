@@ -55,9 +55,14 @@ for CI to catch you — apply them while writing the diff:
 - **Never** call `.unwrap()` or `.expect()` on anything derived from
   `headers`, `raw_body`, or `secret` — those are attacker-controlled or
   operator-controlled inputs. Return a `VerifyError` variant instead.
-  `#![deny(clippy::unwrap_used, clippy::expect_used)]` is set in provider
-  modules; do not add `#[allow(...)]` to work around it — fix the code
-  path instead.
+  `#![deny(clippy::unwrap_used, clippy::expect_used)]` is set at the crate
+  root **and** in every `src/core/*` and `src/providers/*` module (including
+  `providers/mod.rs`, the dispatch); a source-scanning test walks those
+  directories so a new module is covered by adding the file. Do not add
+  `#[allow(...)]` to work around it — fix the code path instead. Note the gate
+  applies to `#[cfg(test)]` code too: write a test as `assert_eq!(result,
+  Err(VerifyError::MalformedHeader { .. }))`, `assert!(matches!(..))`, or by
+  returning `Result` and letting `?` propagate — never `.unwrap()`.
 - **Never** put secret material, raw bodies, or computed signatures into a
   `format!`, `println!`, `tracing::*`, `log::*`, `Debug`, or `Display` call,
   including in test failure messages beyond what `assert_eq!` prints by
