@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`VerifyLayer::on_rejection(..)`** (issue #379). The tower adapter's docs —
+  and the `README` — promised that "distinguishing detail belongs in server-side
+  logging keyed off the structured `VerifyError`", but the middleware made
+  that impossible: `call()` built a status-coded, empty-bodied response and
+  returned `Ok(..)`, dropping the error on the floor. A tower/axum user could
+  not see it at all, not even as a string, so a per-class metric had to be
+  approximated from the status code — which deliberately collapses three
+  variants into each of `400` and `500`, making an operator's `InvalidSecret`
+  indistinguishable from an attacker's `SignatureMismatch`.
+
+  The actix half of this gap landed in
+  `WebhookVerificationError::verify_error()` (issue #378), but an accessor is
+  not available in the tower shape for a structural reason, not an oversight: a
+  layer runs *before* the handler, so there is no object to hand the error to
+  afterwards. `on_rejection` is the hook that shape admits —
+  `Arc<dyn Fn(&Rejection) + Send + Sync>`, stored in the already-shared
+  `Config`, invoked on every request the middleware refuses and never on one
+  that verifies.
+
+  `Rejection` is the one reason a request was refused: `Verify(VerifyError)` —
+  `verify()`'s own value, unchanged, with the same §2.1 redaction — or
+  `BodyTooLarge`, since `413` is not a verification outcome (no signature work
+  is done on those paths at all). Both `413` paths report, so a DoS counter
+  sees the refusals `with_max_body_size` exists to make, and
+  `Rejection::status()` is derived from the same value the response is built
+  from, so a hook and the wire status cannot disagree. Nothing is put on the
+  wire: response bodies stay empty. A transport-level body read failure still
+  answers through the service's `Err` half rather than a response, per tower
+  conventions, so it is not reported to the hook.
+
+  Trade-off, documented on the method: the callback runs inline on the hot
+  path, so it must be cheap, non-blocking, and non-panicking. Purely additive
+  — unset, the layer behaves exactly as before (status codes and empty bodies
+  unchanged), no new dependency, no provider touched, and no `spec.md` edit
+  (the spec does not specify the adapters' error surface).
+
 - **`WebhookVerificationError::verify_error()`** (issue #378). The actix
   adapter documented its rejection contract as "distinguishing detail belongs
   in server-side logging keyed off the structured `VerifyError`", and the
@@ -33,9 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Purely additive: no behaviour change, no new dependency, no provider and no
   `spec.md` edit (the spec does not specify the adapters' error surface). The
-  tower half of the same gap is *not* addressed here and stays open as issue
-  #379 — its middleware never surfaces the error at all, so an observation hook
-  on `VerifyLayer` is a real design decision rather than a one-line accessor.
+  tower half of the same gap is *not* addressed here — its middleware never
+  surfaces the error at all, so an observation hook on `VerifyLayer` is a real
+  design decision rather than a one-line accessor. It is added in the entry
+  above.
 
 - **`Encoding::Base64UrlNoPad`** (issue #366). `Encoding` names one exact
   decoder — an alphabet and a padding rule — and three of the four base64 cells
