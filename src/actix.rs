@@ -70,11 +70,14 @@
 //! | `UnsupportedProvider`, `InvalidSecret`, `MissingContext` (operator misconfiguration) | `500 Internal Server Error` |
 //!
 //! Bodies are deliberately empty: distinguishing detail belongs in
-//! server-side logging keyed off the structured [`crate::VerifyError`], whose
-//! `Display`/`Debug` never carry secret material (`spec.md` §2.1). A failure
-//! to read the body at transport level (e.g. client disconnect mid-stream)
-//! surfaces as `400 Bad Request` — an incomplete request, never a
-//! verification outcome.
+//! server-side logging keyed off the structured [`crate::VerifyError`], which
+//! [`WebhookVerificationError::verify_error`] hands back unchanged — so a
+//! handler can `match` the class rather than parse the status code or the
+//! error's message, and that error's `Display`/`Debug` never carry secret
+//! material (`spec.md` §2.1). A failure to read the body at transport level
+//! (e.g. client disconnect mid-stream) surfaces as `400 Bad Request` — an
+//! incomplete request, never a verification outcome, and therefore a `None`
+//! from that accessor.
 //!
 //! # Providers that need request context
 //!
@@ -371,6 +374,59 @@ enum Rejection {
 #[derive(Debug)]
 pub struct WebhookVerificationError(Rejection);
 
+impl WebhookVerificationError {
+    /// The verification error behind this rejection, when there is one.
+    ///
+    /// This is the structured value the module's [status-codes
+    /// section](self#status-codes) tells callers to log and key off: it is
+    /// [`crate::verify`]'s own [`VerifyError`], unchanged, so `match`ing on it
+    /// gives the full §2.1 granularity rather than the status code, which
+    /// deliberately collapses three variants into one `400` and two into each
+    /// `401`/`500`. Nothing about the redacted `VerifyError` (`spec.md` §2.1)
+    /// is loosened by holding the reference: it is the same value the error
+    /// renders, and it is still never sent to the client
+    /// ([`error_response`](ResponseError::error_response) sends a bodiless
+    /// response).
+    ///
+    /// `None` for the two rejections that are not verification outcomes and
+    /// carry no `VerifyError` at all: the body could not be read to completion
+    /// (`400`), or it exceeded the
+    /// [`WebhookConfig::with_max_body_size`] limit (`413`, the status table's
+    /// "not a `VerifyError`" row). Those two are told apart by
+    /// [`ResponseError::status_code`]; every `Some(_)` here agrees with it, since
+    /// the status is derived from the same error.
+    ///
+    /// The private `Rejection` enum stays private on purpose: an accessor lets
+    /// it grow a variant without a breaking change, which making it public
+    /// would not.
+    ///
+    /// ```no_run
+    /// use webhook_verify::VerifyError;
+    /// use webhook_verify::actix::WebhookVerificationError;
+    ///
+    /// // Label a rejection for metrics: the status code alone cannot tell an
+    /// // operator misconfiguration (`500`) from a forgery (`401`).
+    /// pub fn classify(err: &WebhookVerificationError) -> &'static str {
+    ///     match err.verify_error() {
+    ///         Some(
+    ///             VerifyError::InvalidSecret { .. } | VerifyError::MissingContext { .. },
+    ///         ) => "misconfigured",
+    ///         Some(VerifyError::SignatureMismatch) => "forged",
+    ///         Some(VerifyError::TimestampOutOfTolerance { .. }) => "stale",
+    ///         // A malformed request, or a body that was never read or never fit.
+    ///         _ => "unusable",
+    ///     }
+    /// }
+    /// ```
+    #[must_use]
+    pub fn verify_error(&self) -> Option<&VerifyError> {
+        match &self.0 {
+            Rejection::Verify(error) => Some(error),
+            Rejection::BodyRead | Rejection::BodyTooLarge => None,
+        }
+    }
+}
+
 impl fmt::Display for WebhookVerificationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
@@ -416,8 +472,9 @@ impl ResponseError for WebhookVerificationError {
     // both the measured `skew` and the operator's configured `max_age`, which
     // is a free calibration oracle for an unauthenticated caller probing the
     // replay window. Operators still get the detail: `Display`/`Debug` on this
-    // type are unchanged and remain the server-side logging surface, keyed off
-    // the structured [`VerifyError`].
+    // type are unchanged and remain the server-side logging surface, and
+    // `verify_error()` returns the structured [`VerifyError`] itself for
+    // anything that keys off the class rather than the message.
     fn error_response(&self) -> actix_web::HttpResponse<actix_web::body::BoxBody> {
         actix_web::HttpResponse::build(self.status_code()).finish()
     }
@@ -1918,5 +1975,112 @@ mod tests {
             "webhook body exceeds the configured size limit"
         );
         assert_eq!(e.status_code(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[test]
+    fn verify_error_yields_the_structured_error_and_nothing_else() {
+        // `Some` for a verification outcome, and the *same* value — the caller
+        // gets `verify()`'s error, not a re-spelling of it.
+        let missing = VerifyError::MissingHeader {
+            header: "X-Hub-Signature-256",
+        };
+        let e = WebhookVerificationError(Rejection::Verify(missing));
+        assert_eq!(e.verify_error(), Some(&missing));
+        assert_eq!(
+            e.verify_error(),
+            Some(&VerifyError::MissingHeader {
+                header: "X-Hub-Signature-256"
+            })
+        );
+
+        let e = WebhookVerificationError(Rejection::Verify(VerifyError::SignatureMismatch));
+        assert_eq!(e.verify_error(), Some(&VerifyError::SignatureMismatch));
+
+        // `None` for the two rejections that are not verification outcomes and
+        // therefore carry no `VerifyError` at all — a body that never finished
+        // arriving, and the status table's "not a `VerifyError`" `413` row.
+        // Each still answers with its own status, which is the whole story for
+        // them.
+        let e = WebhookVerificationError(Rejection::BodyRead);
+        assert_eq!(e.verify_error(), None);
+        assert_eq!(e.status_code(), StatusCode::BAD_REQUEST);
+
+        let e = WebhookVerificationError(Rejection::BodyTooLarge);
+        assert_eq!(e.verify_error(), None);
+        assert_eq!(e.status_code(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[actix_web::test]
+    async fn a_rejection_reaches_a_handler_as_the_structured_verify_error() {
+        // The wiring the accessor exists for: a handler that takes the
+        // extractor as a `Result` sees the error object itself, so the class is
+        // matchable instead of inferred from the status code — which
+        // deliberately collapses three variants into one `400` — or parsed out
+        // of the message.
+        async fn inspect(outcome: Result<VerifiedBody, WebhookVerificationError>) -> HttpResponse {
+            match outcome {
+                Ok(body) => HttpResponse::Ok().body(body.len().to_string()),
+                Err(err) => {
+                    let label = match err.verify_error() {
+                        Some(VerifyError::MissingHeader { header }) => format!("missing:{header}"),
+                        Some(VerifyError::SignatureMismatch) => "mismatch".to_string(),
+                        Some(VerifyError::TimestampOutOfTolerance { .. }) => "stale".to_string(),
+                        Some(_) | None => "other".to_string(),
+                    };
+                    HttpResponse::Ok().body(label)
+                }
+            }
+        }
+
+        let app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::new(
+                    Provider::GitHub,
+                    Secret::new(GITHUB_SECRET),
+                ))
+                .route("/", web::post().to(inspect)),
+        )
+        .await;
+
+        // A delivery with no signature header at all: the `400` row, and the
+        // class a caller most wants to tell apart from an attack.
+        let res = aw_test::call_service(
+            &app,
+            aw_test::TestRequest::post()
+                .set_payload(Bytes::from_static(GITHUB_BODY))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            aw_test::read_body(res).await,
+            Bytes::from_static(b"missing:X-Hub-Signature-256")
+        );
+
+        // And the auth row stays distinguishable: a correctly spelled
+        // `sha256=` header carrying a well-formed 32-byte digest that is simply
+        // not this delivery's is `SignatureMismatch` — an attack or a wrong
+        // secret — not a malformed request. The status collapses the two rows
+        // into `401` vs `400`; the variant is what carries the detail.
+        let wrong_digest = format!("sha256={}", "0".repeat(64));
+        let res = aw_test::call_service(
+            &app,
+            aw_test::TestRequest::post()
+                .insert_header(("X-Hub-Signature-256", wrong_digest))
+                .set_payload(Bytes::from_static(GITHUB_BODY))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            aw_test::read_body(res).await,
+            Bytes::from_static(b"mismatch")
+        );
+
+        // The unchanged happy path, so the accessor is proven additive rather
+        // than part of some new failure mode.
+        let res = aw_test::call_service(&app, github_request(GITHUB_BODY).to_request()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(aw_test::read_body(res).await, Bytes::from_static(b"13"));
     }
 }
