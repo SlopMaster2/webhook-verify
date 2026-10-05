@@ -1,6 +1,8 @@
 //! Verification options: timestamp tolerance, clock injection, and asymmetric
 //! verification material for public-key providers.
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;

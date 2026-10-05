@@ -1,6 +1,8 @@
 //! The [`HeaderMap`] abstraction: lets `verify()` work against any framework's
 //! header representation.
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;

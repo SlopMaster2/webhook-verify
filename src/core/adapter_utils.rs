@@ -14,6 +14,8 @@
 //!   `declared_content_length`), which carries a narrower `cfg` so nothing is
 //!   dead code when no adapter is enabled.
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 #[cfg(any(feature = "tower", feature = "actix"))]
 use alloc::{sync::Arc, vec::Vec};
 #[cfg(any(feature = "tower", feature = "actix"))]

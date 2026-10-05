@@ -4,6 +4,8 @@
 //! body, or a computed signature. They may carry header *names*, static reason
 //! strings, and numeric skew values.
 
+#![deny(clippy::unwrap_used, clippy::expect_used)]
+
 use core::fmt;
 use core::time::Duration;
 
