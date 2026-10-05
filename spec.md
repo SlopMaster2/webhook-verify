@@ -3310,7 +3310,23 @@ ambiguity).
    `Provider::Custom` is absent from `provider_list()` (it is not
    name-constructible). The fail-closed direction is pinned by
    `custom::tests::an_unparseable_declared_header_name_is_always_ambiguous`
-   (issue #286).
+   (issue #286). The "cannot be looked up" verdict is produced by the crate's
+   own RFC 9110 §5.1 field-name check for **all** header representations the
+   scan runs over — the pair tables and both framework maps — rather than by
+   delegating the name parse to whichever `http` version the adapter links.
+   That distinction is load-bearing, because the two versions in play
+   (actix-web 4 on `http` 0.2, tower/axum on `http` 1.x) do not implement the
+   same grammar: `http` 0.2.12's `HEADER_CHARS` accepts `"` as a header-name
+   byte. Delegating therefore reported an actix request bearing a `Custom`
+   header name containing `"` as an ordinary unduplicated header while the same
+   configuration was ambiguous on tower, which is exactly the cross-adapter
+   drift `MultiValueHeaders` exists to prevent. Pinned both ways by
+   `core::headers::tests::is_valid_field_name_matches_rfc_9110_tchar` (the
+   crate predicate equals the RFC's own `tchar` list, all 256 byte values in
+   three positions) and
+   `core::adapter_utils::tests::field_name_grammar::every_byte_agrees_across_every_compiled_impl`
+   (every compiled impl agrees with that predicate), the latter so a future
+   dependency bump that reintroduces a divergence fails the build.
    **Provider-sent duplicate headers.** One exception to "for built-in
    providers the scan covers every header the scheme declares" is forced by a
    provider's own signing machinery rather than chosen for convenience: during

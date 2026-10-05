@@ -42,14 +42,28 @@ use crate::{Secret, VerifyOptions};
 /// needs across both. Keeping the implementations here — rather than one
 /// copy of the scan per adapter — is what guarantees a hardening applied to
 /// one framework's ambiguity check cannot be skipped for the other.
+///
+/// That guarantee needs the *name grammar* to be unified too, not only the
+/// scan: the two `http` versions do not implement the same one, and delegating
+/// the name parse to whichever is linked is how they drifted. `http` 0.2.12's
+/// `HEADER_CHARS` maps `0x22` (`"`) to itself, so it accepts `"` as a
+/// header-name byte; RFC 9110 §5.1's `tchar` does not include it (`DQUOTE` is a
+/// delimiter), and `http` 1.x agrees. So every impl below answers "can this
+/// name be looked up?" from [`is_valid_field_name`] first and only then hands
+/// the name to its framework's own parser — making the crate's RFC grammar,
+/// not a transitive dependency's, the single source for the fail-closed
+/// verdict. `tests::field_name_grammar::every_byte_agrees_across_every_compiled_impl`
+/// pins that exhaustively over all 256 byte values in three positions, so a
+/// future dependency bump that reintroduces a divergence fails the build.
 pub(crate) trait MultiValueHeaders {
     /// Iterates over every value stored under `name`, in order, as the raw
     /// (unvalidated) bytes each header line carried.
     ///
-    /// Returns `None` when `name` cannot be parsed into a valid header name.
-    /// Callers must treat that as a fail-closed condition: an unparseable
-    /// name can never be verified against, so reporting it as ambiguous is
-    /// the only safe answer.
+    /// Returns `None` when `name` is not a valid HTTP field name — RFC 9110
+    /// §5.1 `field-name = token`, spelled by [`is_valid_field_name`] rather
+    /// than delegated, per the trait's docs. Callers must treat that as a
+    /// fail-closed condition: an unparseable name can never be verified
+    /// against, so reporting it as ambiguous is the only safe answer.
     fn get_all_bytes(&self, name: &str) -> Option<impl Iterator<Item = &[u8]>>;
 
     /// The first value stored under `name`, decoded as a string — but only
@@ -68,14 +82,20 @@ pub(crate) trait MultiValueHeaders {
 #[cfg(feature = "http")]
 impl MultiValueHeaders for ::http::HeaderMap {
     fn get_all_bytes(&self, name: &str) -> Option<impl Iterator<Item = &[u8]>> {
-        // `HeaderName::from_bytes` normalizes to lowercase and rejects names
-        // with invalid bytes, so an unparseable name is a `None` the shared
-        // scan treats as fail-closed.
+        if !is_valid_field_name(name) {
+            return None;
+        }
+        // `HeaderName::from_bytes` normalizes to lowercase, so it stays as the
+        // lookup step; the grammar decision above is the crate's, not this
+        // version's.
         let key = ::http::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
         Some(self.get_all(&key).iter().map(::http::HeaderValue::as_bytes))
     }
 
     fn get_first_str(&self, name: &str) -> Option<&str> {
+        if !is_valid_field_name(name) {
+            return None;
+        }
         let key = ::http::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
         self.get(&key).and_then(|value| value.to_str().ok())
     }
@@ -83,7 +103,13 @@ impl MultiValueHeaders for ::http::HeaderMap {
 
 #[cfg(feature = "actix")]
 impl MultiValueHeaders for actix_web::http::header::HeaderMap {
+    // `http` 0.2's name parser is the one that diverges from the RFC here
+    // (it accepts `"`), so the guard above is what makes this impl's verdict
+    // match `http` 1.x's rather than `http` 0.2's own opinion.
     fn get_all_bytes(&self, name: &str) -> Option<impl Iterator<Item = &[u8]>> {
+        if !is_valid_field_name(name) {
+            return None;
+        }
         let key = actix_web::http::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
         Some(
             self.get_all(&key)
@@ -92,6 +118,9 @@ impl MultiValueHeaders for actix_web::http::header::HeaderMap {
     }
 
     fn get_first_str(&self, name: &str) -> Option<&str> {
+        if !is_valid_field_name(name) {
+            return None;
+        }
         let key = actix_web::http::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
         self.get(&key).and_then(|value| value.to_str().ok())
     }
@@ -1991,6 +2020,147 @@ mod tests {
                     "http entry point disagreed with the pair table for {pairs:?}",
                 );
             }
+        }
+    }
+
+    /// Every [`MultiValueHeaders`] impl must judge a header *name* by the same
+    /// grammar, or `spec.md` §4.4's fail-closed answer to "this name cannot be
+    /// represented" is only reachable through some of them.
+    ///
+    /// The three representations disagree by default, because two of them
+    /// delegate the name parse to a third-party `http` crate and the two
+    /// versions in play do not implement the same grammar: `http` 0.2 (what
+    /// actix-web 4 links) accepts `"` as a header-name byte
+    /// (`http-0.2.12`'s `HEADER_CHARS` maps `0x22` to itself), while RFC 9110
+    /// §5.1 spells `tchar` without it — `DQUOTE` is a *delimiter*, and
+    /// `http` 1.x agrees. So before the fix, a `CustomScheme` declaring
+    /// `signature_header: "X-Sig\""` was reported ambiguous on **every**
+    /// request through tower and through `ambiguous_signature_header_in`, and
+    /// read as an ordinary, unduplicated header through actix — the one
+    /// documented behavior (`CustomScheme::signature_header`) that the two
+    /// adapters must not differ on.
+    ///
+    /// The fix makes [`is_valid_field_name`] the single source for all three
+    /// impls rather than only the pair table's, and this pins it behaviorally:
+    /// exhaustively over every byte value, in leading/middle/trailing position,
+    /// all impls that are compiled in must agree with each other and with the
+    /// RFC's own `tchar` list, spelled out here so the expectation is
+    /// independent of the code under test.
+    #[cfg(any(feature = "http", feature = "actix"))]
+    mod field_name_grammar {
+        // A nested module does not inherit the parent `tests` prelude, so the
+        // `no_std` glob is restated here for the `http`-only build (the
+        // `String`/`format!` this module builds names with are not in `core`'s
+        // prelude).
+        use crate::core::adapter_utils::MultiValueHeaders;
+        #[cfg(not(feature = "std"))]
+        use crate::test_helpers::*;
+
+        /// RFC 9110 §5.1's `tchar`, spelled out rather than delegated: the point
+        /// of the module is to compare against the RFC, not against another
+        /// parser.
+        const TCHARS: &[u8] = b"!#$%&'*+-.^_`|~";
+
+        fn rfc_9110_tchar(byte: u8) -> bool {
+            byte.is_ascii_alphanumeric() || TCHARS.contains(&byte)
+        }
+
+        /// A one-byte name, and the same byte in the middle and at the end of a
+        /// longer name. Position matters: both `http` versions' tables are
+        /// position-independent, but a future hand-rolled check need not be.
+        fn names_for(byte: u8) -> [String; 3] {
+            // `char::from_u32` cannot fail for 0..=255, so the fallback keeps
+            // this `unwrap`-free without an unreachable arm.
+            let as_char = char::from_u32(u32::from(byte)).unwrap_or('?');
+            [
+                as_char.to_string(),
+                format!("X{as_char}Sig"),
+                format!("XSig{as_char}"),
+            ]
+        }
+
+        #[test]
+        fn every_byte_agrees_across_every_compiled_impl() {
+            let mut disagreement = String::new();
+            for byte in 0u16..=255 {
+                // Every other byte of the two longer names is `X`/`S`/`i`/`g`,
+                // all valid tchar, so each name's validity is decided by `byte`
+                // alone.
+                let expected = rfc_9110_tchar(byte as u8);
+                for name in names_for(byte as u8) {
+                    let crate_says = crate::core::headers::is_valid_field_name(&name);
+                    if crate_says != expected {
+                        disagreement.push_str(&format!(
+                            "crate predicate says {crate_says} for {name:?}, RFC says {expected}\n"
+                        ));
+                    }
+
+                    #[cfg(feature = "http")]
+                    {
+                        let mut map = ::http::HeaderMap::new();
+                        map.insert("X-Probe", ::http::HeaderValue::from_static("present"));
+                        let http_says = map.get_all_bytes(&name).is_some();
+                        if http_says != expected {
+                            disagreement.push_str(&format!(
+                                "http 1.x says {http_says} for {name:?}, RFC says {expected}\n"
+                            ));
+                        }
+                    }
+
+                    #[cfg(feature = "actix")]
+                    {
+                        let mut map = <actix_web::http::header::HeaderMap>::new();
+                        map.insert(
+                            actix_web::http::header::HeaderName::from_static("x-probe"),
+                            actix_web::http::header::HeaderValue::from_static("present"),
+                        );
+                        let actix_says = map.get_all_bytes(&name).is_some();
+                        if actix_says != expected {
+                            disagreement.push_str(&format!(
+                                "actix (http 0.2) says {actix_says} for {name:?}, RFC says {expected}\n"
+                            ));
+                        }
+                    }
+                }
+            }
+            assert!(
+                disagreement.is_empty(),
+                "the ambiguity scan's name grammar is not one grammar:\n{disagreement}"
+            );
+        }
+
+        /// The user-visible consequence of the divergence, in the shape the
+        /// docs promise: a `CustomScheme` whose declared name the scan cannot
+        /// spell is reported ambiguous on **every** request, over every header
+        /// representation — including an empty table, where there is provably
+        /// no duplicate of anything.
+        ///
+        /// `"` is the byte that made this observable, because it is the one
+        /// `http` 0.2 accepts and RFC 9110 does not, so this is the exact
+        /// configuration that read as a clean header through actix before the
+        /// fix. The empty table is the strong form of the assertion: with
+        /// nothing in it, "ambiguous" can only come from the name check.
+        #[cfg(feature = "actix")]
+        #[test]
+        fn a_quote_bearing_custom_name_is_ambiguous_through_actix() {
+            use crate::{CustomScheme, Encoding, HashAlg, Provider};
+
+            const MALFORMED: &str = "X-Sig\"";
+            let scheme = CustomScheme::new(
+                HashAlg::Sha256,
+                MALFORMED,
+                Encoding::Hex,
+                |_headers, raw_body| raw_body.to_vec(),
+            );
+            let provider = Provider::Custom(scheme);
+            let empty = actix_web::http::header::HeaderMap::new();
+
+            assert_eq!(
+                crate::core::adapter_utils::find_ambiguous_signature_header(&empty, &provider),
+                Some(MALFORMED),
+                "a `Custom` header name `http` 0.2 can parse must still read as \
+                 ambiguous: no request can prove it unduplicated"
+            );
         }
     }
 
