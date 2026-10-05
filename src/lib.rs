@@ -435,6 +435,168 @@ mod docs {
         );
     }
 
+    /// The key a TOML line declares, or `None` if the line declares none.
+    ///
+    /// Recognizes the shapes README dependency snippets use — a bare key, a
+    /// dotted key, either quoted. A table header is not a key, and a line with
+    /// no `=` declares none, which is also what keeps a `# comment` out: a
+    /// comment line holding an `=` puts its `#` where a key would be, and `#`
+    /// is not a character a bare key can contain.
+    fn toml_key(line: &str) -> Option<&str> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('[') {
+            return None;
+        }
+        let (key, _value) = trimmed.split_once('=')?;
+        let key = key.trim();
+        let is_bare_key = !key.is_empty()
+            && key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '"' | '\''));
+        is_bare_key.then_some(key)
+    }
+
+    /// Every key a single README `toml` fence declares twice under one table
+    /// header — `(line, table, key)` for each repeat — and how many
+    /// declarations were checked.
+    ///
+    /// This is a line scan rather than a TOML parse. Cargo's rejection of a
+    /// repeated key is "cannot overwrite a value", so duplicate detection is the
+    /// whole of the check, and a dev-dependency on a TOML parser to police a
+    /// dependency snippet would cost more than the defect does. README fences
+    /// also nest inside list items, so the scan trims indentation instead of
+    /// assuming a fence opens in column 1, and a table's identity spans the
+    /// whole fence: re-declaring `[dependencies]` twice in one fence is the
+    /// same parse error as repeating a key inside it.
+    fn readme_duplicate_toml_keys(readme: &str) -> (Vec<(usize, String, String)>, usize) {
+        let root = String::from("(before the first table header)");
+        let mut duplicates = Vec::new();
+        let mut declared: Vec<(String, String)> = Vec::new();
+        let mut table = root.clone();
+        let mut in_toml = false;
+        let mut checked = 0_usize;
+
+        for (index, line) in readme.lines().enumerate() {
+            let trimmed = line.trim();
+            if let Some(info) = trimmed.strip_prefix("```") {
+                if in_toml {
+                    in_toml = false;
+                    declared.clear();
+                    table.clone_from(&root);
+                } else {
+                    in_toml = info.starts_with("toml");
+                }
+                continue;
+            }
+            if !in_toml {
+                continue;
+            }
+            if trimmed.starts_with('[') {
+                table = String::from(trimmed);
+                continue;
+            }
+            let Some(key) = toml_key(line) else {
+                continue;
+            };
+            checked += 1;
+            if declared.iter().any(|(declared_table, declared_key)| {
+                declared_table == &table && declared_key == key
+            }) {
+                duplicates.push((index + 1, table.clone(), String::from(key)));
+            } else {
+                declared.push((table.clone(), String::from(key)));
+            }
+        }
+        (duplicates, checked)
+    }
+
+    /// A README `toml` fence must not declare one key twice under one table
+    /// header.
+    ///
+    /// `readme_dependency_snippets_resolve_to_the_current_release` (#288) reads
+    /// a dependency line's *version*, which is blind to this: four alternatives
+    /// naming the correct `0.2` are four correct lines. The Installation block
+    /// listed four `webhook-verify` keys in one `[dependencies]` table as if
+    /// they were one manifest, so the first thing a reader does — add the
+    /// dependency — failed to parse, and the parse error pointed at a line that
+    /// reads as obviously fine (#376).
+    #[test]
+    fn readme_toml_fences_declare_each_key_once_per_table() {
+        const README: &str = include_str!("../README.md");
+
+        let (duplicates, checked) = readme_duplicate_toml_keys(README);
+        let reported = duplicates
+            .iter()
+            .map(|(line, table, key)| {
+                format!("README.md:{line} declares `{key}` a second time under `{table}`")
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        assert!(
+            duplicates.is_empty(),
+            "{reported} — Cargo rejects a repeated key before it looks at a version, so an install \
+             snippet a reader cannot paste is the first failure they meet. Give each alternative its \
+             own fence, or one line each"
+        );
+
+        // Without this the scan above passes vacuously once the README's
+        // dependency snippets stop being `toml` fences.
+        assert!(
+            checked > 0,
+            "README.md must still show its dependency snippets as `toml` fences, or this guard can \
+             no longer see the keys they declare"
+        );
+    }
+
+    /// The duplicate-key scan has to catch the shape that shipped, ignore the
+    /// same key under two different tables, and read a fence nested in a list
+    /// item — or it enforces nothing while looking thorough.
+    #[test]
+    fn readme_duplicate_toml_keys_are_read_per_table_and_per_fence() {
+        let readme = "\
+```toml
+[dependencies]
+webhook-verify = \"0.2\"
+webhook-verify = { version = \"0.2\", features = [\"http\"] }
+```
+
+- A variant inside a list item:
+
+  ```toml
+  [dependencies]
+  webhook-verify = { version = \"0.2\", features = [\"tower\"] }
+  ```
+
+```toml
+[dependencies]
+axum = \"0.8\"
+
+[dev-dependencies]
+axum = \"0.8\"
+```
+";
+
+        let (duplicates, checked) = readme_duplicate_toml_keys(readme);
+        assert_eq!(
+            duplicates
+                .iter()
+                .map(|(_, table, key)| (table.as_str(), key.as_str()))
+                .collect::<Vec<_>>(),
+            [("[dependencies]", "webhook-verify")],
+            "only the repeated key under one table header is a parse error; the same key in \
+             `[dev-dependencies]` and the next fence's own `[dependencies]` are both legal"
+        );
+        assert_eq!(
+            checked, 5,
+            "every declaration in every `toml` fence is counted, nested ones included, so the \
+             guard's non-vacuity assertion cannot be satisfied by a single stray key"
+        );
+        assert!(
+            readme_duplicate_toml_keys("```sh\n# not toml\nname = a\nname = b\n```\n").1 == 0,
+            "a fence in another language declares nothing this guard reads"
+        );
+    }
+
     /// The body of `spec.md`'s `heading`, from the line after it to the next
     /// top-level `## ` heading.
     fn spec_section<'a>(spec: &'a str, heading: &str) -> &'a str {
