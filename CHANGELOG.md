@@ -532,6 +532,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `Twilio` and `Mandrill` variant docs still said `VerifyOptions::form_params`
+  is required** (issue #370). `Provider::Twilio` read "needs
+  `VerifyOptions::request_url` and `VerifyOptions::form_params`" and
+  `Provider::Mandrill` "Needs `VerifyOptions::request_url` … and
+  `VerifyOptions::form_params`" — both stale since #363, which made both
+  providers decode their form fields from `raw_body` when the option is unset.
+  This is the one surface still saying otherwise: the `form_params` field doc,
+  `webhook_verify::tower`'s and `webhook_verify::actix`'s module docs, and the
+  README all tell the reader to leave it unset, and the two variant docs — which
+  is where a `Provider`-per-variant reader looks for what to configure —
+  contradicted all four.
+
+  It is worse than a stale sentence, because it invites the one fix that cannot
+  work: `form_params` is the parsed `application/x-www-form-urlencoded` **body**,
+  so it differs on every delivery, while both adapters hold their `VerifyOptions`
+  behind a single `Arc` fixed at construction. Configuring it on a layer verifies
+  one delivery's field set and rejects every other with `SignatureMismatch`, which
+  reads like a broken integration. Both docs now say the fields are decoded from
+  `raw_body` unless the option overrides that, and why an adapter user should
+  not set it.
+
+  The three existing guards on the options/provider relationship each read a
+  different surface and none read the variant prose:
+  `context_option_field_docs_name_every_provider_that_reads_the_option` reads
+  the `VerifyOptions` *field* docs,
+  `framework_adapter_docs_name_every_provider_that_needs_request_context` reads
+  the two adapter module docs plus the README, and
+  `spec_two_provider_enum_sketch_matches_declaration_order` reads the `spec.md`
+  §2 variant *list*. `provider_variant_docs_spell_their_own_headers_the_way_the_code_does`
+  is the one guard already reading the variant docs, and it checks header casing
+  in them.
+  `provider_variant_docs_name_their_own_context_options` closes that gap by
+  deriving the reader set for all five options from the provider sources with
+  `reads_context_option_field` and requiring each reading provider's variant doc
+  to name each option it reads, so a provider that starts reading a context
+  option fails CI until its own doc says so. It asserts the exact reader set per
+  option, which is also what keeps the per-provider assertions non-vacuous — a
+  scan that stopped finding readers would otherwise leave the suite green.
+
+  Backward as well as forward, but only for `form_params`, the one option whose
+  absence is not a misconfiguration: the other four fail closed with
+  `MissingContext`, so "needs" is accurate for them, while `form_params` unset
+  means "derive it from the body". `Twilio`'s and `Mandrill`'s docs must
+  therefore name `raw_body` as that source — checked as the phrase "decoded from
+  `raw_body`", the verb `twilio.rs`, `mandrill.rs` and the field doc already share,
+  so the three surfaces are held to one wording.
+
+  Documentation and test only: no verification behavior, signature, or public API
+  change, and no new dependency.
+
 - **A bare intra-doc link that only broke with `http` on and every adapter
   feature off.** The earlier `### Added` entry added
   `cargo doc --no-default-features` to the `doc` job so links that break when a
