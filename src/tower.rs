@@ -475,7 +475,10 @@ where
                     // The one body read failure that is a request outcome
                     // rather than a connection problem: this adapter's own
                     // size limit, reported the same way as every other
-                    // oversize rejection.
+                    // oversize rejection. Answering it here means the rest of
+                    // an oversize body is never read, so the connection cannot
+                    // be reused for it — the usual trade for refusing a
+                    // request before consuming it.
                     Err(error) if error.is::<LengthLimitError>() => {
                         let mut response = Response::new(ResB::default());
                         *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
