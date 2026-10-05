@@ -198,9 +198,14 @@ pub enum Provider {
     /// followed by the sorted `name value` form fields, no delimiters).
     ///
     /// Needs `VerifyOptions::request_url` (the URL exactly as configured in
-    /// Mailchimp Transactional, including any query string) and
-    /// `VerifyOptions::form_params` (`mandrill_events` — a JSON array of
-    /// batched events — historically the only field). The scheme signs no
+    /// Mailchimp Transactional, including any query string) and nothing else:
+    /// the form fields it signs (`mandrill_events`, historically the only
+    /// field) are decoded from `raw_body` when `VerifyOptions::form_params`
+    /// is unset, which is the normal case and the only one that works through
+    /// an adapter, because that option is the per-delivery form body —
+    /// configuring it on a layer or a config pins every delivery to one
+    /// delivery's field set and rejects the rest. Set it only to override the
+    /// derivation, from a framework's own parser. The scheme signs no
     /// timestamp, so `max_age` has no effect. Same construction family as
     /// `Twilio`, with Mailchimp's generic `test-webhook` key used for
     /// webhook-URL-check POSTs.
@@ -272,8 +277,11 @@ pub enum Provider {
     /// first, so rotating callers keep the previous secret until the window
     /// closes and verify against each (`spec.md` §3).
     Mollie,
-    /// Twilio (HMAC-SHA1 over full URL + sorted form params; needs
-    /// `VerifyOptions::request_url` and `VerifyOptions::form_params`).
+    /// Twilio (HMAC-SHA1 over full URL + sorted form params; the only option it
+    /// requires is `VerifyOptions::request_url` — the form fields are
+    /// decoded from `raw_body` unless `VerifyOptions::form_params`
+    /// overrides that, and an adapter user should leave the option
+    /// unset; see the `Provider::Mandrill` doc).
     Twilio,
     /// Twitch EventSub (`Twitch-Eventsub-Message-Signature`, HMAC-SHA256 over
     /// `{message_id}{message_timestamp}{raw_body}`, hex, `sha256=` prefix).
@@ -7937,6 +7945,121 @@ pub struct S {
                  an adapter's options are fixed at construction, so configuring it there pins \
                  every delivery to one delivery's field set and rejects the rest — which reads \
                  like a provider-side misconfiguration rather than a configuration mistake"
+            );
+        }
+    }
+
+    /// Every provider whose `verify()` reads a [`VerifyOptions`] context option
+    /// names that option in its own [`Provider`] enum variant doc — and where
+    /// the option is optional, says where the value comes from instead of
+    /// listing it as required.
+    ///
+    /// The variant docs are what docs.rs shows for a variant, and no other
+    /// guard could see them drift.
+    /// [`context_option_field_docs_name_every_provider_that_reads_the_option`]
+    /// reads the `VerifyOptions` *field* docs,
+    /// [`framework_adapter_docs_name_every_provider_that_needs_request_context`]
+    /// reads the two adapter module docs plus the README, and
+    /// `spec_two_provider_enum_sketch_matches_declaration_order` reads the
+    /// `spec.md` §2 variant *list*.
+    /// [`provider_variant_docs_spell_their_own_headers_the_way_the_code_does`]
+    /// is the one guard already reading the variant prose, and it checks
+    /// header casing in it — nothing about options.
+    ///
+    /// The drift was on exactly the axis issues #363/#364 moved. Both
+    /// form-signed variants still told a reader `form_params` was needed —
+    /// `Provider::Twilio` "needs `VerifyOptions::request_url` and
+    /// `VerifyOptions::form_params`" and `Provider::Mandrill` "Needs
+    /// `VerifyOptions::request_url` … and `VerifyOptions::form_params`" —
+    /// after those two providers started decoding the fields from `raw_body`
+    /// themselves. A reader following those docs configures `form_params`,
+    /// which is the *per-delivery form body*: through an adapter, which fixes
+    /// one `VerifyOptions` for every delivery, that pins every delivery to one
+    /// delivery's field set and rejects the rest, and nothing at runtime says
+    /// so. The field doc and both adapter docs already say to leave it unset;
+    /// the variant docs contradicted all three.
+    ///
+    /// Both directions are checked. Forward, so a provider that starts reading
+    /// a context option cannot ship undocumented: each option it reads must be
+    /// named. Backward only for `form_params`, the one option that is
+    /// *optional* — `request_url`, `request_method`, `verifying_material`, and
+    /// `webhook_id` all fail closed when absent, so "needs" is the right word
+    /// for them, while `form_params` unset means "derive from the body". Its
+    /// doc must therefore name `raw_body` as that source, checked as a phrase
+    /// the wording cannot lose without dropping the words around it — the same
+    /// shape as the adapter guard's `"Do not** set"` check. "Decoded" is the
+    /// verb used for that derivation in `twilio.rs`, `mandrill.rs` and the
+    /// `form_params` field doc, so the three surfaces are held to one word.
+    #[test]
+    fn provider_variant_docs_name_their_own_context_options() {
+        // The providers reading each option today, as `(option, brands)`. Held
+        // as one table rather than a bare count so a failure says *which* read
+        // moved and a new reader is reported here instead of only tripping the
+        // per-provider assertion below.
+        let expected: [(&str, &[Provider]); 5] = [
+            (
+                "request_url",
+                &[
+                    Provider::Contentful,
+                    Provider::HubSpot,
+                    Provider::Mandrill,
+                    Provider::Square,
+                    Provider::Twilio,
+                ],
+            ),
+            ("request_method", &[Provider::Contentful, Provider::HubSpot]),
+            ("form_params", &[Provider::Mandrill, Provider::Twilio]),
+            (
+                "verifying_material",
+                &[Provider::PayPal, Provider::SendGrid],
+            ),
+            ("webhook_id", &[Provider::PayPal]),
+        ];
+
+        for (field, expected_brands) in expected {
+            let found: Vec<Provider> = provider_list()
+                .into_iter()
+                .filter(|provider| {
+                    reads_context_option_field(
+                        &module_implementation(&provider_module_stem(*provider)),
+                        field,
+                    )
+                })
+                .collect();
+            assert_eq!(
+                found, expected_brands,
+                "the providers whose `verify()` reads `options.{field}` changed; \
+                 `framework_adapter_docs_name_every_provider_that_needs_request_context` pins \
+                 the same scan for the three request-context options, so update this table and \
+                 that guard's own count in the same change"
+            );
+            for provider in &found {
+                let doc = provider_variant_doc(&format!("{provider:?}"));
+                assert!(
+                    doc.contains(field),
+                    "the `Provider::{provider:?}` variant doc does not name \
+                     `VerifyOptions::{field}`, which providers/{}.rs reads; a reader on the \
+                     docs.rs page for that variant has no way to learn the option exists, and \
+                     every delivery fails closed with `VerifyError::MissingContext`",
+                    provider_module_stem(*provider)
+                );
+            }
+        }
+
+        // The one context option whose absence is not a misconfiguration. A
+        // reader told it is needed will set it, and setting it on a layer pins
+        // every delivery to one delivery's body — so the doc has to say where
+        // the fields come from instead.
+        for provider in [Provider::Twilio, Provider::Mandrill] {
+            let doc = provider_variant_doc(&format!("{provider:?}"));
+            assert!(
+                doc.contains("decoded from `raw_body`"),
+                "the `Provider::{provider:?}` variant doc lists `VerifyOptions::form_params` \
+                 among the options the provider needs, but it is optional: the fields are \
+                 decoded from `raw_body` when it is unset, which is what makes the provider \
+                 verifiable through a framework adapter (issue #363). A reader who configures \
+                 it there pins every delivery to one delivery's field set and rejects the rest, \
+                 and nothing at runtime says so — say where the fields come from instead"
             );
         }
     }
