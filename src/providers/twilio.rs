@@ -261,13 +261,13 @@ enum BodyHashParam<'a> {
 
 /// Returns the `bodySHA256` query parameter of `url`, if present.
 ///
-/// The query string is everything after the first `?` up to the first `#`: a
-/// fragment is never sent to the server, so a `bodySHA256` after one is not a
-/// query parameter. Parameters are matched on their exact key, as `parse_qs`
-/// does upstream, and the first occurrence wins (again matching upstream's
-/// `query["bodySHA256"][0]`) — valued or not, so a bare `bodySHA256` ahead of a
-/// properly valued one is reported as [`BodyHashParam::Malformed`] rather than
-/// searched past.
+/// The fragment is removed first and the query is what remains: RFC 3986 §3.5
+/// begins the fragment at the *first* `#`, so a `?` after one is part of the
+/// fragment rather than a query delimiter. Parameters are then matched on their
+/// exact key, as `parse_qs` does upstream, and the first occurrence wins (again
+/// matching upstream's `query["bodySHA256"][0]`) — valued or not, so a bare
+/// `bodySHA256` ahead of a properly valued one is reported as
+/// [`BodyHashParam::Malformed`] rather than searched past.
 ///
 /// No percent-decoding is applied. The key `bodySHA256` consists entirely of
 /// unreserved characters, so a conformant encoding leaves it intact, and the
@@ -276,8 +276,10 @@ enum BodyHashParam<'a> {
 /// an attacker cannot substitute a differently-spelled parameter without also
 /// forging the signature over it.
 fn body_sha256_param(url: &str) -> Option<BodyHashParam<'_>> {
-    let (_, after_query) = url.split_once('?')?;
-    let query = after_query.split('#').next()?;
+    // Cut the fragment before looking for the `?`, not after: a URL whose only
+    // `?` is inside the fragment has *no* query component, and looking for the
+    // `?` first would read a parameter out of the fragment.
+    let query = url.split('#').next()?.split_once('?')?.1;
     query
         .split('&')
         .find_map(|pair| match pair.split_once('=') {
@@ -844,6 +846,73 @@ mod tests {
             verify_json_body(URL, b"attacker-chosen", SIGNATURE),
             Ok(()),
             "a fragment-borne lookalike is not a query parameter"
+        );
+    }
+
+    #[test]
+    fn a_question_mark_inside_the_fragment_does_not_open_the_query() {
+        // The other half of that rule, and the half that was not implemented:
+        // the query is terminated by the *first* `#`, so a `?` after one belongs
+        // to the fragment and cannot open a query. `body_sha256_param` split on
+        // `?` before cutting the fragment, so a URL whose only `?` sits inside
+        // the fragment still yielded a `bodySHA256` — and a delivery Twilio had
+        // signed over exactly that URL was rejected on a body-hash comparison
+        // its URL never commits to.
+        //
+        // Rejection is the fail-closed direction, not a bypass: `url` is covered
+        // by the HMAC verified before this runs, so the parameter cannot be
+        // substituted without also forging that signature. What it cost was
+        // availability — a caller whose `request_url` legitimately carries a
+        // fragment lost every delivery.
+        //
+        // The digest is well-formed and deliberately *wrong*, so reading it must
+        // reject, and the signature is the documented recipe over this URL alone
+        // (`printf '%s' "$url" | openssl dgst -sha1 -hmac '12345' -binary | base64`).
+        const URL: &str = concat!(
+            "https://example.com/myapp#frag?bodySHA256=",
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        );
+        const SIGNATURE: &str = "yMFbdakBOwHePSngwRnMc2hij6I=";
+        assert_eq!(
+            verify_json_body(URL, JSON_BODY.as_bytes(), SIGNATURE),
+            Ok(()),
+            "a `?` inside the fragment is not a query delimiter"
+        );
+
+        // Only the *reading* changes, not the body: the same URL carrying the
+        // real digest for this body still verifies, which is what a fragment
+        // that happens to name the digest must not come to depend on.
+        const URL_CARRYING_THE_REAL_DIGEST: &str = concat!(
+            "https://example.com/myapp#frag?bodySHA256=",
+            "0a1ff7634d9ab3b95db5c9a2dfe9416e41502b283a80c7cf19632632f96e6620"
+        );
+        const SIGNATURE_OVER_THE_REAL_DIGEST: &str = "QfSKuagGrV/A8oasxW/2T06veVQ=";
+        assert_eq!(
+            verify_json_body(
+                URL_CARRYING_THE_REAL_DIGEST,
+                JSON_BODY.as_bytes(),
+                SIGNATURE_OVER_THE_REAL_DIGEST
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_genuine_query_is_unaffected_by_a_later_fragment() {
+        // The fix is a reordering, so pin the direction it must not move: a
+        // real `bodySHA256` ahead of a `#` is still the query's, and the
+        // fragment after it cannot displace or shadow it.
+        const URL: &str = concat!(
+            "https://example.com/myapp?bodySHA256=",
+            "0a1ff7634d9ab3b95db5c9a2dfe9416e41502b283a80c7cf19632632f96e6620",
+            "#frag?bodySHA256=",
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        );
+        const SIGNATURE: &str = "1qYIGWnpYzsyqvYC/8KGq+IV+hg=";
+        assert_eq!(
+            verify_json_body(URL, JSON_BODY.as_bytes(), SIGNATURE),
+            Ok(()),
+            "the query's own parameter is found ahead of the fragment"
         );
     }
 

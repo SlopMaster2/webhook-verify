@@ -1229,6 +1229,21 @@ worked example) and the reference implementations in Twilio's official SDKs
   than upstream, where `parse_qs` drops such a pair and the body check is
   skipped. A URL with no `bodySHA256` parameter is unchanged — the
   form-encoded case, where the signed fields already cover the body.
+- The parameter is read from the **query component only**. RFC 3986 §3.5 begins
+  the fragment at the *first* `#`, so a `?` after one belongs to the fragment
+  and does not open a query. Searching for the `?` before cutting the fragment
+  reads a `bodySHA256` out of the fragment of a URL that has no query at all,
+  and then compares the body against a digest that URL never commits to — so a
+  delivery Twilio had signed over exactly that URL is rejected, on the JSON-body
+  variant, by a check its URL does not ask for. The direction is fail-closed
+  rather than a bypass: `request_url` is covered by the HMAC verified before
+  this runs, so a differently-spelled parameter cannot be substituted without
+  also forging that signature. What it costs is availability — a caller whose
+  `request_url` legitimately carries a fragment loses every delivery. Pinned
+  both ways by `twilio.rs`'s
+  `a_question_mark_inside_the_fragment_does_not_open_the_query` and
+  `a_genuine_query_is_unaffected_by_a_later_fragment`, the second pinning the
+  direction the fix must not move.
 - No timestamp in the signature scheme (`max_age` has no effect).
 
 ### Mailchimp Transactional (Mandrill)
