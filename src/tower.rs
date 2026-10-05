@@ -51,7 +51,13 @@
 //!
 //! Bodies are deliberately empty: distinguishing detail belongs in
 //! server-side logging keyed off the structured [`crate::VerifyError`], whose
-//! `Display`/`Debug` never carry secret material (`spec.md` §2.1).
+//! `Display`/`Debug` never carry secret material (`spec.md` §2.1). The status
+//! code alone cannot supply that detail — it collapses three variants into one
+//! `400` and three into one `500` — and this middleware runs *before* your
+//! handler, so unlike actix's extractor there is no object to hand the error to
+//! afterwards. [`VerifyLayer::on_rejection`] is the surface: it hands your
+//! callback a [`Rejection`] — [`crate::verify()`]'s own error, or
+//! `BodyTooLarge` for either `413` path — with nothing put on the wire.
 //!
 //! # Providers that need request context
 //!
@@ -174,7 +180,9 @@
 //! Transport-level failures while reading the request body (e.g. the client
 //! disconnected mid-stream) surface through the middleware's `Err` half,
 //! matching tower conventions — they are connection problems, not
-//! verification outcomes.
+//! verification outcomes. Those are the only request failures an
+//! [`on_rejection`](VerifyLayer::on_rejection) hook does not see: the middleware
+//! answered no response for them.
 //!
 //! [`tower`]: https://crates.io/crates/tower
 
@@ -202,6 +210,74 @@ use crate::{Provider, Secret, VerifyError, VerifyOptions};
 /// Boxed error type used by the middleware, per tower conventions.
 pub type BoxError = Box<dyn Error + Send + Sync>;
 
+/// A request this middleware rejected before it reached the inner service.
+///
+/// Handed to the [`VerifyLayer::on_rejection`] callback. It is the structured
+/// counterpart of the [status code](Rejection::status) the rejection response
+/// carries, and exists because that status code cannot carry the class on its
+/// own: the status mapping deliberately collapses `MissingHeader`,
+/// `MalformedHeader`, and `BadEncoding` into one `400`, and
+/// `UnsupportedProvider`, `InvalidSecret`, and `MissingContext` into one `500`.
+///
+/// Nothing here is sent to the client — the response body stays empty
+/// ([`spec.md`] §2.1's redaction discipline) — and the `VerifyError` is
+/// `crate::verify()`'s own value, unchanged.
+///
+/// [`spec.md`]: https://github.com/SlopMaster2/webhook-verify/blob/master/spec.md
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Rejection {
+    /// Verification failed with this error; the status is derived from it, so
+    /// [`Rejection::status`] and the response can never disagree.
+    Verify(VerifyError),
+    /// The body exceeded the [`VerifyLayer::with_max_body_size`] limit (`413`).
+    ///
+    /// Not a `VerifyError` — no signature work was done at all, because the
+    /// whole point of the limit is to bound that work — so
+    /// [`Rejection::verify_error`] is `None` here, matching the "not a
+    /// `VerifyError`" row of the module's [status
+    /// table](crate::tower#status-codes).
+    BodyTooLarge,
+}
+
+impl Rejection {
+    /// The verification error behind this rejection, when there is one.
+    ///
+    /// `Some` for [`Rejection::Verify`] — [`crate::verify()`]'s own value, so
+    /// `match`ing on it gives the full §2.1 granularity — and `None` for
+    /// [`Rejection::BodyTooLarge`], which never reached verification.
+    #[must_use]
+    pub fn verify_error(&self) -> Option<&VerifyError> {
+        match self {
+            Self::Verify(error) => Some(error),
+            Self::BodyTooLarge => None,
+        }
+    }
+
+    /// The status the rejection response carries: the same value the response
+    /// itself is built from, so a hook and the response cannot disagree.
+    #[must_use]
+    pub fn status(&self) -> StatusCode {
+        match self {
+            Self::Verify(error) => {
+                // The status class is a hard-coded constant (400/401/500), so
+                // conversion cannot fail; the fallback still fails closed with
+                // 500 if it ever did.
+                StatusCode::from_u16(rejection_status(error))
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+            Self::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        }
+    }
+}
+
+/// Callback invoked on every request the middleware rejects.
+///
+/// Stored behind an `Arc` — the layer's shared configuration, which every
+/// service built from that layer holds — so cloning a layer, or the middleware
+/// tower runners routinely clone, stays cheap.
+pub type RejectionHook = Arc<dyn Fn(&Rejection) + Send + Sync>;
+
 /// Shared configuration handed to every service built from a [`VerifyLayer`].
 ///
 /// The key ring and `VerifyOptions` live behind `Arc`s so cloning the layer (or
@@ -212,6 +288,7 @@ struct Config {
     provider: Provider,
     keys: KeyRing,
     options: Arc<VerifyOptions>,
+    on_rejection: Option<RejectionHook>,
 }
 
 impl fmt::Debug for Config {
@@ -223,7 +300,28 @@ impl fmt::Debug for Config {
             .field("provider", &self.provider)
             .field("keys", &self.keys)
             .field("options", &self.options)
+            // Whether a hook is configured, never anything about it: a closure's
+            // Debug is not ours to define and may capture whatever it likes.
+            .field("on_rejection", &self.on_rejection.is_some())
             .finish()
+    }
+}
+
+impl Config {
+    /// The one place a rejection becomes a response: the configured hook is
+    /// given the structured reason first, then the empty-bodied, status-coded
+    /// response is built from *that same* reason — so the two can never drift,
+    /// and a new rejection site cannot forget one of the two.
+    ///
+    /// The body stays empty: no error detail leaks over the wire
+    /// (`spec.md` §2.1's redaction discipline).
+    fn reject<ResB: Default>(&self, rejection: Rejection) -> Response<ResB> {
+        if let Some(hook) = &self.on_rejection {
+            hook(&rejection);
+        }
+        let mut response = Response::new(ResB::default());
+        *response.status_mut() = rejection.status();
+        response
     }
 }
 
@@ -243,6 +341,11 @@ impl fmt::Debug for Config {
 /// every other request is read under the limit itself, so a body sent without a
 /// length (`Transfer-Encoding: chunked`) is rejected as soon as it exceeds it
 /// rather than after being buffered whole (issue #368).
+///
+/// A rejection is answered with an empty body and a status code, so the class
+/// of failure is only observable if you ask for it: use
+/// [`VerifyLayer::on_rejection`] to have the structured [`Rejection`] handed to
+/// a callback (issue #379).
 #[must_use]
 #[derive(Clone, Debug)]
 pub struct VerifyLayer<B = Bytes> {
@@ -265,6 +368,7 @@ impl<B> VerifyLayer<B> {
                 provider,
                 keys: KeyRing::new(secret),
                 options: Arc::new(options),
+                on_rejection: None,
             },
             max_body_size: None,
             _body: PhantomData,
@@ -348,6 +452,82 @@ impl<B> VerifyLayer<B> {
         self.max_body_size = Some(max);
         self
     }
+
+    /// Calls `hook` with the structured [`Rejection`] for every request this
+    /// middleware refuses, so a tower/axum user can log or count the *class* of
+    /// failure (issue #379).
+    ///
+    /// The middleware runs before your handler, so unlike actix's extractor
+    /// there is no object to hand the error to afterwards — and the response is
+    /// deliberately bodiless, so the class never reaches the wire. This hook is
+    /// the surface that makes the module's logging contract actionable: it is
+    /// the only place the [`VerifyError`] behind a `400`/`401`/`500` is
+    /// observable, which matters because the status code collapses three
+    /// variants into each of `400` and `500` (see [`Rejection::verify_error`]).
+    ///
+    /// Invoked for every rejection the middleware answers, and only those:
+    ///
+    /// - [`Rejection::Verify`] with [`crate::verify()`]'s own error — including
+    ///   the `400` the ambiguity scan raises for conflicting duplicate signature
+    ///   headers (`spec.md` §4.4) before any signature work;
+    /// - [`Rejection::BodyTooLarge`] on **both** `413` paths — a declared
+    ///   `Content-Length` over the limit and a body that exceeds it while being
+    ///   read — so DoS metrics see the refusals the size limit exists to make,
+    ///   not just verification outcomes.
+    ///
+    /// A transport-level body read failure (client disconnect mid-stream) is
+    /// *not* reported here: that request is answered through the service's
+    /// `Err` half rather than a response, per tower conventions, and is a
+    /// connection problem rather than a rejection of the request's contents.
+    ///
+    /// # Cost and failure mode
+    ///
+    /// One `Arc` deref and one indirect call per *rejected* request, inline
+    /// with producing the response — synchronously in `call()` for the
+    /// ambiguity and declared-length rejections, and inside the future just
+    /// before the response is returned for the rest. Nothing is added to a
+    /// request that verifies. The hook therefore runs on the hot path, so it
+    /// must be cheap and non-blocking: a hook that blocks delays that request,
+    /// and a hook that panics turns a rejection into a panic. Keep it to
+    /// incrementing a counter, opening a `tracing` span, or forwarding to a
+    /// non-blocking channel. (This is the one cost actix's
+    /// `WebhookVerificationError` accessor does not have — there, the handler is
+    /// already running.)
+    ///
+    /// A hook is server-side observation only: whatever it logs, the error it
+    /// receives is already redacted of secret material (`spec.md` §2.1), and
+    /// nothing it does can change what the client is told.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use bytes::Bytes;
+    /// use std::sync::atomic::{AtomicU64, Ordering};
+    /// use webhook_verify::tower::{Rejection, VerifyLayer};
+    /// use webhook_verify::{Provider, Secret, VerifyError};
+    ///
+    /// static FORGED: AtomicU64 = AtomicU64::new(0);
+    /// static MISCONFIGURED: AtomicU64 = AtomicU64::new(0);
+    ///
+    /// let layer: VerifyLayer<Bytes> =
+    ///     VerifyLayer::new(Provider::GitHub, Secret::new("secret")).on_rejection(|rejection| {
+    ///         match rejection.verify_error() {
+    ///             // An operator mistake, not an attacker: page on these.
+    ///             Some(VerifyError::InvalidSecret { .. } | VerifyError::MissingContext { .. }) => {
+    ///                 MISCONFIGURED.fetch_add(1, Ordering::Relaxed);
+    ///             }
+    ///             Some(VerifyError::SignatureMismatch) => {
+    ///                 FORGED.fetch_add(1, Ordering::Relaxed);
+    ///             }
+    ///             // A request we could not use, or an oversize body.
+    ///             Some(_) | None => {}
+    ///         }
+    ///     });
+    /// ```
+    pub fn on_rejection(mut self, hook: impl Fn(&Rejection) + Send + Sync + 'static) -> Self {
+        self.config.on_rejection = Some(Arc::new(hook));
+        self
+    }
 }
 
 // `Layer::layer` takes `&self`, so the layer acts as its own factory: every
@@ -395,16 +575,6 @@ impl<S: fmt::Debug, B> fmt::Debug for VerifyMiddleware<S, B> {
     }
 }
 
-/// Empty-bodied rejection response; no error detail leaks over the wire.
-fn rejection_response<ResB: Default>(error: &VerifyError) -> Response<ResB> {
-    let mut response = Response::new(ResB::default());
-    // The status class is a hard-coded constant (400/401/500), so conversion
-    // cannot fail; the fallback still fails closed with 500 if it ever did.
-    *response.status_mut() =
-        StatusCode::from_u16(rejection_status(error)).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    response
-}
-
 impl<S, ReqB, ResB, OutB> Service<Request<ReqB>> for VerifyMiddleware<S, OutB>
 where
     S: Service<Request<OutB>, Response = Response<ResB>> + Clone + Send + 'static,
@@ -431,10 +601,12 @@ where
         // `x-contentful-signed-headers`) — see `spec.md` §4.4.
         if let Some(header) = find_ambiguous_signature_header(req.headers(), &self.config.provider)
         {
-            let response = rejection_response::<ResB>(&VerifyError::MalformedHeader {
-                header,
-                reason: VerifyError::AMBIGUOUS_HEADER_REASON,
-            });
+            let response = self
+                .config
+                .reject(Rejection::Verify(VerifyError::MalformedHeader {
+                    header,
+                    reason: VerifyError::AMBIGUOUS_HEADER_REASON,
+                }));
             return Box::pin(async { Ok(response) });
         }
 
@@ -446,8 +618,7 @@ where
         // buffering itself.
         if let Some(limit) = self.max_body_size {
             if declared_content_length(req.headers()).is_some_and(|len| len > limit) {
-                let mut response = Response::new(ResB::default());
-                *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
+                let response = self.config.reject(Rejection::BodyTooLarge);
                 return Box::pin(async { Ok(response) });
             }
         }
@@ -477,14 +648,13 @@ where
                     // The one body read failure that is a request outcome
                     // rather than a connection problem: this adapter's own
                     // size limit, reported the same way as every other
-                    // oversize rejection. Answering it here means the rest of
-                    // an oversize body is never read, so the connection cannot
-                    // be reused for it — the usual trade for refusing a
-                    // request before consuming it.
+                    // oversize rejection — including to an `on_rejection`
+                    // hook, so a DoS counter sees both `413` paths. Answering
+                    // it here means the rest of an oversize body is never read,
+                    // so the connection cannot be reused for it — the usual
+                    // trade for refusing a request before consuming it.
                     Err(error) if error.is::<LengthLimitError>() => {
-                        let mut response = Response::new(ResB::default());
-                        *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
-                        return Ok(response);
+                        return Ok(config.reject(Rejection::BodyTooLarge));
                     }
                     // Transport-level read failure (client disconnect, body
                     // decode error) — surfaced per tower conventions.
@@ -507,7 +677,7 @@ where
                 // avoid.
                 config.options.as_ref(),
             ) {
-                return Ok(rejection_response::<ResB>(&error));
+                return Ok(config.reject(Rejection::Verify(error)));
             }
 
             let request = Request::from_parts(parts, OutB::from(raw_body));
@@ -1785,6 +1955,329 @@ mod tests {
             .with_max_body_size(1024);
         let debug = format!("{layer:?}");
         assert!(!debug.contains("super-secret-key"));
+    }
+
+    // --- on_rejection observation hook (issue #379) ---------------------------
+
+    /// Collects what an [`on_rejection`](VerifyLayer::on_rejection) hook saw.
+    ///
+    /// The hook runs inline on the request path, so it has to be
+    /// `Send + Sync + 'static`; this hands it somewhere to put the value.
+    #[derive(Clone, Default)]
+    struct Observed(std::sync::Arc<std::sync::Mutex<Vec<Rejection>>>);
+
+    impl Observed {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        /// The callback to hand to `on_rejection`.
+        fn hook(&self) -> impl Fn(&Rejection) + Send + Sync + 'static {
+            let seen = self.0.clone();
+            move |rejection| {
+                if let Ok(mut seen) = seen.lock() {
+                    seen.push(*rejection);
+                }
+            }
+        }
+
+        /// A `GitHub` layer signing-keyed by `secret`, wired to this recorder.
+        fn layer(&self, secret: &str) -> VerifyLayer<Bytes> {
+            VerifyLayer::<Bytes>::new(Provider::GitHub, Secret::new(secret))
+                .on_rejection(self.hook())
+        }
+
+        fn get(&self) -> Vec<Rejection> {
+            self.0
+                .lock()
+                .map(|seen| seen.clone())
+                .unwrap_or_else(|_| unreachable!("nothing else holds the lock"))
+        }
+    }
+
+    #[test]
+    fn the_hook_sees_the_structured_error_behind_each_collapsed_status() {
+        // The point of the hook (issue #379): the status code cannot separate
+        // these three classes, so a page-on-misconfiguration or per-class metric
+        // keyed off it could not. The error itself can.
+        let observed = Observed::new();
+        let svc = observed.layer(GITHUB_SECRET).layer(EchoLen);
+        // Operator misconfiguration, which must never read as an attack.
+        let misconfigured = observed.layer("\0\0").layer(EchoLen);
+
+        // 400 row — no signature header at all.
+        let no_signature = Request::builder()
+            .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+            .unwrap_or_else(|_| unreachable!("no headers to misbuild"));
+        // 401 row — correctly spelled header, well-formed digest, wrong one.
+        let forged = Request::builder()
+            .header("X-Hub-Signature-256", format!("sha256={}", "0".repeat(64)))
+            .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+
+        block_on(async {
+            let response = svc
+                .clone()
+                .oneshot(no_signature)
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+            let response =
+                svc.clone().oneshot(forged).await.unwrap_or_else(|error| {
+                    panic!("middleware should respond, not error: {error}")
+                });
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+            let response = misconfigured
+                .oneshot(github_request(GITHUB_BODY))
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        });
+
+        let seen = observed.get();
+        assert_eq!(
+            seen.len(),
+            3,
+            "one hook call per rejected request: {seen:?}"
+        );
+        assert_eq!(
+            seen[0].verify_error(),
+            Some(&VerifyError::MissingHeader {
+                header: "X-Hub-Signature-256"
+            })
+        );
+        assert_eq!(seen[0].status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            seen[1].verify_error(),
+            Some(&VerifyError::SignatureMismatch)
+        );
+        assert_eq!(seen[1].status(), StatusCode::UNAUTHORIZED);
+        assert!(matches!(
+            seen[2].verify_error(),
+            Some(VerifyError::InvalidSecret { .. })
+        ));
+        assert_eq!(seen[2].status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn the_hook_stays_quiet_when_a_delivery_verifies() {
+        // A hook that cannot distinguish rejection from success is useless as a
+        // counter: the happy path must produce no call at all.
+        let observed = Observed::new();
+        let svc = observed.layer(GITHUB_SECRET).layer(EchoLen);
+        block_on(async {
+            let response = svc
+                .clone()
+                .oneshot(github_request(GITHUB_BODY))
+                .await
+                .unwrap_or_else(|error| panic!("verification should pass: {error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+            let response = svc
+                .oneshot(github_request(GITHUB_BODY))
+                .await
+                .unwrap_or_else(|error| panic!("verification should pass: {error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+        });
+        assert!(
+            observed.get().is_empty(),
+            "a verified request is not a rejection: {:?}",
+            observed.get()
+        );
+    }
+
+    #[test]
+    fn the_hook_sees_both_body_too_large_paths() {
+        // `413` is not a `VerifyError`, so a hook typed only for verification
+        // outcomes would silently miss it — and `413` is precisely the class
+        // an operator hardens against. Both ways into it must report: the
+        // pre-buffer `Content-Length` guard and the streaming limit.
+        let observed = Observed::new();
+        let svc = observed
+            .layer("valid")
+            .with_max_body_size(2 * 1024)
+            .layer(EchoLen);
+
+        let declared_oversize = Request::builder()
+            .header("X-Hub-Signature-256", GITHUB_SIGNATURE)
+            .header("content-length", "1000000")
+            .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+
+        block_on(async {
+            let response = svc
+                .clone()
+                .oneshot(declared_oversize)
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+            // The streaming path: no declared length, so only the read can
+            // catch it.
+            let (body, _yielded) = CountedBody::oversized(100, 1024);
+            let response = svc
+                .oneshot(chunked_request(body))
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        });
+
+        let seen = observed.get();
+        assert_eq!(
+            seen,
+            vec![Rejection::BodyTooLarge, Rejection::BodyTooLarge],
+            "both `413` paths report, once each"
+        );
+        // No signature work happened, so there is no `VerifyError` to report —
+        // the same answer actix's `verify_error()` gives for its `413` row.
+        assert!(seen.iter().all(|r| r.verify_error().is_none()));
+        assert!(
+            seen.iter()
+                .all(|r| r.status() == StatusCode::PAYLOAD_TOO_LARGE),
+            "the hook's status and the response's must agree"
+        );
+    }
+
+    #[test]
+    fn the_hook_sees_the_ambiguity_rejection_before_any_signature_work() {
+        // The `400` the ambiguity scan raises is a `VerifyError` like any other
+        // and carries a fixed reason (`spec.md` §4.4), so a caller keying off
+        // the class can tell it from a parse failure of the same status.
+        let observed = Observed::new();
+        let svc = observed.layer(GITHUB_SECRET).layer(EchoLen);
+        let request = Request::builder()
+            .header("X-Hub-Signature-256", GITHUB_SIGNATURE)
+            .header(
+                "x-hub-signature-256",
+                "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"));
+        block_on(async {
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        });
+        assert_eq!(
+            observed.get(),
+            vec![Rejection::Verify(VerifyError::MalformedHeader {
+                header: "X-Hub-Signature-256",
+                reason: VerifyError::AMBIGUOUS_HEADER_REASON,
+            })]
+        );
+    }
+
+    #[test]
+    fn the_hook_is_shared_by_every_service_a_layer_builds() {
+        // `Layer::layer` takes `&self`, so a tower runner routinely clones one
+        // layer into many services. The hook lives in the shared `Config`, so a
+        // clone cannot lose it — the alternative would be observers silently
+        // attached to only some of a process's routes.
+        let observed = Observed::new();
+        let layer = observed.layer(GITHUB_SECRET);
+        let first = layer.clone().layer(EchoLen);
+        let second = layer.clone().layer(EchoLen);
+        block_on(async {
+            let response = first
+                .clone()
+                .oneshot(github_request(b"Hello, World?"))
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            let response = second
+                .oneshot(github_request(b"Hello, World?"))
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        });
+        assert_eq!(observed.get().len(), 2, "both services reported");
+    }
+
+    #[test]
+    fn a_layer_without_a_hook_behaves_exactly_as_before() {
+        // The additive-promise check: `on_rejection` unset is the configuration
+        // that has always existed — same status codes, same empty bodies.
+        block_on(async {
+            let svc = VerifyLayer::<Bytes>::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .layer(EchoLen);
+            let response = svc
+                .clone()
+                .oneshot(github_request(GITHUB_BODY))
+                .await
+                .unwrap_or_else(|error| panic!("verification should pass: {error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+            let response = svc
+                .oneshot(github_request(b"Hello, World?"))
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert!(
+                response
+                    .into_body()
+                    .into_inner()
+                    .unwrap_or_default()
+                    .is_empty()
+            );
+        });
+    }
+
+    #[test]
+    fn a_rejection_status_never_carries_detail_over_the_wire() {
+        // The hook is server-side only: the client's answer stays an empty
+        // body, so a hook cannot become a channel that tells a caller whether
+        // its secret, its header name, or its provider configuration is right.
+        let observed = Observed::new();
+        let svc = observed.layer(GITHUB_SECRET).layer(EchoLen);
+        let request = Request::builder()
+            .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+            .unwrap_or_else(|_| unreachable!("no headers to misbuild"));
+        block_on(async {
+            let response = svc
+                .oneshot(request)
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = response.into_body().into_inner().unwrap_or_default();
+            assert!(body.is_empty(), "rejection body leaked: {body:?}");
+        });
+        // ...while the same rejection is fully available server-side.
+        assert_eq!(observed.get().len(), 1);
+    }
+
+    /// The module's "Status codes" section promises that the distinguishing
+    /// detail "belongs in server-side logging keyed off the structured
+    /// `VerifyError`" — a promise the API did not deliver until
+    /// `on_rejection` (issue #379), and which a future change could silently
+    /// un-deliver by removing the pointer. Both the module docs and the README
+    /// have to keep naming the hook; the README guard reads it for the same
+    /// reason it reads its own paragraph back.
+    #[test]
+    fn the_docs_point_at_the_hook_for_the_logging_contract() {
+        const SOURCE: &str = include_str!("tower.rs");
+        const README: &str = include_str!("../README.md");
+
+        assert!(
+            flattened(
+                &SOURCE[..SOURCE
+                    .find("/// Boxed error type")
+                    .unwrap_or_else(|| unreachable!(
+                        "the module docs must still precede the first item"
+                    ))]
+            )
+            .contains("on_rejection"),
+            "the module docs promise server-side logging keyed off the structured \
+             VerifyError, so they must name the hook that makes it possible: the \
+             tower adapter has no extractor to hand the error to afterwards"
+        );
+        assert!(
+            README.contains("on_rejection"),
+            "README.md must point a tower/axum user at `on_rejection` too — it \
+             otherwise promised logging keyed off the structured `VerifyError` \
+             that this adapter cannot deliver"
+        );
     }
 
     /// `VerifyLayer`'s *type* doc is the one docs.rs renders for the type, and

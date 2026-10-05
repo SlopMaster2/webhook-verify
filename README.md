@@ -479,6 +479,39 @@ then deserialize freely. Verification failures never reach your handler:
 | Signature mismatch / stale timestamp | `401 Unauthorized` |
 | Operator misconfiguration | `500 Internal Server Error` |
 
+Rejection bodies are empty, so the status is all the client learns. To log or
+count the *class* of a rejection server-side, register a hook with
+`VerifyLayer::on_rejection(...)`: it is called with a `Rejection` for every
+request the middleware refuses — `Rejection::Verify` carrying the structured
+`VerifyError` itself, or `Rejection::BodyTooLarge` for either `413` path — and
+never for a delivery that verifies. This is the tower counterpart of the actix
+extractor's `verify_error()`; the difference is structural, since a layer runs
+*before* the handler and so has nothing to hand the error to afterwards:
+
+```rust,ignore
+use webhook_verify::tower::{Rejection, VerifyLayer};
+use webhook_verify::{Provider, Secret, VerifyError};
+
+let layer = VerifyLayer::new(Provider::Stripe, Secret::new("whsec_..."))
+    .on_rejection(|rejection| match rejection.verify_error() {
+        // Operator misconfiguration, not an attack: page on these.
+        Some(VerifyError::InvalidSecret { .. } | VerifyError::MissingContext { .. }) => {
+            tracing::error!("webhook verification misconfigured");
+        }
+        Some(VerifyError::SignatureMismatch) => tracing::warn!("forged webhook signature"),
+        // A malformed request, or an oversize body (`None`).
+        Some(_) | None => tracing::info!("webhook request rejected"),
+    });
+```
+
+The status codes collapse some of these on their own (`MissingHeader` and
+`BadEncoding` are both a `400`, and so are `InvalidSecret` and `MissingContext`
+at `500`), which is what the hook exists to undo. The callback runs inline on
+the rejection path, so keep it cheap and non-blocking, and do not let it panic.
+A transport-level body read failure (client disconnect mid-stream) is answered
+through the service's `Err` half instead, per tower conventions, so it never
+reaches the hook.
+
 By default the body is buffered with no size limit. To stop a malicious
 client from forcing an arbitrarily large HMAC/verification computation,
 configure an optional maximum body size with
@@ -583,10 +616,11 @@ instead of string-matching the message; the status codes collapse some of these
 on their own (`MissingHeader` and `BadEncoding` are both a `400`, and so are
 `InvalidSecret` and `MissingContext` at `500`). It is `None` for the two
 rejections that are not verification outcomes: a body that never finished
-arriving, and the `413` above. The tower layer has no such accessor — it
-answers with a status code and nothing more, so per-class logging there needs
-your own middleware (issue #379). A guard is intentionally not provided: guards
-run before the body is read, but verification requires those bytes.
+arriving, and the `413` above. The tower layer hands the same value to
+`VerifyLayer::on_rejection(...)` instead: a layer rejects before the handler
+runs, so there is no error object to pass through to it (issue #379). A guard
+is intentionally not provided: guards run before the body is read, but
+verification requires those bytes.
 
 The actix adapter has one limit the tower one does not: `web::Bytes` is
 itself capped by actix-web's `PayloadConfig` at 256 KiB by default, and
