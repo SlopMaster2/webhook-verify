@@ -124,6 +124,15 @@ pub trait HeaderMap {
 /// and the guard that audits the provider constants against it
 /// (`providers::tests::signature_header_names_are_valid_http_field_names`) must
 /// not be able to disagree about what a field name is.
+///
+/// It is also the single source for **every** header representation the
+/// `spec.md` §4.4 scan runs over — the pair tables and both framework maps
+/// (`core::adapter_utils`'s `MultiValueHeaders`), rather than those delegating
+/// the name parse to whichever `http` version they link. The two versions do
+/// not implement the same grammar (`http` 0.2 accepts `"`), and
+/// `every_byte_agrees_across_every_compiled_impl` there is what keeps them
+/// honest; `is_valid_field_name_matches_rfc_9110_tchar` below is what keeps
+/// *this* predicate honest, unconditionally in every feature configuration.
 pub(crate) fn is_valid_field_name(name: &str) -> bool {
     !name.is_empty()
         && name.bytes().all(|b| {
@@ -268,7 +277,76 @@ mod tests {
     #[cfg(feature = "std")]
     use std::collections::HashMap;
 
-    use super::HeaderMap;
+    use super::{HeaderMap, is_valid_field_name};
+
+    /// RFC 9110 §5.6 lists `tchar` as
+    ///
+    /// ```text
+    /// tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" /
+    ///         "." / "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
+    /// ```
+    ///
+    /// and §5.1 defines `field-name = token`, `token = 1*tchar`. Spelled out
+    /// here as a literal byte list so the test states the RFC's grammar
+    /// independently of the implementation's hand-written `matches!` arm — if
+    /// the two lists ever diverge, the test fails rather than the guard
+    /// agreeing with itself. ALPHA/DIGIT are covered by
+    /// `is_ascii_alphanumeric`, which is the one place the reference list
+    /// delegates rather than spelling out; that delegation is safe because
+    /// the `SPECIAL` list is the only part of `tchar` under test here.
+    #[test]
+    fn is_valid_field_name_matches_rfc_9110_tchar() {
+        const SPECIAL: &[u8] = b"!#$%&'*+-.^_`|~";
+        let is_tchar = |b: u8| b.is_ascii_alphanumeric() || SPECIAL.contains(&b);
+
+        // Every Latin-1 code point (the whole byte range, plus the C1 controls
+        // that UTF-8 encodes as high bytes) in leading, middle and trailing
+        // position, so a name-level rule that hides an interior-only offender
+        // cannot pass. `&str` cannot carry an unpaired byte at all, so U+0000..
+        // U+00FF is the exhaustive range reachable through this API — and
+        // `is_valid_field_name` must reject every non-ASCII code point, which
+        // the sampled non-Latin-1 cases below confirm.
+        for code in 0u32..=0x00FF {
+            let Some(ch) = char::from_u32(code) else {
+                continue;
+            };
+            let name = ch.to_string();
+            assert_eq!(
+                is_valid_field_name(&name),
+                is_tchar(code as u8),
+                "single-code-point field name disagreement for U+{code:04X}"
+            );
+            let middle = format!("X{name}Signature");
+            assert_eq!(
+                is_valid_field_name(&middle),
+                is_tchar(code as u8),
+                "mid-name field name disagreement for U+{code:04X}"
+            );
+            let trailing = format!("X-Signature{name}");
+            assert_eq!(
+                is_valid_field_name(&trailing),
+                is_tchar(code as u8),
+                "trailing field name disagreement for U+{code:04X}"
+            );
+        }
+        for code in [0x0100u32, 0x2028, 0xFEFF, 0x1F600] {
+            let Some(ch) = char::from_u32(code) else {
+                continue;
+            };
+            assert!(
+                !is_valid_field_name(&ch.to_string()),
+                "non-ASCII code point U+{code:04X} accepted as a field name"
+            );
+        }
+
+        // `token` requires at least one tchar, so the empty name is invalid
+        // even though it vacuously contains no invalid byte.
+        assert!(!is_valid_field_name(""));
+        // Sanity-check the reference list itself: if `SPECIAL` were mistyped,
+        // every assertion above would be vacuously inverted.
+        assert!(is_valid_field_name("X-Webhook-Signature_1"));
+        assert!(!is_valid_field_name("X Webhook"));
+    }
 
     #[test]
     fn lookup_is_ascii_case_insensitive() {
