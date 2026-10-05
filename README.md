@@ -247,19 +247,36 @@ providers; PayPal and SendGrid ignore `Secret` and verify against
 
 ## Installation
 
+Add the base crate:
+
 ```toml
 [dependencies]
 webhook-verify = "0.2"
-
-# verify straight against http::HeaderMap (axum, tower, hyper, ...)
-webhook-verify = { version = "0.2", features = ["http"] }
-
-# generic tower middleware (works with axum routers too)
-webhook-verify = { version = "0.2", features = ["tower"] }
-
-# actix-web 4 extractor + header bridge
-webhook-verify = { version = "0.2", features = ["actix"] }
 ```
+
+Pick one of the following feature-specific variants depending on your needs:
+
+- **Core only (no framework integration, pass your own header map):** no extra features required beyond the default.
+- **Verify against `http::HeaderMap` (axum, tower, hyper, ...):**
+
+  ```toml
+  [dependencies]
+  webhook-verify = { version = "0.2", features = ["http"] }
+  ```
+
+- **Generic tower middleware (works with axum routers too):**
+
+  ```toml
+  [dependencies]
+  webhook-verify = { version = "0.2", features = ["tower"] }
+  ```
+
+- **actix-web 4 extractor + header bridge:**
+
+  ```toml
+  [dependencies]
+  webhook-verify = { version = "0.2", features = ["actix"] }
+  ```
 
 With the `http` feature enabled, any `http::HeaderMap` (from axum, tower, or
 hyper requests) implements `HeaderMap` and can be passed to `verify()` directly.
