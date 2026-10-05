@@ -31,12 +31,14 @@
 //! - **Optional body size limit** (DoS hardening): use
 //!   [`VerifyLayer::with_max_body_size`] to reject oversized request bodies
 //!   with `413 Payload Too Large` before any signature work, so a malicious
-//!   client cannot force an arbitrarily large HMAC/verification computation.
-//!   A request whose `Content-Length` already exceeds the limit is rejected
-//!   before a single byte is buffered; otherwise the body is fully buffered
-//!   (verification requires the exact wire bytes) and the limit bounds the
-//!   signature work — the buffered allocation may still exceed the limit for
-//!   bodies sent without a length (`Transfer-Encoding: chunked`).
+//!   client cannot force an arbitrarily large HMAC/verification computation —
+//!   or an arbitrarily large buffered body. A request whose `Content-Length`
+//!   already exceeds the limit is rejected before a single byte is read;
+//!   otherwise the read itself is bounded by the limit, so a body sent without
+//!   a length (`Transfer-Encoding: chunked`) is stopped as soon as it exceeds
+//!   it rather than after being buffered whole. A body *within* the limit is
+//!   still buffered in full (verification requires the exact wire bytes) and
+//!   reaches the inner service byte-for-byte.
 //!
 //! # Status codes
 //!
@@ -188,7 +190,7 @@ use std::{
 
 use ::bytes::Bytes;
 use ::http::{Request, Response, StatusCode};
-use ::http_body_util::BodyExt;
+use ::http_body_util::{BodyExt, LengthLimitError, Limited};
 use ::tower_layer::Layer;
 use ::tower_service::Service;
 
@@ -319,10 +321,13 @@ impl<B> VerifyLayer<B> {
     /// `413 Payload Too Large` *before* any signature verification work, so a
     /// malicious client cannot force an arbitrarily large HMAC/verification
     /// computation. Requests that declare an oversized `Content-Length` are
-    /// rejected before any body bytes are buffered; otherwise the body is
-    /// buffered in full (verification requires the exact wire bytes) and the
-    /// limit bounds the verification work. Bodies sent without a length
-    /// (`Transfer-Encoding: chunked`) are always fully buffered.
+    /// rejected before any body bytes are read; every other request is read
+    /// under the limit itself, so a body sent without a length
+    /// (`Transfer-Encoding: chunked`) is rejected as soon as it exceeds it
+    /// rather than after being buffered whole (issue #368).
+    ///
+    /// A body within the limit is buffered in full — verification requires the
+    /// exact wire bytes — and forwarded unchanged.
     ///
     /// When `None` (the default), the body is buffered without a size limit.
     ///
@@ -432,10 +437,11 @@ where
         }
 
         // Pre-buffer DoS guard: a declared `Content-Length` over the limit is
-        // rejected with 413 before a single body byte is buffered — previously
-        // the limit could not bound the buffered allocation at all. Requests
-        // without a declared length (chunked transfer) fall through to the
-        // post-buffer check below, which still bounds the work.
+        // rejected with 413 before a single body byte is read, which no
+        // read-time guard can do — this one costs no I/O at all. Requests
+        // without a usable declared length (chunked transfer, a non-numeric
+        // length) are caught by the streaming limit below, which bounds the
+        // buffering itself.
         if let Some(limit) = self.max_body_size {
             if declared_content_length(req.headers()).is_some_and(|len| len > limit) {
                 let mut response = Response::new(ResB::default());
@@ -453,30 +459,40 @@ where
 
             // Buffer the exact wire bytes once; these are both what gets
             // verified and what the inner service receives (spec.md §4.2).
-            let raw_body = match BodyExt::collect(body).await {
-                Ok(collected) => collected.to_bytes(),
-                // Transport-level read failure (client disconnect, body
-                // decode error): a connection problem, not a verification
-                // outcome — surfaced per tower conventions.
-                Err(error) => return Err(error.into()),
+            //
+            // With a limit configured, the read is bounded while it happens
+            // rather than checked after it: `Limited` forwards every data
+            // frame untouched until one would push the total past the limit,
+            // so a body that fits is byte-identical to an unlimited read, and
+            // one that does not fit can never force the allocation it was
+            // trying to provoke (issue #368). It is the same limit the
+            // post-buffer check used to apply, applied earlier, which is why
+            // there is no length check on the collected bytes below: `Limited`
+            // cannot yield more than `limit` of them.
+            let raw_body = match max_body_size {
+                Some(limit) => match BodyExt::collect(Limited::new(body, limit)).await {
+                    Ok(collected) => collected.to_bytes(),
+                    // The one body read failure that is a request outcome
+                    // rather than a connection problem: this adapter's own
+                    // size limit, reported the same way as every other
+                    // oversize rejection. Answering it here means the rest of
+                    // an oversize body is never read, so the connection cannot
+                    // be reused for it — the usual trade for refusing a
+                    // request before consuming it.
+                    Err(error) if error.is::<LengthLimitError>() => {
+                        let mut response = Response::new(ResB::default());
+                        *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
+                        return Ok(response);
+                    }
+                    // Transport-level read failure (client disconnect, body
+                    // decode error) — surfaced per tower conventions.
+                    Err(error) => return Err(error),
+                },
+                None => match BodyExt::collect(body).await {
+                    Ok(collected) => collected.to_bytes(),
+                    Err(error) => return Err(error.into()),
+                },
             };
-
-            // DoS hardening: reject oversized bodies before any signature
-            // work. CPU amplification (HMAC over an arbitrarily large body)
-            // is the primary vector this defends against; a declared
-            // Content-Length was already checked in `call` (pre-buffer), and
-            // this post-buffer check catches bodies sent without a length or
-            // lying about it. A streaming body-size guard (e.g.
-            // `http_body_util::Limited`) would additionally bound memory for
-            // chunked bodies, but this crate's verification semantics require
-            // the full raw bytes, so the body must be collected regardless.
-            if let Some(limit) = max_body_size {
-                if raw_body.len() > limit {
-                    let mut response = Response::new(ResB::default());
-                    *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
-                    return Ok(response);
-                }
-            }
 
             if let Err(error) = config.keys.verify(
                 config.provider,
@@ -515,6 +531,7 @@ mod tests {
     use ::http_body_util::Full;
     use ::tower::ServiceExt;
     use futures_executor::block_on;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// GitHub's documented example vector
     /// (<https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries>).
@@ -605,6 +622,72 @@ mod tests {
         Request::builder()
             .header("X-Hub-Signature-256", GITHUB_SIGNATURE)
             .body(TestBody::new(Bytes::from_static(body)))
+            .unwrap_or_else(|_| unreachable!("static parts build a valid request"))
+    }
+
+    /// A body that hands out one data frame per poll and counts the frames it
+    /// has produced, so a test can prove *how much of the request was read*
+    /// rather than only what the response ended up being.
+    ///
+    /// A single-frame `Full` body cannot show that: whether the adapter
+    /// buffered all of it or stopped at the limit, it saw the same one frame.
+    /// Counting frames is what distinguishes "bounded while reading" from
+    /// "checked after buffering" (issue #368).
+    struct CountedBody {
+        chunks: std::vec::IntoIter<Bytes>,
+        yielded: Arc<AtomicUsize>,
+    }
+
+    impl CountedBody {
+        /// A body delivering exactly `chunks` frames, plus the counter of how
+        /// many of them have been handed out.
+        fn of_chunks(chunks: &[&[u8]]) -> (Self, Arc<AtomicUsize>) {
+            let yielded = Arc::new(AtomicUsize::new(0));
+            let body = Self {
+                chunks: chunks
+                    .iter()
+                    .map(|chunk| Bytes::copy_from_slice(chunk))
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+                yielded: Arc::clone(&yielded),
+            };
+            (body, yielded)
+        }
+
+        /// A body of `count` frames of `chunk_len` bytes each — the chunked
+        /// shape the pre-buffer `Content-Length` guard cannot see, and the one
+        /// an attacker would use to make the adapter buffer without declaring
+        /// a length.
+        fn oversized(count: usize, chunk_len: usize) -> (Self, Arc<AtomicUsize>) {
+            let chunk = vec![b'x'; chunk_len];
+            let chunks: Vec<&[u8]> = (0..count).map(|_| chunk.as_slice()).collect();
+            Self::of_chunks(&chunks)
+        }
+    }
+
+    impl ::http_body::Body for CountedBody {
+        type Data = Bytes;
+        type Error = core::convert::Infallible;
+
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<::http_body::Frame<Self::Data>, Self::Error>>> {
+            let this = self.get_mut();
+            Poll::Ready(this.chunks.next().map(|chunk| {
+                this.yielded.fetch_add(1, Ordering::SeqCst);
+                Ok(::http_body::Frame::data(chunk))
+            }))
+        }
+    }
+
+    /// A request carrying `chunks` as its body — with **no** declared length,
+    /// so the pre-buffer guard cannot reject it and only what the adapter does
+    /// while reading stands between it and the inner service.
+    fn chunked_request(body: CountedBody) -> Request<CountedBody> {
+        Request::builder()
+            .header("X-Hub-Signature-256", GITHUB_SIGNATURE)
+            .body(body)
             .unwrap_or_else(|_| unreachable!("static parts build a valid request"))
     }
 
@@ -1501,7 +1584,7 @@ mod tests {
     }
 
     #[test]
-    fn unparseable_declared_content_length_falls_through_to_post_buffer_check() {
+    fn unparseable_declared_content_length_falls_through_to_the_body_limit() {
         // A non-numeric Content-Length cannot drive the pre-buffer guard; the
         // request must still be processed (and, if within limit, verify).
         block_on(async {
@@ -1522,6 +1605,82 @@ mod tests {
                 .await
                 .unwrap_or_else(|error| panic!("verification should pass: {error}"));
             assert_eq!(response.status(), StatusCode::OK);
+        });
+    }
+
+    #[test]
+    fn oversized_chunked_body_is_stopped_before_it_is_fully_read() {
+        // The point of the streaming limit (issue #368): a body sent without a
+        // `Content-Length` — the shape the pre-buffer guard cannot see — is
+        // read only until it exceeds the limit. 100 frames of 1 KiB are 100
+        // KiB, and the limit is 2 KiB, so an adapter that buffered the request
+        // first would have taken all 100 frames before answering 413 at all.
+        block_on(async {
+            let (body, yielded) = CountedBody::oversized(100, 1024);
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(2 * 1024)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(chunked_request(body))
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            assert_eq!(
+                response.into_body().into_inner().unwrap_or_default(),
+                Bytes::new()
+            );
+            let read = yielded.load(Ordering::SeqCst);
+            assert!(
+                read <= 3,
+                "the read must stop at the limit (2 frames fit, the third trips it), \
+                 but it took {read} of 100 frames — the body was buffered before the limit \
+                 was applied"
+            );
+        });
+    }
+
+    #[test]
+    fn chunked_body_within_the_limit_is_read_whole_and_verifies() {
+        // The other half of the same contract, and the reason the streaming
+        // limit is safe: `Limited` never truncates a body that fits. GITHUB_BODY
+        // is 13 bytes, delivered here as three frames with no declared length,
+        // and it must reach the inner service byte-for-byte.
+        block_on(async {
+            let (body, yielded) = CountedBody::of_chunks(&[b"Hello", b", ", b"World!"]);
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(1024)
+                .layer(EchoLen);
+            let response = svc
+                .oneshot(chunked_request(body))
+                .await
+                .unwrap_or_else(|error| panic!("verification should pass: {error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.into_body().into_inner().unwrap_or_default(),
+                Bytes::from_static(b"13")
+            );
+            assert_eq!(yielded.load(Ordering::SeqCst), 3);
+        });
+    }
+
+    #[test]
+    fn chunked_body_exactly_at_the_limit_is_read_whole() {
+        // The boundary: a body whose total length equals the limit is not an
+        // oversize body, so it must still be buffered whole and verified.
+        block_on(async {
+            let (body, yielded) = CountedBody::oversized(13, 1);
+            let svc = VerifyLayer::new(Provider::GitHub, Secret::new(GITHUB_SECRET))
+                .with_max_body_size(13)
+                .layer(EchoLen);
+            // No valid signature over this body, so it cannot reach 200 — the
+            // rejection is what proves the bytes were collected rather than
+            // refused at the limit.
+            let response = svc
+                .oneshot(chunked_request(body))
+                .await
+                .unwrap_or_else(|error| panic!("middleware should respond, not error: {error}"));
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(yielded.load(Ordering::SeqCst), 13);
         });
     }
 

@@ -313,6 +313,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`VerifyLayer::with_max_body_size` now bounds the buffered body, not just
+  the signature work** (issue #368). On the tower adapter (which also serves
+  axum) the limit was applied *after* the body had been collected: a request
+  that declares no `Content-Length` — chunked transfer, a non-numeric length,
+  or a length the framing layer let through — was buffered whole before the
+  limit was consulted, so any unauthenticated client could force an
+  arbitrarily large allocation on the adapter. The body is now read through
+  `http_body_util::Limited` whenever a limit is configured, which errors as
+  soon as a frame would push the total past it, and that error is reported as
+  the same `413 Payload Too Large` with the same empty body as before.
+
+  The reason recorded in the old comment for not doing this — "this crate's
+  verification semantics require the full raw bytes, so the body must be
+  collected regardless" — does not hold: `Limited` forwards every frame
+  untouched until one would exceed the limit, so a body that fits is
+  byte-identical to an unlimited read and still reaches the inner service
+  whole (§4.2). Only the amount of memory an oversized request can make the
+  adapter allocate changes. A body *within* the limit is still buffered in
+  full, and with no limit configured nothing is bounded, as documented.
+
+  The pre-buffer `Content-Length` guard stays: it is still the cheapest
+  rejection, and a request that declares an oversize body never reaches the
+  body stream at all. The now-unreachable post-collection length check is
+  gone, since `Limited` cannot yield more than `limit` bytes.
+
+  Tests pin both halves, because either alone would be satisfied by the old
+  behavior: `oversized_chunked_body_is_stopped_before_it_is_fully_read` counts
+  the frames the adapter actually pulled (100 one-KiB frames against a 2 KiB
+  limit must not be read past the third — the old code took all 100), and
+  `chunked_body_within_the_limit_is_read_whole_and_verifies` /
+  `chunked_body_exactly_at_the_limit_is_read_whole` pin that a body at or
+  under the limit is still collected whole and verified.
+
 - **Twilio and Mandrill now decode their form fields from the request body, so
   both verify through `VerifyLayer` / `WebhookConfig`** (issue #363).
   `VerifyOptions::form_params` is the parsed
