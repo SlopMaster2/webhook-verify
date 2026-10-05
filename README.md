@@ -579,15 +579,14 @@ by default), and rejection bodies are empty in both adapters — the status
 carries the signal, and the structured `VerifyError` behind it stays in your
 server-side logs. In the extractor, `WebhookVerificationError::verify_error()`
 hands that `VerifyError` back unchanged, so a handler can `match` the class
-instead of string-matching the message — which is the only way to separate
-cases the status codes collapse on their own (`MissingHeader` and `BadEncoding`
-are both a `400`; so are `InvalidSecret` and `MissingContext` at `500`). It is
-`None` for the two rejections that are not verification outcomes: a body that
-never finished arriving, and the `413` above. The tower layer has no such
-accessor — it answers with a status code and nothing more, so per-class
-logging there needs your own middleware (issue #379). A guard
-is intentionally not provided: guards run before the body is read, but
-verification requires those bytes.
+instead of string-matching the message; the status codes collapse some of these
+on their own (`MissingHeader` and `BadEncoding` are both a `400`, and so are
+`InvalidSecret` and `MissingContext` at `500`). It is `None` for the two
+rejections that are not verification outcomes: a body that never finished
+arriving, and the `413` above. The tower layer has no such accessor — it
+answers with a status code and nothing more, so per-class logging there needs
+your own middleware (issue #379). A guard is intentionally not provided: guards
+run before the body is read, but verification requires those bytes.
 
 The actix adapter has one limit the tower one does not: `web::Bytes` is
 itself capped by actix-web's `PayloadConfig` at 256 KiB by default, and
