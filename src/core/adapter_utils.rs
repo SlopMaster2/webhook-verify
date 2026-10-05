@@ -487,13 +487,14 @@ fn dynamically_named_ambiguity<H: MultiValueHeaders + ?Sized>(
 /// After that, the digits must be exactly the canonical `1*DIGIT` grammar HTTP
 /// requires — no leading `+`/`-`, no radix prefix, no separator. Any other
 /// value is treated as "no declared length": the request then falls through to
-/// the post-buffer size check, which still bounds the verification work, and
-/// the framing layer (`hyper`/`axum` on tower, actix-http on actix) has
-/// already rejected inconsistent `Content-Length` fields. A non-visible-ASCII
-/// value cannot reach here at all — [`MultiValueHeaders::get_first_str`] only
-/// decodes visible ASCII, so it reads as "no declared length" one step
-/// earlier. Shared between the adapters so the pre-buffer 413 guard cannot
-/// drift.
+/// the adapter's own body-size limit — tower's streaming `Limited` read,
+/// actix's post-buffer check (issue #368) — which still bounds both the
+/// verification work and the buffered body, and the framing layer
+/// (`hyper`/`axum` on tower, actix-http on actix) has already rejected
+/// inconsistent `Content-Length` fields. A non-visible-ASCII value cannot reach
+/// here at all — [`MultiValueHeaders::get_first_str`] only decodes visible
+/// ASCII, so it reads as "no declared length" one step earlier. Shared between
+/// the adapters so the pre-buffer 413 guard cannot drift.
 #[cfg(any(feature = "tower", feature = "actix"))]
 #[must_use]
 pub(crate) fn declared_content_length<H: MultiValueHeaders + ?Sized>(headers: &H) -> Option<usize> {
@@ -503,8 +504,8 @@ pub(crate) fn declared_content_length<H: MultiValueHeaders + ?Sized>(headers: &H
     // `parse_unsigned_decimal` in `replay.rs` applies (Rust's `usize::from_str`
     // would otherwise silently accept a leading `+`, e.g. `+100`, which is not
     // a valid Content-Length). Any non-canonical value is treated as "no
-    // declared length" and falls through to the post-buffer size check, which
-    // still bounds the signature-verification work.
+    // declared length" and falls through to the adapter's own body-size limit,
+    // which still bounds the signature-verification work.
     if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
@@ -2128,7 +2129,7 @@ mod tests {
     /// constructors reject such a value outright, so the only way to build one
     /// is `from_bytes` (obs-text). The `MultiValueHeaders::get_first_str`
     /// decode then fails and the length reads as undeclared, so the pre-buffer
-    /// guard falls through to the post-buffer size check.
+    /// guard falls through to the adapter's own body-size limit.
     #[cfg(feature = "http")]
     #[cfg(any(feature = "tower", feature = "actix"))]
     #[test]

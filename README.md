@@ -476,11 +476,12 @@ let layer = VerifyLayer::new(Provider::Stripe, Secret::new("whsec_..."))
     .with_max_body_size(256 * 1024);
 ```
 
-The body is always fully buffered (verification requires the exact wire
-bytes), so this limit bounds the signature-verification work on oversized
-payloads rather than the buffering itself. Requests whose body exceeds the
-limit are rejected with `413 Payload Too Large` before any signature
-verification work.
+The body is buffered in full (verification requires the exact wire bytes)
+and forwarded unchanged, but the read itself is bounded by the limit: a
+request is rejected with `413 Payload Too Large` as soon as it exceeds it,
+so an oversized body — including one sent chunked, with no `Content-Length`
+to check up front — is never buffered whole. No signature verification work
+is done for it either way.
 
 Plain tower stacks receive `Request<Bytes>`; axum users get their own body
 type back automatically via type inference:
