@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`WebhookVerificationError::verify_error()`** (issue #378). The actix
+  adapter documented its rejection contract as "distinguishing detail belongs
+  in server-side logging keyed off the structured `VerifyError`", and the
+  `README` repeated it — but the structured error was unreachable. `Rejection`
+  is private, `WebhookVerificationError` had no accessor at all, so a handler
+  could only log or match on the `Display`/`Debug` *string*. The status code it
+  also gets does not recover the class either: `rejection_status` collapses
+  `MissingHeader`/`MalformedHeader`/`BadEncoding` into one `400` and
+  `UnsupportedProvider`/`InvalidSecret`/`MissingContext` into one `500`, so a
+  caller who wanted to page a human on `InvalidSecret` while counting
+  `SignatureMismatch` as an attack had to string-match on the rendering — which
+  is exactly the failure mode §2.1's error granularity exists to remove.
+
+  `verify_error()` returns `&VerifyError` — `verify()`'s own value, unchanged,
+  with the same §2.1 redaction, and still never sent to the client
+  (`error_response` remains a bodiless response). It is `None` for the two
+  rejections that are not verification outcomes and carry no `VerifyError`: a
+  body that could not be read to completion (`400`) and a body over
+  `with_max_body_size` (`413`, the status table's own "not a `VerifyError`"
+  row). `Rejection` stays private, so it can still gain a variant without a
+  breaking change — which making it public would have cost.
+
+  Purely additive: no behaviour change, no new dependency, no provider and no
+  `spec.md` edit (the spec does not specify the adapters' error surface). The
+  tower half of the same gap is *not* addressed here and stays open as issue
+  #379 — its middleware never surfaces the error at all, so an observation hook
+  on `VerifyLayer` is a real design decision rather than a one-line accessor.
+
 - **`Encoding::Base64UrlNoPad`** (issue #366). `Encoding` names one exact
   decoder — an alphabet and a padding rule — and three of the four base64 cells
   had a variant: `Base64` (standard, padded), `Base64Url` (URL-safe, padded),
