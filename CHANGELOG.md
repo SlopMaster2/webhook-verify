@@ -597,6 +597,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Twilio`: a `?` inside the URL fragment was read as a query delimiter**
+  (issue #384). `body_sha256_param` searched for the `?` first and cut the
+  fragment off
+  afterwards, but RFC 3986 §3.5 begins the fragment at the *first* `#` — so a
+  `?` after one is part of the fragment and does not open a query. A
+  `request_url` whose only `?` sits inside the fragment therefore yielded a
+  `bodySHA256` read out of the fragment, and the JSON-body variant's body check
+  compared the body against a digest that URL never commits to.
+
+  The direction is fail-closed, not a bypass, and worth being precise about:
+  `request_url` is covered by the HMAC verified before the body check runs, so a
+  differently-spelled parameter cannot be substituted without also forging that
+  signature, and no request that verified before this change verifies less now.
+  What it cost was availability. A caller whose `request_url` legitimately
+  carries a fragment — an SPA route, a docs link, anything reconstructed rather
+  than taken from the request line — lost *every* delivery with a
+  `SignatureMismatch`, an error shaped like an active attack for what is a URL
+  spelling.
+
+  The existing `fragment_is_not_part_of_the_query` test pinned only half the
+  rule (a `#` after the `?`), which is the direction that happened to work. The
+  fragment is now cut before the `?` is looked for, and the reverse ordering is
+  pinned in both directions: a fragment-borne parameter is not read, and a
+  genuine `bodySHA256` ahead of a `#` still is. Both vectors' signatures were
+  computed independently with `openssl dgst -sha1 -hmac '12345' -binary |
+  base64` over the URL alone, per Twilio's documented recipe. `spec.md` §3's
+  Twilio entry documents the query-component boundary. Pre-1.0, and this widens
+  what is accepted rather than narrowing it.
+
 - **The `Twilio` and `Mandrill` variant docs still said `VerifyOptions::form_params`
   is required** (issue #370). `Provider::Twilio` read "needs
   `VerifyOptions::request_url` and `VerifyOptions::form_params`" and
