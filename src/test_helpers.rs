@@ -1,5 +1,6 @@
 //! Shared test helpers: a deterministic clock and options for exercising
-//! timestamp-based (replay-protected) providers.
+//! timestamp-based (replay-protected) providers, plus the text normalizer the
+//! documentation-drift guards use.
 
 use alloc::sync::Arc;
 use core::hash::Hasher;
@@ -75,4 +76,24 @@ pub fn clocked_at(secs: u64, max_age: Option<Duration>) -> VerifyOptions {
         verifying_material: None,
         webhook_id: None,
     }
+}
+
+/// Collapses every whitespace run in `text` to a single space.
+///
+/// The documentation-drift guards that read a doc comment back out of its own
+/// source have to match *prose*, not the exact bytes rustfmt happened to wrap it
+/// into: a phrase like "bounds both the verification work and the buffered
+/// body" is split across lines by `cargo fmt` at the fill column, so a plain
+/// `str::contains` on the raw source silently stops matching the moment the
+/// comment is re-wrapped — and a stale-doc guard that stops matching is worse
+/// than no guard, because it looks like it is still holding. Normalizing both
+/// sides of the comparison keeps those guards about what the doc *says*.
+///
+/// Gated on an adapter because both of its callers are: the adapter body-limit
+/// guards cannot run in a build with neither adapter, and a helper nothing
+/// calls would warn in exactly the `no_std` / `sendgrid,paypal` combos where a
+/// new warning is easiest to miss (issue #335).
+#[cfg(any(feature = "tower", feature = "actix"))]
+pub fn flattened(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }

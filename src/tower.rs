@@ -238,9 +238,11 @@ impl fmt::Debug for Config {
 /// Use [`VerifyLayer::with_max_body_size`] to reject oversized request bodies
 /// (`413 Payload Too Large`) before any signature verification work, so a
 /// malicious client cannot force an arbitrarily large HMAC/verification
-/// computation. Requests declaring an oversized `Content-Length` are rejected
-/// before any body bytes are buffered; the limit otherwise bounds the
-/// signature work, not the buffering itself.
+/// computation — or an arbitrarily large buffered body. Requests declaring an
+/// oversized `Content-Length` are rejected before any body bytes are buffered;
+/// every other request is read under the limit itself, so a body sent without a
+/// length (`Transfer-Encoding: chunked`) is rejected as soon as it exceeds it
+/// rather than after being buffered whole (issue #368).
 #[must_use]
 #[derive(Clone, Debug)]
 pub struct VerifyLayer<B = Bytes> {
@@ -522,7 +524,7 @@ mod tests {
     use crate::core::adapter_utils::has_conflicting_duplicates;
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
-    use crate::test_helpers::{FixedClock, epoch};
+    use crate::test_helpers::{FixedClock, epoch, flattened};
     // Only the PayPal vector sets a clock, and that test is `paypal`-gated;
     // importing this unconditionally made `--features tower` (no `paypal`)
     // warn, and no CI job built that combination (issue #335).
@@ -1783,5 +1785,47 @@ mod tests {
             .with_max_body_size(1024);
         let debug = format!("{layer:?}");
         assert!(!debug.contains("super-secret-key"));
+    }
+
+    /// `VerifyLayer`'s *type* doc is the one docs.rs renders for the type, and
+    /// it is the page an operator actually reads — the builder method's doc is
+    /// one scroll further down. It had drifted: it still claimed the limit
+    /// "bounds the signature work, not the buffering itself", the pre-#368
+    /// statement, while the implementation reads through a streaming `Limited`
+    /// that bounds the buffering too. `oversized_chunked_body_is_stopped_before_it_is_fully_read`
+    /// pins the behavior; this pins the doc to it, so the next change to the read
+    /// path cannot leave the type page promising a weaker DoS bound than the code
+    /// provides (issue #372).
+    #[test]
+    fn verify_layer_type_doc_promises_the_streaming_limit() {
+        const SOURCE: &str = include_str!("tower.rs");
+
+        // The struct's own doc block: from the first line of the `///` comment
+        // above it back to the end of the previous item.
+        let decl = SOURCE
+            .find("pub struct VerifyLayer")
+            .unwrap_or_else(|| unreachable!("VerifyLayer must still be declared"));
+        let doc_start = SOURCE[..decl]
+            .rfind("/// A [`tower_layer::Layer`]")
+            .unwrap_or_else(|| unreachable!("VerifyLayer must keep a doc comment above it"));
+        let doc = flattened(&SOURCE[doc_start..decl]);
+
+        assert!(
+            doc.contains("under the limit itself"),
+            "VerifyLayer's doc must state that a request with no usable declared \
+             length is read under the limit, which is what the streaming `Limited` \
+             does: {doc}"
+        );
+        assert!(
+            doc.contains("Transfer-Encoding: chunked"),
+            "VerifyLayer's doc must name the chunked case — it is the only body shape \
+             the pre-buffer 413 guard cannot see, and the reason the streaming limit \
+             exists: {doc}"
+        );
+        assert!(
+            !doc.contains("not the buffering"),
+            "VerifyLayer's doc must not claim the limit leaves buffering unbounded; \
+             that was the pre-#368 statement and the opposite of what the code does"
+        );
     }
 }
