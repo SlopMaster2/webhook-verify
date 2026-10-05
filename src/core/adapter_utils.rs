@@ -487,14 +487,18 @@ fn dynamically_named_ambiguity<H: MultiValueHeaders + ?Sized>(
 /// After that, the digits must be exactly the canonical `1*DIGIT` grammar HTTP
 /// requires — no leading `+`/`-`, no radix prefix, no separator. Any other
 /// value is treated as "no declared length": the request then falls through to
-/// the adapter's own body-size limit — tower's streaming `Limited` read,
-/// actix's post-buffer check (issue #368) — which still bounds both the
-/// verification work and the buffered body, and the framing layer
-/// (`hyper`/`axum` on tower, actix-http on actix) has already rejected
-/// inconsistent `Content-Length` fields. A non-visible-ASCII value cannot reach
-/// here at all — [`MultiValueHeaders::get_first_str`] only decodes visible
-/// ASCII, so it reads as "no declared length" one step earlier. Shared between
-/// the adapters so the pre-buffer 413 guard cannot drift.
+/// the adapter's own body-size limit, which still bounds the verification work.
+/// What that limit bounds beyond that differs per adapter and must not be
+/// conflated (issue #372): tower reads through a streaming `Limited`, so the
+/// limit bounds the *buffering* too and a lengthless body is stopped mid-read
+/// (issue #368), while actix buffers through `web::Bytes::from_request` first
+/// and checks the length afterwards, so its limit bounds only the verification
+/// work — actix-web's own `PayloadConfig` is what bounds the buffering. Either
+/// way the framing layer (`hyper`/`axum` on tower, actix-http on actix) has
+/// already rejected inconsistent `Content-Length` fields. A non-visible-ASCII
+/// value cannot reach here at all — [`MultiValueHeaders::get_first_str`] only
+/// decodes visible ASCII, so it reads as "no declared length" one step earlier.
+/// Shared between the adapters so the pre-buffer 413 guard cannot drift.
 #[cfg(any(feature = "tower", feature = "actix"))]
 #[must_use]
 pub(crate) fn declared_content_length<H: MultiValueHeaders + ?Sized>(headers: &H) -> Option<usize> {
@@ -654,6 +658,11 @@ mod tests {
     // they need the same prelude the other test modules restore under `no_std`.
     #[cfg(all(not(feature = "std"), feature = "http"))]
     use crate::test_helpers::*;
+    // The `declared_content_length` doc guard needs `flattened`, and the glob above
+    // is gated on `http` (which `actix` does not enable), so it imports the one
+    // helper explicitly rather than widening that gate.
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    use crate::test_helpers::flattened;
 
     /// The shared key-ring logic (issue #259), pinned once so the tower and
     /// actix adapters — which differ only in their header map and status
@@ -2565,5 +2574,54 @@ mod tests {
             "spec.md §5.8 must not name `conflicting_signature_header`; it was \
              removed when the scan was unified into `core::adapter_utils`"
         );
+    }
+
+    /// [`declared_content_length`] is the shared pre-buffer 413 guard, so its
+    /// doc is where an operator looks up what the adapters do with a request
+    /// that declares no usable `Content-Length`. It claimed the fall-through
+    /// "still bounds both the verification work and the buffered body" — true
+    /// for tower's streaming `Limited`, false for actix, which buffers through
+    /// `web::Bytes::from_request` first and checks the length afterwards. It
+    /// also contradicted its own inline comment sixteen lines further down,
+    /// which states only the verification-work bound (issue #372).
+    ///
+    /// Both adapters fail closed either way, so this is a doc lying about a DoS
+    /// bound rather than a hole; the per-adapter behavior tests are
+    /// `tower::tests::oversized_chunked_body_is_stopped_before_it_is_fully_read`
+    /// and `actix::tests::chunked_body_over_the_actix_payload_cap_is_payload_too_large`.
+    /// This guard keeps the shared doc from re-collapsing the two into one claim.
+    ///
+    /// Gated on either adapter, like the helper whose doc it reads: the prose
+    /// only describes adapter behavior, so there is nothing to check in a build
+    /// that has neither.
+    #[cfg(any(feature = "tower", feature = "actix"))]
+    #[test]
+    fn declared_content_length_doc_does_not_conflate_the_two_adapters() {
+        const SOURCE: &str = include_str!("adapter_utils.rs");
+
+        let decl = SOURCE
+            .find("pub(crate) fn declared_content_length")
+            .unwrap_or_else(|| unreachable!("the shared pre-buffer guard must still exist"));
+        let doc_start = SOURCE[..decl]
+            .rfind("/// The request's declared `Content-Length`")
+            .unwrap_or_else(|| unreachable!("the guard must keep a doc comment above it"));
+        let doc = flattened(&SOURCE[doc_start..decl]);
+
+        assert!(
+            !doc.contains("both the verification work and the buffered body"),
+            "`declared_content_length` must not claim its fall-through bounds the \
+             buffered body for both adapters: actix's is a post-buffer check, so only \
+             tower's streaming `Limited` bounds the buffering — {doc}"
+        );
+        // Both halves must stay named, so the fix cannot degenerate into simply
+        // dropping the per-adapter distinction: tower bounds the read, actix
+        // bounds only the verification work.
+        for required in ["Limited", "PayloadConfig", "verification work"] {
+            assert!(
+                doc.contains(required),
+                "`declared_content_length`'s doc must name `{required}` so the \
+                 per-adapter buffering behavior stays spelled out: {doc}"
+            );
+        }
     }
 }
