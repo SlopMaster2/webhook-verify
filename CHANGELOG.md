@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`CustomScheme::signed_headers`**, the declaration that brings a custom
+  scheme's extra signed headers into the §4.4 duplicate-ambiguity scan
+  (issue #395).
+
+  The scan has always covered a `Custom` scheme's `signature_header` and
+  `timestamp_header`, but a `signed_string` closure that also folds, say,
+  `x-request-id` or `content-type` into the signed bytes got first-match
+  lookup for that header with no duplicate detection: an intermediary could
+  prepend a second value and have the verifier sign-check one value while an
+  upstream validator saw the other — exactly the smuggled-duplicate failure
+  §4.4 exists to reject, and reachable through both framework adapters and
+  both public entry points. Built-in providers could not hit this (every
+  declared `*_HEADER` constant is pinned into the scan by
+  `every_declared_provider_header_is_scanned_for_ambiguity`) and
+  Contentful's self-describing `x-contentful-signed-headers` list is followed
+  dynamically; `Custom` was the only scheme with no way to say which names
+  its closure reads.
+
+  `signed_headers: &'static [&'static str]` (default empty) is set with the
+  new `CustomScheme::with_signed_headers(_)` builder and folded into
+  `signature_header_names(Provider::Custom)`, so the adapters and the
+  `ambiguous_signature_header` / `ambiguous_signature_header_in` entry points
+  all pick it up through the one existing scan — no second code path. Names
+  are de-duplicated ASCII-case-insensitively in list order against
+  `signature_header`/`timestamp_header`, an entry that is not a valid HTTP
+  field name fails closed as ambiguous on every request exactly as a
+  malformed `signature_header` does, and `provider_sent_duplicate_headers`
+  stays empty for `Custom` (nothing in the request sanctions a duplicate
+  there — that would be a new security decision needing a linked source).
+  The carve-out `spec.md` §4.4 documents shrinks accordingly: what remains
+  is a header the closure reads but the scheme did **not** declare, which
+  nothing outside the closure can enumerate.
+
+  The field participates in `PartialEq`/`Hash` — it changes what the scan
+  does, so it is part of the scheme's declarative identity. Additive but a
+  source break for struct-literal construction, exactly as
+  `timestamp_unit` was: bounded by the pre-1.0 line and pinned by
+  `cargo semver-checks`' `constructible_struct_adds_field` (issue #276).
+  No new dependency; no built-in provider's behavior changes.
+
 - **`VerifyError::rejection_status()`**, the crate's one HTTP status
   classification (a raw `u16`: `400`/`401`/`500`) for a rejection it
   produces.

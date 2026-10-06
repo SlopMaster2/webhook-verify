@@ -1212,6 +1212,12 @@ impl core::error::Error for ProviderParseError {}
 /// Header names that carry signing material for `provider`, per its row in
 /// `spec.md` §3.
 ///
+/// For [`Provider::Custom`] there is no §3 row, so the names come from the
+/// scheme itself: `signature_header`, `timestamp_header`, and every entry the
+/// caller declared in `CustomScheme::signed_headers` — the declaration that
+/// brings a closure's extra reads into the scan at all (issue #395),
+/// de-duplicated in list order.
+///
 /// Used by the `spec.md` §4.4 ambiguity check — by the framework adapters
 /// (behind the `tower`/`actix` features) and, since the `http` feature, by
 /// `webhook_verify::ambiguous_signature_header` for callers doing their own
@@ -1309,12 +1315,27 @@ pub(crate) fn signature_header_names(provider: &Provider) -> Vec<&'static str> {
             standard_webhooks::SVIX_SIGNATURE_HEADER,
         ],
         Provider::Custom(scheme) => {
-            // Only the two declared headers are scanned for duplicates.
-            // Additional headers read by signed_string are *not* covered —
-            // see the CustomScheme struct-level safety note.
-            let mut names = vec![scheme.signature_header];
+            // The two headers every scheme declares, plus whatever extra
+            // headers `signed_string` reads and the scheme listed in
+            // `signed_headers` (issue #395). A name the closure reads but did
+            // not declare here is *not* covered — see the CustomScheme
+            // struct-level safety note — because nothing outside the closure
+            // can enumerate it.
+            //
+            // Duplicates of an already-listed name are dropped, comparing
+            // ASCII-case-insensitively the way header names compare: a scheme
+            // that names `signature_header` again (in any case) is scanned
+            // once and reported under its `signature_header` spelling rather
+            // than under the repeat.
+            let mut names = Vec::with_capacity(2 + scheme.signed_headers.len());
+            names.push(scheme.signature_header);
             if let Some(timestamp) = scheme.timestamp_header {
                 names.push(timestamp);
+            }
+            for name in scheme.signed_headers {
+                if !names.iter().any(|listed| listed.eq_ignore_ascii_case(name)) {
+                    names.push(name);
+                }
             }
             names
         }
@@ -2891,6 +2912,7 @@ mod tests {
             timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Hex,
             prefix: None,
+            signed_headers: &[],
             signed_string: |_h, b| b.to_vec(),
         });
         assert_eq!(custom.to_string(), "Custom(X-My-Sig, SHA-256, hex)");
@@ -2905,6 +2927,7 @@ mod tests {
             timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Base64,
             prefix: Some("v1="),
+            signed_headers: &[],
             signed_string: |_h, b| b.to_vec(),
         });
         assert_eq!(
@@ -6411,9 +6434,12 @@ pub struct S {
                     standard_webhooks::SVIX_SIGNATURE_HEADER,
                 ],
             ),
-            // Custom covers exactly its two declared headers — additional
-            // headers read by `signed_string` are outside the adapters' scan
-            // (documented caveat on `CustomScheme`).
+            // Custom covers its declared headers: `signature_header`,
+            // `timestamp_header`, and whatever `signed_headers` adds (issue
+            // #395) — deduplicated against the first two, so the repeat of the
+            // signature header below must not show up twice. A header the
+            // closure reads but the scheme did not declare stays outside the
+            // scan (documented caveat on `CustomScheme`).
             (
                 Provider::Custom(CustomScheme {
                     hash: HashAlg::Sha256,
@@ -6422,6 +6448,7 @@ pub struct S {
                     timestamp_unit: TimestampUnit::Seconds,
                     encoding: Encoding::Hex,
                     prefix: None,
+                    signed_headers: &[],
                     signed_string: |_headers, raw_body| raw_body.to_vec(),
                 }),
                 &["X-Acme-Signature", "X-Acme-Timestamp"],
@@ -6434,9 +6461,23 @@ pub struct S {
                     timestamp_unit: TimestampUnit::Seconds,
                     encoding: Encoding::Hex,
                     prefix: None,
+                    signed_headers: &[],
                     signed_string: |_headers, raw_body| raw_body.to_vec(),
                 }),
                 &["X-Acme-Signature"],
+            ),
+            (
+                Provider::Custom(
+                    CustomScheme::new(
+                        HashAlg::Sha256,
+                        "X-Acme-Signature",
+                        Encoding::Hex,
+                        |_headers, raw_body| raw_body.to_vec(),
+                    )
+                    .with_timestamp_header("X-Acme-Timestamp")
+                    .with_signed_headers(&["X-Acme-Nonce", "x-acme-signature"]),
+                ),
+                &["X-Acme-Signature", "X-Acme-Timestamp", "X-Acme-Nonce"],
             ),
         ];
         for &(ref provider, expected) in cases {
@@ -6816,7 +6857,8 @@ pub struct S {
     /// scan's reach (a comma-delimited list in one value, or two distinctly
     /// named headers), so a new entry here means a new exemption, which is a
     /// security decision that has to be made deliberately — with a linked
-    /// provider source, not by extending a match arm.
+    /// provider source, not by extending a match arm. `Provider::Custom` is
+    /// pinned separately below because `provider_list()` never reaches it.
     #[cfg(any(feature = "http", feature = "tower", feature = "actix"))]
     #[test]
     fn only_mollie_is_exempt_from_the_ambiguity_scan() {
@@ -6835,6 +6877,25 @@ pub struct S {
             &[mollie::SIGNATURE_HEADER],
             "the exemption is scoped to Mollie's one header, read from the provider's \
              own constant rather than re-spelled"
+        );
+
+        // `provider_list()` never yields `Provider::Custom`, so its half of the
+        // "Mollie is the only exemption" claim needs its own assertion: a
+        // `Custom` scheme declares what it signs in `signature_header`,
+        // `timestamp_header`, and `signed_headers`, and nothing in a request
+        // sanctions a duplicate of any of them — an exemption here would be a
+        // new security decision with no provider source behind it (issue #395).
+        let custom = Provider::Custom(CustomScheme::new(
+            HashAlg::Sha256,
+            "X-Webhook-Sig",
+            Encoding::Hex,
+            |_headers, raw_body| raw_body.to_vec(),
+        ));
+        assert!(
+            provider_sent_duplicate_headers(&custom).is_empty(),
+            "`Provider::Custom` must have no ambiguity-scan exemption: its declared \
+             headers are caller-typed signing material, and no provider source sanctions \
+             a duplicate of them (issue #395)"
         );
     }
 

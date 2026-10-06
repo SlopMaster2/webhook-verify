@@ -405,22 +405,40 @@ pub struct CustomScheme {
     pub timestamp_unit: TimestampUnit, // Seconds (default) | Millis
     pub encoding: Encoding,            // Hex | Base64 | Base64Url | Base64NoPad | Base64UrlNoPad
     pub prefix: Option<&'static str>,  // e.g. "sha256=" or "v0="
+    pub signed_headers: &'static [&'static str], // extra headers signed_string reads
     pub signed_string: fn(&dyn HeaderMap, &[u8]) -> Vec<u8>,
 }
 ```
 
 Construction: `CustomScheme::new(hash, signature_header, encoding,
 signed_string)` sets the required fields with `timestamp_header`/`prefix`
-left `None` and `timestamp_unit` at its `Default` of `Seconds`, and the
-`with_timestamp_header(_)` / `with_timestamp_unit(_)` / `with_prefix(_)`
+left `None`, `signed_headers` empty, and `timestamp_unit` at its `Default` of
+`Seconds`, and the
+`with_timestamp_header(_)` / `with_timestamp_unit(_)` / `with_prefix(_)` /
+`with_signed_headers(_)`
 builders set those optional fields (struct-literal construction also remains
 available since the fields are public). The declarative fields participate in
 `PartialEq`/`Hash`; `signed_string` is excluded (function pointers have no
 meaningful equality).
 
+**Signed-header declaration.** `signed_headers` names the headers beyond
+`signature_header`/`timestamp_header` that `signed_string` folds into the
+signed bytes, so the §4.4 ambiguity scan can cover them: a conflicting
+duplicate of a declared name is rejected exactly as for a built-in provider's
+own signing headers, de-duplicated against the two declared names
+(ASCII-case-insensitively, in list order) so a repeat is scanned once. What is
+*not* declared is not scanned — a closure that reads a header this list omits
+still gets first-match lookup with no duplicate detection, and no request
+field and no crate API can enumerate it (`signed_string` is a plain `fn`), so
+the declaration is the caller's to make. Each entry must be a valid HTTP
+field name (RFC 9110 §5.1); an unparseable one makes the scan report that
+header ambiguous on **every** request (fail closed), exactly as an
+unparseable `signature_header`/`timestamp_header` does (§4.4).
+
 **Construction compatibility.** The struct is not `#[non_exhaustive]`, so a
 struct literal must name every field and adding one is a source-level break for
-that form (`timestamp_unit`, released in 0.2.0, was the first). `new(_)` plus
+that form (`timestamp_unit` was the first, `signed_headers` the second — both
+landed in 0.2.0). `new(_)` plus
 the builders are the forward-compatible path: they fill in each new field's
 `Default`. The break is bounded by the crate's version line rather than by an
 API freeze — while the crate is pre-1.0 it may break in a minor bump, which is
@@ -589,8 +607,10 @@ the SDK and reference examples disambiguate its details.
   scanned. Names that fail to parse as HTTP field names are treated as
   ambiguous (fail closed); empty entries are skipped, since `verify()` rejects
   a list containing one on its own. The residual carve-out is
-  `CustomScheme`'s closure-read headers, which no caller-declared list
-  enumerates.
+  `CustomScheme`'s *undeclared* closure-read headers — a `Custom` scheme
+  declares the ones it signs over in `signed_headers` (§2.2) and those are
+  scanned, but nothing in this list (or anywhere else in the request)
+  enumerates a name the scheme left out.
 - Path encoding: the docs' pseudo-code url-encodes only the *query* portion
   (`query = urlEncode(query)`), with the pathname used as its UTF-8 bytes.
   The crate implements exactly that: the query's percent-encoding uses
@@ -3361,13 +3381,15 @@ ambiguity).
    the list does not name are not signing material and are not scanned; a name
    that fails to parse as an HTTP field name is treated as ambiguous (fail
    closed), while an empty entry is skipped and left for `verify()` to reject
-   on the list header. This closes the previously documented Contentful
+   on the list header.    This closes the previously documented Contentful
    carve-out (see §3, Contentful row). The one carve-out that remains is
-   `Custom` providers: the scan covers only `signature_header` and
-   `timestamp_header`, and if the user's `signed_string` closure reads
-   additional headers, duplicates in those are **not** detected (see
-   `CustomScheme` docs) — nothing in the request enumerates them.
-   `Provider::Custom`'s two declared names are the one place a *scanned* name
+   `Custom` providers: the scan covers `signature_header`, `timestamp_header`,
+   and every name the scheme declares in `signed_headers` (§2.2), so if the
+   user's `signed_string` closure reads a header the scheme did **not**
+   declare there, duplicates in that header are **not** detected (see
+   `CustomScheme` docs) — nothing in the request enumerates what the closure
+   reads, so only the caller's declaration can bring a header into scope.
+   `Provider::Custom`'s declared names are the one place a *scanned* name
    is caller-typed rather than an in-crate constant, so the "reject, never
    degrade to a no-op" rule above applies to them directly: a name that is not
    a valid HTTP field name (RFC 9110 §5.1) cannot be looked up and is
@@ -3381,7 +3403,9 @@ ambiguity).
    `Provider::Custom` is absent from `provider_list()` (it is not
    name-constructible). The fail-closed direction is pinned by
    `custom::tests::an_unparseable_declared_header_name_is_always_ambiguous`
-   (issue #286). The "cannot be looked up" verdict is produced by the crate's
+   (issue #286) and, for a `signed_headers` entry, by
+   `custom::tests::an_unparseable_declared_signed_header_name_is_always_ambiguous`
+   (issue #395). The "cannot be looked up" verdict is produced by the crate's
    own RFC 9110 §5.1 field-name check for **all** header representations the
    scan runs over — the pair tables and both framework maps — rather than by
    delegating the name parse to whichever `http` version the adapter links.

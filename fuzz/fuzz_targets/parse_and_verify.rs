@@ -849,6 +849,7 @@ fuzz_target!(|data: &[u8]| {
         timestamp_unit: TimestampUnit::Seconds,
         encoding: Encoding::Hex,
         prefix: Some("v0="),
+        signed_headers: &[],
         signed_string: |headers, raw_body| {
             let ts = headers.get("X-Slack-Request-Timestamp").unwrap_or_default();
             let mut signed = Vec::with_capacity(3 + ts.len() + 1 + raw_body.len());
@@ -885,6 +886,7 @@ fuzz_target!(|data: &[u8]| {
         timestamp_unit: TimestampUnit::Seconds,
         encoding,
         prefix: None,
+        signed_headers: &[],
         signed_string: |_headers, raw_body| raw_body.to_vec(),
     };
     for encoding in [
@@ -920,6 +922,7 @@ fuzz_target!(|data: &[u8]| {
         timestamp_unit: TimestampUnit::Millis,
         encoding: Encoding::Hex,
         prefix: Some("sha256="),
+        signed_headers: &[],
         signed_string: |headers, raw_body| {
             let ts = headers.get("X-Ms-Timestamp").unwrap_or_default();
             let mut signed = Vec::with_capacity(ts.len() + 1 + raw_body.len());
