@@ -648,7 +648,14 @@ over-cap body is a `413`, not a `400`.
   provided (spec §5.7) but `#[ignore]`d due to runner noise; run it locally
   with `cargo test --release --all-features -- constant_time_comparison --ignored`.
 - Timestamp-based replay protection is enabled by default wherever the
-  provider supports it (`VerifyOptions::max_age`, default 5 minutes).
+  provider supports it (`VerifyOptions::max_age`, default 5 minutes). Turning it
+  *off* is a named builder — `VerifyOptions::without_replay_protection()` — not
+  a `max_age: None` that reads like ordinary config while its effect is
+  permanent acceptance: `with_max_age(None)` still works, but nothing at the
+  call site says what it costs, and once the window is gone
+  `TimestampOutOfTolerance` cannot be produced, so a captured request replays
+  forever with no signal. For a delivery that is merely *late*, widen the window
+  with `with_max_age` instead — that keeps the check in place.
 - A timestamped provider's signature covers its own timestamp, so a test cannot
   age a delivery by editing the header — the HMAC stops matching before the
   window is ever reached. `FixedClock` is the deterministic clock for asserting
