@@ -70,10 +70,7 @@ pub(crate) fn verify(
     let matched = verify_hmac_sha256_any(
         secret.as_bytes(),
         &signed_string,
-        parsed
-            .signatures
-            .iter()
-            .map(Vec::as_slice),
+        parsed.signatures.iter().map(Vec::as_slice),
     );
 
     if !matched {

@@ -2074,9 +2074,10 @@ mod tests {
         }
 
         fn get(&self) -> Vec<Rejection> {
-            self.0
-                .lock()
-                .map_or_else(|_| unreachable!("nothing else holds the lock"), |seen| seen.clone())
+            self.0.lock().map_or_else(
+                |_| unreachable!("nothing else holds the lock"),
+                |seen| seen.clone(),
+            )
         }
     }
 

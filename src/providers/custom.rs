@@ -1937,8 +1937,7 @@ mod tests {
         for (hash, encoding, signature, label) in cases {
             let result = verify_raw(hash, encoding, signature);
             match result {
-                Err(VerifyError::BadEncoding { .. } | VerifyError::MalformedHeader { .. }) => {
-                }
+                Err(VerifyError::BadEncoding { .. } | VerifyError::MalformedHeader { .. }) => {}
                 other => panic!("expected a decode failure for {label}, got {other:?}"),
             }
         }
