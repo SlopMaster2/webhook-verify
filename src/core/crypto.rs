@@ -253,7 +253,7 @@ pub(crate) fn verify_sha256_prepended_key(
 /// Verifies an Ed25519 `signature` over `message` against a 32-byte
 /// compressed Edwards public key.
 ///
-/// Used for asymmetric schemes (Discord) where the [`Secret`](crate::Secret)
+/// Used for Discord's Ed25519 scheme, where the [`Secret`](crate::Secret)
 /// holds a *public* key. Fails closed: malformed keys/signatures (wrong
 /// length, undecodable point, non-canonical `S`) verify as `false` rather
 /// than erroring; callers that need to distinguish operator misconfiguration

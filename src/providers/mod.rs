@@ -1394,9 +1394,10 @@ pub(crate) fn provider_sent_duplicate_headers(provider: &Provider) -> &'static [
 /// * `headers` — request headers via [`HeaderMap`] (any framework's map works).
 /// * `raw_body` — the **exact bytes** received. Never re-serialize or
 ///   re-encode the body before calling this.
-/// * `secret` — the shared secret configured with the provider. For asymmetric
-///   schemes (Discord) it holds the public key instead; each provider's docs
-///   state which applies.
+/// * `secret` — the shared secret configured with the provider. For Discord it
+///   holds the Ed25519 public key instead, and PayPal and SendGrid ignore it
+///   entirely in favour of [`VerifyOptions::verifying_material`]; each
+///   provider's docs state which applies.
 /// * `options` — tolerance/clock knobs; see [`VerifyOptions`].
 ///
 /// Errors are structured ([`VerifyError`]) and never contain secret material.
@@ -1553,14 +1554,17 @@ pub(crate) fn verify_ref(
 
 /// Whether `provider`'s scheme is keyed by the [`Secret`] argument at all.
 ///
-/// PayPal and SendGrid are the two asymmetric schemes: they check a signature
-/// against caller-supplied key material in
-/// [`VerifyOptions::verifying_material`] and ignore `Secret` entirely, so an
+/// PayPal and SendGrid are the two providers that ignore `Secret` entirely:
+/// they check a signature against caller-supplied key material in
+/// [`VerifyOptions::verifying_material`], so an
 /// unusable `Secret` is neither a misconfiguration nor a security problem for
 /// them (a test in `paypal`'s module pins that "any (even pathological)
 /// secret is accepted and unused"). Every other provider keys its MAC — or,
 /// for Discord, its Ed25519 verifying key — with `Secret`, so an unusable one
-/// is always operator misconfiguration.
+/// is always operator misconfiguration. Discord's scheme is asymmetric too,
+/// so this exclusion is keyed on "ignores `Secret`" rather than on the
+/// scheme's crypto: those are not the same set, and a count of public-key
+/// schemes goes stale the next time one ships.
 ///
 /// **A provider added here that ignores `Secret` must be added to this
 /// `matches!`**, and a provider added here that does use `Secret` needs no
@@ -1661,19 +1665,22 @@ fn unusable_secret_reason(secret: &Secret) -> Option<&'static str> {
 /// for the *separate* case where the provider's config allows *multiple
 /// distinct keys* to be valid simultaneously (e.g. during key rotation).
 ///
-/// # Asymmetric providers
+/// # Providers that ignore `Secret`
 ///
 /// Rotation via a slice of [`Secret`]s is only meaningful for providers
-/// whose scheme is keyed by a shared secret. The asymmetric providers —
-/// PayPal and SendGrid — ignore the `Secret` entirely: they verify against
+/// whose scheme is keyed by the [`Secret`] argument. PayPal and SendGrid
+/// ignore it entirely: they verify against
 /// [`VerifyOptions::verifying_material`] (and for PayPal, `webhook_id`),
 /// so every element of the slice behaves identically and `verify_any` gives
 /// them no rotation semantics. It still degrades safely: structural errors
 /// (`MissingContext` for absent key material, `MissingHeader`, etc.) are
-/// returned immediately, so passing an asymmetric provider here cannot
-/// silently panic or loop. For genuine rotation of asymmetric key material,
-/// supply the current key via [`VerifyOptions::verifying_material`] and
-/// re-verify when it rotates, rather than using `verify_any`.
+/// returned immediately, so passing one of them here cannot silently panic
+/// or loop. Discord's scheme is asymmetric as well, but its Ed25519
+/// verifying key travels in `Secret`, so a Discord key rotation works
+/// through `verify_any` like a shared-secret one. For genuine rotation of
+/// PayPal/SendGrid key material, supply the current key via
+/// [`VerifyOptions::verifying_material`] and re-verify when it rotates,
+/// rather than using `verify_any`.
 ///
 /// # Empty slice
 ///
@@ -2402,10 +2409,12 @@ mod tests {
     }
 
     #[test]
-    fn uses_secret_excludes_exactly_the_asymmetric_providers() {
+    fn uses_secret_excludes_exactly_the_providers_that_ignore_it() {
         // `uses_secret` is a hand-maintained exclusion list, so pin both
-        // directions: the two public-key schemes ignore `Secret` entirely,
-        // and every other named provider keys its scheme with it.
+        // directions: PayPal and SendGrid ignore `Secret` entirely, and every
+        // other named provider keys its scheme with it — Discord included,
+        // whose scheme is asymmetric but whose verifying key travels in
+        // `Secret`.
         for provider in provider_list() {
             let expected = !matches!(provider, Provider::PayPal | Provider::SendGrid);
             assert_eq!(
@@ -3692,6 +3701,139 @@ mod tests {
              variant that ships; claims about variants that do not exist: \
              {phantom_variants:?}"
         );
+    }
+
+    /// Whether `clause` names `provider` as a word of its own — in the variant
+    /// ident or the `Display` brand — rather than as a substring of a longer
+    /// word (`except` must not count as a mention of `Provider::X`).
+    fn clause_names(clause: &str, provider: &Provider) -> bool {
+        for needle in [format!("{provider:?}"), provider.to_string()] {
+            let mut from = 0usize;
+            while let Some(found) = clause[from..].find(needle.as_str()) {
+                let at = from + found;
+                let before = clause[..at].chars().next_back();
+                let after = clause[at + needle.len()..].chars().next();
+                let on_a_boundary = match (before, after) {
+                    (None, None) => true,
+                    (None, Some(after)) => !after.is_alphanumeric(),
+                    (Some(before), None) => !before.is_alphanumeric(),
+                    (Some(before), Some(after)) => {
+                        !before.is_alphanumeric() && !after.is_alphanumeric()
+                    }
+                };
+                if on_a_boundary {
+                    return true;
+                }
+                from = at + needle.len();
+            }
+        }
+        false
+    }
+
+    /// The word immediately before byte `at` in `text`, with punctuation
+    /// stripped from both ends (`"… the only asymmetric"` → `only`).
+    fn word_before(text: &str, at: usize) -> &str {
+        let trimmed = text[..at].trim_end_matches(|c: char| !c.is_alphanumeric());
+        let start = trimmed
+            .char_indices()
+            .rev()
+            .find(|(_, c)| !c.is_alphanumeric())
+            .map_or(0, |(index, c)| index + c.len_utf8());
+        &trimmed[start..]
+    }
+
+    #[test]
+    fn spec_section_four_scopes_the_secret_exemption_by_who_ignores_secret() {
+        // `spec.md` §4.7's item 7 scopes the entry-point empty/whitespace/NUL
+        // secret rule by naming the providers exempt from it, and it used to
+        // name them as "the two asymmetric schemes, PayPal and SendGrid" — a
+        // count that went stale the moment PayPal and SendGrid shipped, while
+        // §4.8 of the same document still called Discord "the only
+        // asymmetric-scheme provider". Discord *is* asymmetric and is *not*
+        // exempt: its Ed25519 verifying key travels in `Secret`, so the check
+        // reaches it like any HMAC key. The criterion is `uses_secret`, not the
+        // crypto, so this pins the clause to `uses_secret` in both directions
+        // and keeps it from being re-scoped by a count that a fourth
+        // public-key scheme would invalidate.
+        let spec = include_str!("../../spec.md");
+        let section_start = match spec.find("## 4. Security requirements (non-negotiable)") {
+            Some(at) => at,
+            None => panic!("spec.md must keep its `## 4. Security requirements` heading"),
+        };
+        let section = match spec[section_start..].find("\n## ") {
+            Some(offset) => &spec[section_start..section_start + offset],
+            None => &spec[section_start..],
+        };
+        // Whitespace-flattened, so a guard's anchors are stable against the
+        // prose being re-flowed to a different line width.
+        let flat = section.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        const CLAUSE_START: &str = "every provider except";
+        const CLAUSE_END: &str = "which ignore `Secret`";
+        let clause_start = match flat.find(CLAUSE_START) {
+            Some(at) => at + CLAUSE_START.len(),
+            None => panic!(
+                "spec.md §4.7 must scope the empty/whitespace/NUL-secret rule with \
+                 `{CLAUSE_START} … {CLAUSE_END} …` so this guard can find the \
+                 exemption clause"
+            ),
+        };
+        let after_start = &flat[clause_start..];
+        let clause_end = match after_start.find(CLAUSE_END) {
+            Some(at) => at,
+            None => panic!(
+                "spec.md §4.7 must end its exemption clause with `{CLAUSE_END}` so \
+                 this guard can find it"
+            ),
+        };
+        let clause = after_start[..clause_end].trim();
+
+        let mut named: Vec<String> = provider_list()
+            .iter()
+            .filter(|provider| clause_names(clause, provider))
+            .map(|provider| format!("{provider:?}"))
+            .collect();
+        let mut exempt: Vec<String> = provider_list()
+            .iter()
+            .filter(|provider| !uses_secret(**provider))
+            .map(|provider| format!("{provider:?}"))
+            .collect();
+        named.sort_unstable();
+        exempt.sort_unstable();
+        assert_eq!(
+            named, exempt,
+            "spec.md §4.7's exemption clause (`{clause}`) must name exactly the \
+             providers `uses_secret` excludes — the ones that ignore `Secret` — \
+             spelled with their variant names, so a third one cannot ship in \
+             silence"
+        );
+        assert!(
+            !clause.contains("asymmetric"),
+            "spec.md §4.7's exemption clause (`{clause}`) must scope the rule by \
+             who ignores `Secret`, not by the scheme being asymmetric: Discord is \
+             asymmetric and is *not* exempt (its verifying key travels in \
+             `Secret`)"
+        );
+
+        // The same document paired §4.7's count of two with §4.8's claim that
+        // Discord was the only asymmetric-scheme provider, and both were wrong
+        // for the same reason: a count of public-key schemes goes stale the
+        // next time one ships. No sentence in the spec may scope that set by a
+        // count; scope by who ignores `Secret`, which `uses_secret` pins above.
+        const COUNT_WORDS: &[&str] = &[
+            "only", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "both", "all", "each", "every",
+        ];
+        for (at, _) in spec.match_indices("asymmetric") {
+            let word = word_before(spec, at);
+            assert!(
+                !COUNT_WORDS.contains(&word),
+                "spec.md scopes the crate's asymmetric schemes by a count (`… {word} \
+                 asymmetric …`, byte {at}); scope the claims that matter by who \
+                 ignores `Secret` instead, so a newly shipped public-key scheme \
+                 cannot leave the sentence wrong"
+            );
+        }
     }
 
     /// The text of `spec.md` §3, the per-provider signing-scheme section.
@@ -8082,10 +8224,10 @@ pub struct S {
     /// decide whether `Secret` is load-bearing for a scheme got the wrong
     /// answer from both.
     ///
-    /// [`uses_secret_excludes_exactly_the_asymmetric_providers`] pins the code
-    /// side of that same fact; this guard pins the prose side, and derives the
-    /// set from `uses_secret` so a fourth public-key scheme is covered the next
-    /// time one is added.
+    /// [`uses_secret_excludes_exactly_the_providers_that_ignore_it`] pins the
+    /// code side of that same fact; this guard pins the prose side, and derives
+    /// the set from `uses_secret` so a fourth public-key scheme is covered the
+    /// next time one is added.
     ///
     /// Only members of the set are checked, and only for naming the *other*
     /// members. Discord holds its public key in `Secret`, so it is not in the

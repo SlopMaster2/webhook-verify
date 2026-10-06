@@ -379,15 +379,19 @@ returns `Ok(())` if any one of them verifies. Its error aggregation rules:
   already yields `SignatureMismatch` whenever a usable key exists — and it
   gives operators an honest signal that their key configuration is broken.
 
-`verify_any` is meaningful only for **shared-secret** providers. The
-asymmetric providers (PayPal, SendGrid) ignore the `Secret` argument and
-verify against `VerifyOptions::verifying_material` (plus `webhook_id` for
-PayPal), so every element of the slice behaves identically and `verify_any`
-gives them no rotation semantics; it still degrades safely because their
-errors are structural (`MissingContext` for absent key material,
-`MissingHeader`, ...) and returned immediately. Rotating asymmetric key
-material is the caller's job: supply the current key via
-`VerifyOptions::verifying_material` and re-verify when it rotates.
+`verify_any` is meaningful only for providers whose scheme is keyed by the
+`Secret` argument — every provider except PayPal and SendGrid. Discord's
+scheme is asymmetric too, but its Ed25519 verifying key travels in `Secret`,
+so a Discord key rotation is a `Secret` rotation like any other and
+`verify_any` gives it the same window it gives a shared secret. PayPal and
+SendGrid ignore the `Secret` argument and verify against
+`VerifyOptions::verifying_material` (plus `webhook_id` for PayPal), so every
+element of the slice behaves identically and `verify_any` gives them no
+rotation semantics; it still degrades safely because their errors are
+structural (`MissingContext` for absent key material, `MissingHeader`, ...)
+and returned immediately. Rotating that key material is the caller's job:
+supply the current key via `VerifyOptions::verifying_material` and
+re-verify when it rotates.
 
 ### 2.2 `CustomScheme`
 
@@ -3452,10 +3456,10 @@ ambiguity).
    matters for known real-world timing attacks.
 7. **An empty, whitespace-only, or NUL-only secret fails closed.** Every
    provider whose scheme is keyed by the `Secret` argument — that is, every
-   provider except the two asymmetric schemes, PayPal and SendGrid, which
-   ignore `Secret` and verify against `VerifyOptions::verifying_material` —
-   rejects such a secret with `InvalidSecret` before any request parsing or
-   signature work. An empty HMAC (or plain-digest) key is not a weak key but
+   provider except PayPal and SendGrid, which ignore `Secret` entirely and
+   verify against `VerifyOptions::verifying_material` — rejects such a
+   secret with `InvalidSecret` before any request parsing or signature work.
+   An empty HMAC (or plain-digest) key is not a weak key but
    *no* key: the resulting signature is reproducible by anyone who can read
    the request, so accepting one turns `verify()` into an unconditional `Ok(())`
    for a forged delivery. The check lives once, in the `verify_ref` dispatch
@@ -3573,8 +3577,10 @@ ambiguity).
    the ones the all-NUL predicate has to be re-applied to, since the raw secret
    and the decoded key are different byte strings there.)
 8. **A low-order (weak) Ed25519 public key fails closed, and is an operator
-   error.** Discord is the only asymmetric-scheme provider, and the shape that
-   matters for it is not a degenerate MAC key but a *point of small order*:
+   error.** Discord's scheme is asymmetric and its verifying key travels in
+   `Secret` — unlike PayPal's and SendGrid's, which come from
+   `VerifyOptions::verifying_material` — and the shape that matters for it
+   is not a degenerate MAC key but a *point of small order*:
    `VerifyingKey::from_bytes` only checks that the 32 bytes decompress (ZIP-215),
    and `ed25519-dalek`'s default `verify` is the non-strict equation
    `[-k]A + [s]B == R` with no cofactor clearing. A low-order `A` therefore
