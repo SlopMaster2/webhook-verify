@@ -2076,8 +2076,7 @@ mod tests {
         fn get(&self) -> Vec<Rejection> {
             self.0
                 .lock()
-                .map(|seen| seen.clone())
-                .unwrap_or_else(|_| unreachable!("nothing else holds the lock"))
+                .map_or_else(|_| unreachable!("nothing else holds the lock"), |seen| seen.clone())
         }
     }
 
@@ -2373,7 +2372,7 @@ mod tests {
     /// statement, while the implementation reads through a streaming `Limited`
     /// that bounds the buffering too. `oversized_chunked_body_is_stopped_before_it_is_fully_read`
     /// pins the behavior; this pins the doc to it, so the next change to the read
-    /// path cannot leave the type page promising a weaker DoS bound than the code
+    /// path cannot leave the type page promising a weaker `DoS` bound than the code
     /// provides (issue #372).
     #[test]
     fn verify_layer_type_doc_promises_the_streaming_limit() {

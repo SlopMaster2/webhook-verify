@@ -73,7 +73,7 @@ pub(crate) fn verify(
         parsed
             .signatures
             .iter()
-            .map(|signature| signature.as_slice()),
+            .map(Vec::as_slice),
     );
 
     if !matched {
