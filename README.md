@@ -43,7 +43,7 @@ let result = verify(
 
 match result {
     Ok(()) => { /* trusted: safe to process the event */ }
-    Err(e) => { /* reject with 400/401, log e */ }
+    Err(e) => { /* reject with e.rejection_status() (400/401/500), log e */ }
 }
 ```
 
@@ -87,7 +87,11 @@ hand-copied signing-string logic to get wrong.
 4. **Fail closed, explain why.** Errors are structured
    (`VerifyError::{MissingHeader, BadEncoding, SignatureMismatch, TimestampOutOfTolerance, UnsupportedProvider, ...}`)
    so callers can log and alert meaningfully instead of getting a bare
-   `false`.
+   `false`. The HTTP status a rejection should carry is structured too:
+   `VerifyError::rejection_status()` returns the crate's own 400/401/500
+   classification, and both framework adapters build their responses from
+   that same method — so a headless caller and an adapter cannot disagree
+   about what a variant means.
 5. **No unbounded scope creep.** This crate verifies signatures. It does not
    deserialize event payloads, manage retries, store idempotency keys, or
    proxy webhooks. Those are separate, composable concerns (and separate
@@ -479,7 +483,11 @@ then deserialize freely. Verification failures never reach your handler:
 | Signature mismatch / stale timestamp | `401 Unauthorized` |
 | Operator misconfiguration | `500 Internal Server Error` |
 
-Rejection bodies are empty, so the status is all the client learns. To log or
+Rejection bodies are empty, so the status is all the client learns. The
+classification behind that table is public, for a caller who drives `verify()`
+itself instead of going through an adapter:
+`VerifyError::rejection_status()` returns the same raw `u16` (400/401/500),
+and both adapters build their responses from it. To log or
 count the *class* of a rejection server-side, register a hook with
 `VerifyLayer::on_rejection(...)`: it is called with a `Rejection` for every
 request the middleware refuses — `Rejection::Verify` carrying the structured

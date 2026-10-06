@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`VerifyError::rejection_status()`**, the crate's one HTTP status
+  classification (a raw `u16`: `400`/`401`/`500`) for a rejection it
+  produces.
+
+  The classification has existed since the adapters shipped, but only as a
+  private helper compiled under the `tower`/`actix` features
+  (`core::adapter_utils::rejection_status`), so a caller driving `verify()`
+  directly — the crate's headless core usage — had to hand-roll the
+  400/401/500 match, guided by the README's adapter status table. The
+  method is now public on `VerifyError` itself, unconditional (it needs no
+  feature, so it is available in the `no_std + alloc` builds too), and it is
+  what both framework adapters build their rejection responses from, so a
+  headless caller and an adapter cannot disagree about a variant's class.
+
+  The split is about who should be looking at the rejection: a `401` is the
+  attacker-visible signal (wrong signature, stale timestamp), a `500` is the
+  operator's fault worth paging on (feature off, unusable key, missing
+  request context), and a `400` never became a signature question at all.
+  The match is exhaustive, so a new `VerifyError` variant fails to compile
+  until its class is chosen deliberately. Additive only: a new method, no
+  field, variant, or signature touched, so `semver-checks` sees no change.
+  The old private helper is gone — its doc, its tests, and its module
+  listing moved to the method — and a source-scanning test pins both
+  adapters to the shared method.
+
 - **`VerifyOptions::without_replay_protection()`** (issue #387). Turning the
   timestamp replay window off was spelled `with_max_age(None)`, which reads
   like ordinary configuration at the call site while its effect is permanent

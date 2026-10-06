@@ -304,8 +304,28 @@ pub enum VerifyError {
 }
 ```
 
+```rust
+impl VerifyError {
+    /// The raw HTTP status (`u16`: `400`, `401`, or `500`) a rejection for
+    /// this error should carry — the crate's one status classification,
+    /// exported so a caller driving `verify()` itself answers with the same
+    /// status an adapter would. Both framework adapters build their
+    /// rejection response from this method. A raw number rather than an
+    /// `http::StatusCode`, because `VerifyError` lives in the unconditional
+    /// core, which must not depend on either `http` version in play.
+    pub fn rejection_status(&self) -> u16;
+}
+```
+
 Design rules for errors:
 
+- **One status classification.** The 400/401/500 split between malformed
+  request, authentication signal, and operator misconfiguration lives in
+  `VerifyError::rejection_status` alone, and the `tower`/`actix` adapters
+  call it rather than matching the variants themselves, so a caller's own
+  mapping and an adapter's rejection response cannot disagree about a
+  variant's class. The match is exhaustive: adding a variant fails to compile
+  until its class is chosen deliberately.
 - `VerifyError` **never** includes the secret, the raw body, or the computed
   signature in its `Display` output. It may include header *names* and
   numeric skew values.

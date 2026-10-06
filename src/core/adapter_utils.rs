@@ -10,9 +10,8 @@
 //!   (the `http` feature) and [`ambiguous_signature_header_in`] for a caller
 //!   holding a name/value pair table (no features at all) — as well as the
 //!   adapters' internal step, so one implementation serves all three;
-//! * adapter-only glue ([`KeyRing`], `rejection_status`,
-//!   `declared_content_length`), which carries a narrower `cfg` so nothing is
-//!   dead code when no adapter is enabled.
+//! * adapter-only glue ([`KeyRing`], `declared_content_length`), which carries
+//!   a narrower `cfg` so nothing is dead code when no adapter is enabled.
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
@@ -633,46 +632,10 @@ impl fmt::Debug for KeyRing {
     }
 }
 
-/// Maps a verification outcome to its rejection HTTP status code.
-///
-/// Returns the raw numeric status (400/401/500) rather than a framework's
-/// `StatusCode` type because the tower adapter uses `http` 1.x while
-/// actix-web 4 uses `http` 0.2 — two distinct types. Each adapter converts the
-/// number to its own `StatusCode`, so the classification logic (and its
-/// exhaustive match over the in-crate enum) lives in exactly one place.
-///
-/// | Class | Status | Rationale |
-/// |---|---|---|
-/// | `MissingHeader`, `MalformedHeader`, `BadEncoding` | `400` | Malformed request |
-/// | `SignatureMismatch`, `TimestampOutOfTolerance` | `401` | Auth signal |
-/// | `UnsupportedProvider`, `InvalidSecret`, `MissingContext` | `500` | Operator misconfiguration |
-///
-/// Adding a `VerifyError` variant will surface here at compile time so its
-/// status class is chosen deliberately.
-#[cfg(any(feature = "tower", feature = "actix"))]
-#[must_use]
-pub(crate) fn rejection_status(error: &VerifyError) -> u16 {
-    match error {
-        // Malformed request: missing/unparseable signature headers.
-        VerifyError::MissingHeader { .. }
-        | VerifyError::MalformedHeader { .. }
-        | VerifyError::BadEncoding { .. } => 400,
-
-        // Authentication signals: wrong signature or stale timestamp.
-        VerifyError::SignatureMismatch | VerifyError::TimestampOutOfTolerance { .. } => 401,
-
-        // Operator misconfiguration: unsupported/broken configuration, never
-        // the requester's fault. Still rejected — fail closed.
-        VerifyError::UnsupportedProvider
-        | VerifyError::InvalidSecret { .. }
-        | VerifyError::MissingContext { .. } => 500,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[cfg(any(feature = "tower", feature = "actix"))]
-    use super::{KeyRing, rejection_status};
+    use super::KeyRing;
     // The helper itself is available to either adapter, but its tests here
     // build an `http` 1.x `HeaderMap`, so they are `http`-gated as well. The
     // `actix` feature does not enable `http` (actix carries its own 0.2 header
@@ -681,8 +644,6 @@ mod tests {
     // built that combination (issue #335).
     #[cfg(all(feature = "http", any(feature = "tower", feature = "actix")))]
     use super::declared_content_length;
-    #[cfg(any(feature = "tower", feature = "actix"))]
-    use crate::VerifyError;
     #[cfg(all(not(feature = "std"), any(feature = "tower", feature = "actix")))]
     use crate::test_helpers::*;
     // The README doc-drift guards below build strings and slices of blocks, so
@@ -912,60 +873,6 @@ mod tests {
             // rotation window is open.
             assert_eq!(debug.matches("redacted").count(), 2, "{debug}");
         }
-    }
-
-    #[cfg(any(feature = "tower", feature = "actix"))]
-    fn status_of(error: VerifyError) -> u16 {
-        rejection_status(&error)
-    }
-
-    #[cfg(any(feature = "tower", feature = "actix"))]
-    #[test]
-    fn malformed_request_class_maps_to_400() {
-        assert_eq!(
-            status_of(VerifyError::MissingHeader {
-                header: "X-Signature"
-            }),
-            400
-        );
-        assert_eq!(
-            status_of(VerifyError::MalformedHeader {
-                header: "X-Signature",
-                reason: "boom"
-            }),
-            400
-        );
-        assert_eq!(status_of(VerifyError::BadEncoding { reason: "boom" }), 400);
-    }
-
-    #[cfg(any(feature = "tower", feature = "actix"))]
-    #[test]
-    fn auth_signal_class_maps_to_401() {
-        assert_eq!(status_of(VerifyError::SignatureMismatch), 401);
-        assert_eq!(
-            status_of(VerifyError::TimestampOutOfTolerance {
-                skew: std::time::Duration::from_secs(1000),
-                max_age: std::time::Duration::from_secs(300),
-            }),
-            401
-        );
-    }
-
-    #[cfg(any(feature = "tower", feature = "actix"))]
-    #[test]
-    fn operator_misconfiguration_class_maps_to_500() {
-        // UnsupportedProvider keeps its 500 class even once a feature (e.g.
-        // `paypal`) implements the provider — the mapping is about the error
-        // class, not the current build's provider set.
-        assert_eq!(status_of(VerifyError::UnsupportedProvider), 500);
-        assert_eq!(
-            status_of(VerifyError::InvalidSecret { reason: "boom" }),
-            500
-        );
-        assert_eq!(
-            status_of(VerifyError::MissingContext { reason: "boom" }),
-            500
-        );
     }
 
     /// Contentful's self-describing signed-header list: the ambiguity scan must

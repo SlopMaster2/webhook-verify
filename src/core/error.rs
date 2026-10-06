@@ -127,6 +127,84 @@ impl VerifyError {
     /// ```
     pub const AMBIGUOUS_HEADER_REASON: &'static str =
         "header present multiple times with different values";
+
+    /// The HTTP status a rejection for this error should carry, as a raw
+    /// `u16`: `400`, `401`, or `500`.
+    ///
+    /// | Class | Variants | Status |
+    /// |---|---|---|
+    /// | Malformed request | [`MissingHeader`](VerifyError::MissingHeader), [`MalformedHeader`](VerifyError::MalformedHeader), [`BadEncoding`](VerifyError::BadEncoding) | `400 Bad Request` |
+    /// | Authentication signal | [`SignatureMismatch`](VerifyError::SignatureMismatch), [`TimestampOutOfTolerance`](VerifyError::TimestampOutOfTolerance) | `401 Unauthorized` |
+    /// | Operator misconfiguration | [`UnsupportedProvider`](VerifyError::UnsupportedProvider), [`InvalidSecret`](VerifyError::InvalidSecret), [`MissingContext`](VerifyError::MissingContext) | `500 Internal Server Error` |
+    ///
+    /// The split is about *who should be looking at it*, not about whether the
+    /// request is rejected — every class is a rejection. A `401` is the signal
+    /// an attacker-visible forgery or a stale replay produces; a `500` is the
+    /// operator's fault (a feature that is off, an unusable key, request
+    /// context nobody supplied) and is the one worth alerting on, because it
+    /// means the integration is broken rather than under attack; a `400` is a
+    /// request that never became a signature question at all.
+    ///
+    /// A raw `u16` rather than an `http::StatusCode`, because [`VerifyError`]
+    /// lives in this crate's unconditional core, which must not depend on
+    /// either `http` version in play — `http` 1.x for tower/axum and `http`
+    /// 0.2 for actix-web 4. Convert at the edge with
+    /// `StatusCode::from_u16(error.rejection_status())`.
+    ///
+    /// Both framework adapters build their rejection response from this one
+    /// method, so a caller's own classification and an adapter's response
+    /// cannot drift apart. The match is exhaustive over the variants: adding
+    /// one fails to compile here until its class is chosen deliberately,
+    /// rather than silently landing in one.
+    ///
+    /// ```
+    /// use webhook_verify::{Provider, Secret, VerifyError, verify};
+    ///
+    /// let headers: Vec<(String, String)> = vec![(
+    ///     "X-Hub-Signature-256".to_string(),
+    ///     "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
+    ///         .to_string(),
+    /// )];
+    ///
+    /// // The same delivery the crate-level example accepts for "Hello, World!",
+    /// // with one byte changed — a forgery, so a `401`.
+    /// let tampered = verify(
+    ///     Provider::GitHub,
+    ///     &headers,
+    ///     b"Hello, World?",
+    ///     &Secret::new("It's a Secret to Everybody"),
+    ///     Default::default(),
+    /// );
+    /// assert_eq!(tampered, Err(VerifyError::SignatureMismatch));
+    /// assert_eq!(
+    ///     tampered.map_err(|error| error.rejection_status()),
+    ///     Err(401),
+    /// );
+    ///
+    /// // A misconfiguration is a `500`, which is what makes it page.
+    /// assert_eq!(
+    ///     VerifyError::MissingContext { reason: "no request_url" }.rejection_status(),
+    ///     500,
+    /// );
+    /// ```
+    #[must_use]
+    pub fn rejection_status(&self) -> u16 {
+        match self {
+            // Malformed request: missing/unparseable signature headers.
+            VerifyError::MissingHeader { .. }
+            | VerifyError::MalformedHeader { .. }
+            | VerifyError::BadEncoding { .. } => 400,
+
+            // Authentication signals: wrong signature or stale timestamp.
+            VerifyError::SignatureMismatch | VerifyError::TimestampOutOfTolerance { .. } => 401,
+
+            // Operator misconfiguration: unsupported/broken configuration,
+            // never the requester's fault. Still rejected — fail closed.
+            VerifyError::UnsupportedProvider
+            | VerifyError::InvalidSecret { .. }
+            | VerifyError::MissingContext { .. } => 500,
+        }
+    }
 }
 
 impl fmt::Display for VerifyError {
@@ -242,6 +320,103 @@ mod tests {
             assert!(
                 source.contains("VerifyError::AMBIGUOUS_HEADER_REASON"),
                 "{name} must fill the §4.4 rejection reason from the shared constant",
+            );
+        }
+    }
+
+    /// The three status classes, pinned variant by variant.
+    ///
+    /// These lived in `core::adapter_utils` beside the private
+    /// `rejection_status` they exercised, so they only ran in a build with an
+    /// adapter feature on. The classification is now public core API — the one
+    /// a caller driving `verify()` itself reads — so the tests are
+    /// unconditional and cover the same `test-nostd` runs as the rest of this
+    /// module (`spec.md` §6).
+    ///
+    /// Deliberately **not** `#[cfg(feature = "std")]`: `Duration` here is
+    /// `core::time::Duration`, which is the type the variant carries in every
+    /// configuration.
+    #[test]
+    fn malformed_request_class_maps_to_400() {
+        assert_eq!(
+            VerifyError::MissingHeader {
+                header: "X-Signature"
+            }
+            .rejection_status(),
+            400
+        );
+        assert_eq!(
+            VerifyError::MalformedHeader {
+                header: "X-Signature",
+                reason: "boom"
+            }
+            .rejection_status(),
+            400
+        );
+        assert_eq!(
+            VerifyError::BadEncoding { reason: "boom" }.rejection_status(),
+            400
+        );
+    }
+
+    /// See [`malformed_request_class_maps_to_400`]; the auth class is the one
+    /// an attacker-visible forgery or a stale replay produces.
+    #[test]
+    fn auth_signal_class_maps_to_401() {
+        assert_eq!(VerifyError::SignatureMismatch.rejection_status(), 401);
+        assert_eq!(
+            VerifyError::TimestampOutOfTolerance {
+                skew: Duration::from_secs(1000),
+                max_age: Duration::from_secs(300),
+            }
+            .rejection_status(),
+            401
+        );
+    }
+
+    /// See [`malformed_request_class_maps_to_400`]; the `500` class is the one
+    /// worth alerting on, because it means the integration is broken rather
+    /// than under attack.
+    #[test]
+    fn operator_misconfiguration_class_maps_to_500() {
+        // UnsupportedProvider keeps its 500 class even once a feature (e.g.
+        // `paypal`) implements the provider — the mapping is about the error
+        // class, not the current build's provider set.
+        assert_eq!(VerifyError::UnsupportedProvider.rejection_status(), 500);
+        assert_eq!(
+            VerifyError::InvalidSecret { reason: "boom" }.rejection_status(),
+            500
+        );
+        assert_eq!(
+            VerifyError::MissingContext { reason: "boom" }.rejection_status(),
+            500
+        );
+    }
+
+    /// Both framework adapters build their rejection response from
+    /// [`VerifyError::rejection_status`], so a caller's own classification and
+    /// an adapter's response cannot drift apart.
+    ///
+    /// Reads the adapter sources rather than trusting review: nothing in the
+    /// type system stops a future edit from hand-writing the 400/401/500 match
+    /// inside one adapter, and the two would then disagree about the class of
+    /// a new variant while every test above still passed — the same hazard
+    /// `the_ambiguity_rejection_reason_has_one_code_spelling` guards for the
+    /// §4.4 `reason` string.
+    ///
+    /// Deliberately **not** feature-gated: `include_str!` resolves at compile
+    /// time, so the guard holds in a build that compiles neither adapter.
+    #[test]
+    fn both_adapters_take_their_rejection_status_from_the_shared_method() {
+        for (name, source) in [
+            ("src/tower.rs", include_str!("../tower.rs")),
+            ("src/actix.rs", include_str!("../actix.rs")),
+        ] {
+            assert!(
+                source.contains(".rejection_status()"),
+                "{name} must build its rejection response from \
+                 `VerifyError::rejection_status`, the crate's one status \
+                 classification"
             );
         }
     }

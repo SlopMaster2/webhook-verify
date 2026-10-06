@@ -15,8 +15,8 @@
 // `std`). Both entry points share the one scan implementation, which is what
 // keeps a caller, the `tower` adapter and the `actix` adapter from drifting
 // apart on what counts as ambiguous — so the module is unconditional, and the
-// adapter-only helpers inside it (`rejection_status`,
-// `declared_content_length`, `KeyRing`) carry their own narrower `cfg`.
+// adapter-only helpers inside it (`declared_content_length`, `KeyRing`) carry
+// their own narrower `cfg`.
 pub(crate) mod adapter_utils;
 pub(crate) mod crypto;
 pub(crate) mod error;
