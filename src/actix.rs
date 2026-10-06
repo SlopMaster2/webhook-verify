@@ -172,7 +172,7 @@ use actix_web::{
 };
 
 use crate::core::adapter_utils::{
-    KeyRing, declared_content_length, find_ambiguous_signature_header, rejection_status,
+    KeyRing, declared_content_length, find_ambiguous_signature_header,
 };
 use crate::{HeaderMap, Provider, Secret, VerifyError, VerifyOptions};
 
@@ -450,10 +450,11 @@ impl ResponseError for WebhookVerificationError {
         match &self.0 {
             Rejection::BodyRead => StatusCode::BAD_REQUEST,
             Rejection::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-            // The status class is a hard-coded constant (400/401/500), so
-            // conversion cannot fail; the fallback still fails closed with
-            // 500 if it ever did.
-            Rejection::Verify(error) => StatusCode::from_u16(rejection_status(error))
+            // The status class is a fixed `u16` (400/401/500) from
+            // `VerifyError::rejection_status` — the same classification a
+            // direct `verify()` caller reads — so conversion cannot fail; the
+            // fallback still fails closed with 500 if it ever did.
+            Rejection::Verify(error) => StatusCode::from_u16(error.rejection_status())
                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
         }
     }
