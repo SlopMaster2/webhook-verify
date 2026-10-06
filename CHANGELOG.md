@@ -725,6 +725,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The spec and the docs counted the crate's asymmetric schemes, and both
+  counts were wrong.** `spec.md` §4.7 scoped the entry-point
+  empty/whitespace/NUL-secret rule as "every provider except the two
+  asymmetric schemes, PayPal and SendGrid", while §4.8 of the same document
+  opened with "Discord is the only asymmetric-scheme provider" — three
+  asymmetric schemes ship, and Discord is one of them *and* is not exempt
+  from §4.7's rule. Both sentences were true when written and neither
+  survived the others' arrival.
+
+  The criterion was never the crypto: it is whether the scheme reads the
+  `Secret` argument at all (`uses_secret` in the dispatch), so every
+  count-scoped sentence now says that instead. §2.1's `verify_any` paragraph
+  no longer calls PayPal and SendGrid "the asymmetric providers" (or the
+  set "shared-secret providers", which Discord's rotation is not) — Discord's
+  Ed25519 verifying key travels in `Secret`, so a Discord key rotation is a
+  `Secret` rotation like any other; §4.7's exemption clause names the two
+  providers that ignore `Secret` directly; §4.8 describes which key material
+  each scheme reads rather than ranking the set. The same drift in the code
+  docs is fixed with them: `uses_secret`'s own doc, `verify()`'s `secret`
+  bullet, `verify_any`'s section (now headed "Providers that ignore
+  `Secret`"), and `verify_ed25519`'s "asymmetric schemes (Discord)".
+
+  Pinned by `spec_section_four_scopes_the_secret_exemption_by_who_ignores_secret`,
+  which derives the exempt set from `uses_secret` in both directions and
+  fails on any count-scoped sentence about the asymmetric set anywhere in
+  the spec — so a fourth public-key scheme ships as a prose update rather
+  than a second stale count. The test that pins `uses_secret` itself is
+  renamed from `uses_secret_excludes_exactly_the_asymmetric_providers` to
+  `uses_secret_excludes_exactly_the_providers_that_ignore_it`, because the
+  old name asserted the very claim this fixes.
+
 - **`Twilio`: a `?` inside the URL fragment was read as a query delimiter**
   (issue #384). `body_sha256_param` searched for the `?` first and cut the
   fragment off
