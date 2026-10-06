@@ -179,6 +179,22 @@ fn with_max_age(self, max_age: impl Into<Option<Duration>>) -> Self;
 // `without_replay_protection()` is the same state under a name that greps.
 fn without_replay_protection(self) -> Self;
 
+// The clock setter takes the clock itself rather than an `Option<..>`:
+// `Arc<dyn Clock>` is a concrete expected type, so `Arc::new(FixedClock(..))`
+// coerces at the call site and the ordinary call needs no `Some(..)` wrapper
+// (issue #390). The `impl Into<Option<..>>` widening `with_max_age` got cannot
+// be applied here — an unsized coercion does not happen where the expected
+// type is a generic parameter, so that signature would reject the very calls
+// that compile today instead of widening them.
+fn with_clock(self, clock: Arc<dyn Clock>) -> Self;
+
+// Clearing the injected clock therefore has its own named builder: the setter
+// has no `None` spelling, and the direction reads where it is written, like
+// `without_replay_protection()`. It restores the *default* source of "now"
+// (wall clock under `std`, reads 0 on `no_std + alloc`) rather than removing
+// any protection (§4's loud-over-silent bias, in the harmless direction).
+fn without_injected_clock(self) -> Self;
+
 impl core::str::FromStr for Provider {
     type Err = ProviderParseError;
     // Case-insensitive match on the canonical Display name of each variant
