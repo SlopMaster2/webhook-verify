@@ -422,6 +422,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`VerifyOptions::with_max_age` takes the bare duration** (issue #386). The
+  parameter widens from `Option<Duration>` to `impl Into<Option<Duration>>`,
+  so the ordinary call no longer needs a `Some(..)` wrapper that carries no
+  information — `VerifyOptions::default().with_max_age(Duration::from_secs(600))`
+  — while both spellings that compiled before keep compiling unchanged:
+  `Some(..)` and `None` each resolve through the reflexive `From<T> for T`
+  impl, and the bare value through `From<T> for Option<T>`. Nothing narrows,
+  so `with_max_age(None)` still turns the replay window off and
+  `without_replay_protection()` remains the spelling the docs point callers at
+  for that direction.
+
+  `with_clock` deliberately keeps `Option<Arc<dyn Clock>>` (issue #390). A
+  trait object sits behind that parameter, and an unsized coercion such as
+  `Arc<FixedClock> -> Arc<dyn Clock>` does not happen where the expected type
+  is a generic parameter, so `impl Into<Option<Arc<dyn Clock>>>` would break
+  `with_clock(Some(Arc::new(..)))` — the spelling in the crate's own `Clock`
+  docs — instead of widening it.
+
 - **`VerifyLayer::with_max_body_size` now bounds the buffered body, not just
   the signature work** (issue #368). On the tower adapter (which also serves
   axum) the limit was applied *after* the body had been collected: a request

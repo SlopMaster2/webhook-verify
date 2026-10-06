@@ -49,7 +49,7 @@
 //! shared default is strictly stronger, and the timestamp is HMAC-covered so
 //! an attacker cannot freshen it (`spec.md` §3). Callers wanting Box's
 //! prescribed window can match it with
-//! `VerifyOptions::with_max_age(Some(Duration::from_secs(600)))`.
+//! `VerifyOptions::with_max_age(Duration::from_secs(600))`.
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 

@@ -519,7 +519,7 @@ pub enum Provider {
     /// dot, then the raw body. The timestamp is HMAC-covered, so the shared
     /// `max_age` replay window applies. Calendly's docs use a 180-second
     /// tolerance; callers can match it with
-    /// `VerifyOptions::with_max_age(Some(Duration::from_secs(180)))` (the crate
+    /// `VerifyOptions::with_max_age(Duration::from_secs(180))` (the crate
     /// default is 300s). Only a single `v1` signature is accepted — Calendly's
     /// docs define no rotation list.
     Calendly,
@@ -1707,7 +1707,7 @@ fn unusable_secret_reason(secret: &Secret) -> Option<&'static str> {
 ///     &secrets,
 ///     // The example uses a fixed historical timestamp; disable the replay
 ///     // window so the real wall clock during a `cargo test` run doesn't matter.
-///     VerifyOptions::default().with_max_age(None),
+///     VerifyOptions::default().without_replay_protection(),
 /// );
 ///
 /// assert_eq!(result, Ok(()));
