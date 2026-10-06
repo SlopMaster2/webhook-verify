@@ -23,9 +23,9 @@ use std::time::SystemTime;
 ///
 /// # Testing a replay window
 ///
-/// A timestamped provider's signature covers its own timestamp, so a test
-/// cannot exercise the window by rewriting the header alone — the HMAC stops
-/// matching. Injecting a clock is what makes both halves of the window
+/// A built-in timestamped provider's signature covers its own timestamp, so a
+/// test cannot exercise the window by rewriting the header alone — the HMAC
+/// stops matching. Injecting a clock is what makes both halves of the window
 /// assertable, and [`FixedClock`] is the ready-made clock for it: pin "now"
 /// to the instant the signature was minted over, then move it and watch the
 /// delivery go stale.
@@ -81,11 +81,12 @@ impl Clock for SystemClock {
 
 /// A [`Clock`] pinned to a fixed instant, for deterministic tests.
 ///
-/// Every provider whose scheme signs a timestamp also HMACs that timestamp,
-/// so a test cannot age a delivery by editing the header — the signature stops
-/// matching and the replay window is never reached. Injecting the clock is
-/// what makes the window assertable: sign at `t`, pin "now" to `t + 5` and the
-/// delivery verifies, pin it to `t + 600` and the same bytes come back
+/// Every built-in timestamped provider HMACs its own timestamp into the signed
+/// string, so a test cannot age a delivery by editing the header — the
+/// signature stops matching and the replay window is never reached. Injecting
+/// the clock is what makes the window assertable: sign at `t`, pin "now" to
+/// `t + 5` and the delivery verifies, pin it to `t + 600` and the same bytes
+/// come back
 /// [`VerifyError::TimestampOutOfTolerance`](crate::VerifyError::TimestampOutOfTolerance)
 /// instead of verifying.
 ///
@@ -106,6 +107,11 @@ impl Clock for SystemClock {
 /// Not for production: a [`FixedClock`] never advances, so it accepts a
 /// timestamp exactly `max_age` old forever. Use `SystemClock` (or your own
 /// [`Clock`]) in anything that faces real traffic.
+///
+/// [`FixedClock::default`] is the unix epoch, which fails the other way — every
+/// realistic delivery timestamp reads as decades stale and comes back
+/// `TimestampOutOfTolerance`. Both directions are refusals, so neither default
+/// can widen what `verify()` accepts.
 ///
 /// ```
 /// use webhook_verify::{Clock, FixedClock};

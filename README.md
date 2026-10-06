@@ -653,7 +653,10 @@ over-cap body is a `413`, not a `400`.
   age a delivery by editing the header — the HMAC stops matching before the
   window is ever reached. `FixedClock` is the deterministic clock for asserting
   it: pin "now" and the same bytes verify or come back
-  `TimestampOutOfTolerance`. See `Clock`'s docs for a worked example.
+  `TimestampOutOfTolerance`. It is the clock the crate's own provider tests
+  use, and it needs no feature (unlike `SystemClock`), so it is also the only
+  clock available in a `no_std` test build. See `Clock`'s docs for a worked
+  example.
 - This crate does not log secrets, request bodies, or computed signatures
   under any log level.
 - Secrets are wrapped in a `Secret` type that redacts `Debug`/`Display` output.
