@@ -45,13 +45,13 @@ use std::time::SystemTime;
 /// let secret = Secret::new("whsec_test_secret");
 ///
 /// // Inside the default 300s window: "now" is 5s after the signed timestamp.
-/// let at = VerifyOptions::default().with_clock(Some(Arc::new(FixedClock(1_700_000_005))));
+/// let at = VerifyOptions::default().with_clock(Arc::new(FixedClock(1_700_000_005)));
 /// assert_eq!(verify(Provider::Stripe, &headers, body, &secret, at), Ok(()));
 ///
 /// // The very same bytes, replayed ten minutes later, are refused — and as a
 /// // replay rejection rather than a signature mismatch, which is the
 /// // distinction a caller counts and logs differently.
-/// let stale = VerifyOptions::default().with_clock(Some(Arc::new(FixedClock(1_700_000_600))));
+/// let stale = VerifyOptions::default().with_clock(Arc::new(FixedClock(1_700_000_600)));
 /// assert!(matches!(
 ///     verify(Provider::Stripe, &headers, body, &secret, stale),
 ///     Err(VerifyError::TimestampOutOfTolerance { .. }),
@@ -440,22 +440,76 @@ impl VerifyOptions {
     }
 
     /// Sets [`VerifyOptions::clock`], the source of "now" used for replay
-    /// protection. `None` uses real system time under the `std` feature; on a
-    /// `no_std` target it leaves [`VerifyOptions::now`] reading 0, which
-    /// fail-closes replay-protected providers until a [`Clock`] is injected.
-    /// Injectable for deterministic tests of timestamp-based providers —
-    /// [`FixedClock`] is the ready-made clock for that, and [`Clock`]'s docs
-    /// show a replay window asserted end to end.
+    /// protection. With no clock injected (the default, and what
+    /// [`VerifyOptions::without_injected_clock`] restores) real system time is
+    /// used under the `std` feature; on a `no_std` target
+    /// [`VerifyOptions::now`] then reads 0, which fail-closes
+    /// replay-protected providers until a [`Clock`] is injected
+    /// (`spec.md` §1, §7). Injectable for deterministic tests of
+    /// timestamp-based providers — [`FixedClock`] is the ready-made clock for
+    /// that, and [`Clock`]'s docs show a replay window asserted end to end.
+    ///
+    /// The parameter is the clock itself rather than an `Option<..>`, because
+    /// `Arc<dyn Clock>` is a *concrete* expected type: the unsized coercion
+    /// `Arc<FixedClock> -> Arc<dyn Clock>` happens at the call site, so the
+    /// ordinary call is a bare `Arc::new(..)` with no `Some(..)` wrapper and no
+    /// `as Arc<dyn Clock>` cast, and a handle that is already erased passes
+    /// through unchanged. An `impl Into<Option<Arc<dyn Clock>>>` parameter —
+    /// the shape [`VerifyOptions::with_max_age`] was widened to (issue #386) —
+    /// cannot do this: coercion does not happen where the expected type is a
+    /// generic parameter, so such a signature would reject the very calls that
+    /// compile today instead of widening them (issue #390).
+    ///
+    /// Where the clock is optional at the call site, branch rather than pass
+    /// the `Option` through — `if let Some(clock) = maybe { opts =
+    /// opts.with_clock(clock) }`.
+    ///
+    /// To go back to the default source of "now", use
+    /// [`VerifyOptions::without_injected_clock`]; the parameter has no `None`
+    /// spelling.
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use webhook_verify::{Clock, FixedClock, VerifyOptions};
+    ///
+    /// // A concrete `Arc` coerces to `Arc<dyn Clock>` at the call site.
+    /// let opts = VerifyOptions::default().with_clock(Arc::new(FixedClock(1_700_000_000)));
+    /// assert_eq!(opts.now(), 1_700_000_000);
+    ///
+    /// // A pre-erased handle passes through unchanged.
+    /// let erased: Arc<dyn Clock> = Arc::new(FixedClock(1_700_000_000));
+    /// assert_eq!(VerifyOptions::default().with_clock(erased).now(), 1_700_000_000);
+    /// ```
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    /// Clears [`VerifyOptions::clock`], restoring the default source of "now":
+    /// real system time under the `std` feature, and on a `no_std + alloc`
+    /// target the read of 0 that fail-closes replay-protected providers until a
+    /// [`Clock`] is supplied (`spec.md` §1, §7).
+    ///
+    /// The counterpart of [`VerifyOptions::with_clock`], which takes the clock
+    /// itself and therefore has no `None` spelling — this is the "go back to
+    /// the wall clock" direction under a name that reads at the call site and
+    /// greps, matching [`VerifyOptions::without_replay_protection`]. Unlike
+    /// that one, this removes nothing that was protecting anything: an injected
+    /// clock is test scaffolding (or a platform RTC), so clearing it is the
+    /// ordinary return to production configuration and always lands on the
+    /// *default* behaviour rather than on a weaker one.
     ///
     /// ```
     /// use std::sync::Arc;
     /// use webhook_verify::{FixedClock, VerifyOptions};
     ///
-    /// let opts = VerifyOptions::default().with_clock(Some(Arc::new(FixedClock(1_700_000_000))));
-    /// assert_eq!(opts.now(), 1_700_000_000);
+    /// let opts = VerifyOptions::default()
+    ///     .with_clock(Arc::new(FixedClock(1_700_000_000)))
+    ///     .without_injected_clock();
+    /// assert!(opts.clock.is_none());
     /// ```
-    pub fn with_clock(mut self, clock: Option<Arc<dyn Clock>>) -> Self {
-        self.clock = clock;
+    pub fn without_injected_clock(mut self) -> Self {
+        self.clock = None;
         self
     }
 
@@ -721,7 +775,7 @@ mod tests {
         let body = br#"{"id":"evt_test_webhook","object":"event"}"#;
         let secret = Secret::new("whsec_test_secret");
         let now = VerifyOptions::default()
-            .with_clock(Some(Arc::new(FixedClock(epoch(1_700_000_600)))))
+            .with_clock(Arc::new(FixedClock(epoch(1_700_000_600))))
             .without_replay_protection();
 
         assert_eq!(
@@ -732,7 +786,7 @@ mod tests {
         // The very same bytes with the window restored are refused as a replay,
         // which is the difference the loud spelling exists to make visible.
         let protected =
-            VerifyOptions::default().with_clock(Some(Arc::new(FixedClock(epoch(1_700_000_600)))));
+            VerifyOptions::default().with_clock(Arc::new(FixedClock(epoch(1_700_000_600))));
         assert!(matches!(
             verify(Provider::Stripe, &headers, body, &secret, protected),
             Err(VerifyError::TimestampOutOfTolerance { .. }),
@@ -742,9 +796,17 @@ mod tests {
     #[test]
     fn builder_sets_clock() {
         let fixed = FixedClock(epoch(1_700_000_000));
-        let opts =
-            VerifyOptions::default().with_clock(Some(Arc::new(FixedClock(epoch(1_700_000_000)))));
+        let opts = VerifyOptions::default().with_clock(Arc::new(FixedClock(epoch(1_700_000_000))));
         assert_eq!(opts.now(), fixed.0);
+        // The parameter is `Arc<dyn Clock>`, so a concrete `Arc<FixedClock>`
+        // coerces at the call site and a pre-erased handle is accepted as-is:
+        // both spellings must land on the same field (issue #390).
+        let erased: Arc<dyn Clock> = Arc::new(FixedClock(epoch(1_700_000_000)));
+        assert_eq!(
+            VerifyOptions::default().with_clock(erased).now(),
+            fixed.0,
+            "an already-erased Arc<dyn Clock> must pass through unchanged"
+        );
     }
 
     #[test]
@@ -752,12 +814,55 @@ mod tests {
         // Start with an injected clock, then clear it.
         let fixed = epoch(1_700_000_000);
         let opts = VerifyOptions::default()
-            .with_clock(Some(Arc::new(FixedClock(fixed))))
-            .with_clock(None);
+            .with_clock(Arc::new(FixedClock(fixed)))
+            .without_injected_clock();
         // With no clock, `now()` falls back to system time — just verify it
         // doesn't panic and the clock field is None.
         assert!(opts.clock.is_none());
         let _ = opts.now();
+    }
+
+    #[test]
+    fn without_injected_clock_restores_the_default_state() {
+        // The clear spelling must land exactly on `VerifyOptions::default()`'s
+        // clock, i.e. the state the docs promise it restores — not on some
+        // third configuration.
+        let cleared = VerifyOptions::default()
+            .with_clock(Arc::new(FixedClock(epoch(1_700_000_000))))
+            .without_injected_clock();
+        assert!(cleared.clock.is_none());
+        assert!(VerifyOptions::default().clock.is_none());
+    }
+
+    #[test]
+    fn without_injected_clock_keeps_the_other_options() {
+        // It sets exactly one field: returning to the default clock must not
+        // silently drop the request context a URL-signed provider needs.
+        let opts = VerifyOptions::default()
+            .with_request_url("https://example.com/hook")
+            .with_request_method("POST")
+            .with_webhook_id("sub_123")
+            .with_clock(Arc::new(FixedClock(epoch(1_700_000_000))))
+            .without_injected_clock();
+        assert!(opts.clock.is_none());
+        assert_eq!(opts.max_age, Some(Duration::from_secs(300)));
+        assert_eq!(
+            opts.request_url.as_deref(),
+            Some("https://example.com/hook")
+        );
+        assert_eq!(opts.request_method.as_deref(), Some("POST"));
+        assert_eq!(opts.webhook_id.as_deref(), Some("sub_123"));
+    }
+
+    #[test]
+    fn a_clock_can_be_injected_again_after_being_cleared() {
+        // Builder order is the ordinary one: clearing and re-injecting must
+        // put a clock back, since `clock` is a plain field.
+        let opts = VerifyOptions::default()
+            .with_clock(Arc::new(FixedClock(epoch(1_700_000_000))))
+            .without_injected_clock()
+            .with_clock(Arc::new(FixedClock(epoch(1_700_000_300))));
+        assert_eq!(opts.now(), epoch(1_700_000_300));
     }
 
     #[cfg(not(feature = "std"))]

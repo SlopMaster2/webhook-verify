@@ -53,6 +53,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TimestampOutOfTolerance` outside it — over Stripe's crate-local vector,
   which is also the first time either doc had an example at all.
 
+- **`VerifyOptions::without_injected_clock()`** (issue #390). Clears an
+  injected `Clock`, restoring the default source of "now". Its setter no
+  longer has a `None` spelling — `with_clock` takes the clock itself (see the
+  `Changed` entry below) — so this is the "back to the wall clock" direction
+  under its own name, matching `without_replay_protection()`.
+
+  Unlike that builder this is the harmless direction, which is recorded on the
+  method rather than left to be inferred: an injected clock is test scaffolding
+  (or a platform RTC), and clearing it always lands on the *default* behaviour
+  — real system time under `std`, the fail-closed read of 0 on
+  `no_std + alloc` — never on a weaker one. It exists so the call site says
+  what it is doing and greps, and so `clock` is settable through the builder
+  chain like every other field.
+
 - **`VerifyLayer::on_rejection(..)`** (issue #379). The tower adapter's docs —
   and the `README` — promised that "distinguishing detail belongs in server-side
   logging keyed off the structured `VerifyError`", but the middleware made
@@ -433,12 +447,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `without_replay_protection()` remains the spelling the docs point callers at
   for that direction.
 
-  `with_clock` deliberately keeps `Option<Arc<dyn Clock>>` (issue #390). A
-  trait object sits behind that parameter, and an unsized coercion such as
-  `Arc<FixedClock> -> Arc<dyn Clock>` does not happen where the expected type
-  is a generic parameter, so `impl Into<Option<Arc<dyn Clock>>>` would break
-  `with_clock(Some(Arc::new(..)))` — the spelling in the crate's own `Clock`
-  docs — instead of widening it.
+  The same widening is *impossible* for `with_clock`, whose parameter carries
+  a trait object — that is why the sibling setter is handled separately in the
+  entry below rather than mirrored here (issue #390).
+
+- **`VerifyOptions::with_clock` takes the bare clock** (issue #390). The
+  parameter narrows from `Option<Arc<dyn Clock>>` to `Arc<dyn Clock>`, so the
+  ordinary call is the bare value the crate's other builders already take —
+  `VerifyOptions::default().with_clock(Arc::new(FixedClock(1_700_000_000)))`,
+  with no `Some(..)` wrapper and no `as Arc<dyn Clock>` cast, because the
+  unsized coercion happens where the expected type is concrete — while a
+  handle that is already `Arc<dyn Clock>` passes through unchanged.
+
+  This is a **source break**, deliberate and pre-1.0: `with_clock(Some(..))`
+  call sites drop the `Some(..)` (the crate's own four are updated here), and
+  `with_clock(None)` becomes `without_injected_clock()`. It lands in 0.2.0, a
+  minor bump, which is this crate's compatibility boundary per `README.md`
+  § "Versioning & MSRV", and it needs no `semver-checks` lint entry: the
+  baseline is 0.1.0 and `0.1.x -> 0.2.0` is the bump that carries breaks.
+
+  The `impl Into<Option<Arc<dyn Clock>>>` widening that `with_max_age` got
+  (issue #386) cannot be applied here, and this is the recorded reason: an
+  unsized coercion such as `Arc<FixedClock> -> Arc<dyn Clock>` only happens
+  where the expected type is known concretely, so against a generic parameter
+  every spelling fails — the bare `Arc::new(..)` (no `From` impl reaches
+  `Option<Arc<dyn Clock>>`), `Some(Arc::new(..))` (no
+  `From<Option<Arc<FixedClock>>>`), and `None` alike. Such a signature would
+  have rejected exactly the calls that compile today — including the crate's
+  own `Clock` doc example — instead of widening them, which is the opposite of
+  the claim it was proposed under. Taking the concrete type gets the
+  bare-value call honestly, and leaves the clear direction to a named builder.
+
+  `spec.md` §2 gains both builder signatures, so the spec and the code do not
+  drift.
 
 - **`VerifyLayer::with_max_body_size` now bounds the buffered body, not just
   the signature work** (issue #368). On the tower adapter (which also serves
