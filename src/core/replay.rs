@@ -190,8 +190,8 @@ pub(crate) fn parse_rfc3339_timestamp(
     // `Z` designator in lowercase (`z`) as the ISO 8601 spelling.
     let mut offset_seconds: i64 = 0;
     match b.get(i) {
-        Some(b'Z') | Some(b'z') => i += 1,
-        Some(b'+') | Some(b'-') => {
+        Some(b'Z' | b'z') => i += 1,
+        Some(b'+' | b'-') => {
             let sign: i64 = if b[i] == b'-' { -1 } else { 1 };
             i += 1;
             if b.len() < i + 5
@@ -397,7 +397,7 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let mp = (m as i64 + 9) % 12;
     let doy = (153 * mp + 2) / 5 + d as i64 - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
+    era * 146_097 + doe - 719_468
 }
 
 /// Enforces `|now - t| <= max_age` when replay protection is enabled.
