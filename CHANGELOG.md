@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The README's code blocks are now doctests.** #399. `README.md` is included
+  as the documentation of a module gated on
+  `cfg(all(doctest, feature = "tower"))`, so every active `rust` fence in it is
+  compiled *and run* by `cargo test --all-features` — the test job CI runs on
+  every toolchain — instead of being prose nothing checks, which is how a stale
+  snippet ships (the drift #376 had to catch after the fact).
+
+  All five such blocks failed as doctests before this change: three used
+  `return Err(...)`/`?` where rustdoc's generated `fn main()` returns `()`, and
+  the two `VerifyLayer` bindings hit E0282 — the `B = Bytes` default does not
+  apply to a `let` binding whose body type is otherwise unconstrained. They now
+  build the ambiguity-vs-verification outcome as a `match`ed `result`, and name
+  `VerifyLayer<Bytes>` with `use bytes::Bytes;`, the spelling `src/tower.rs`'s
+  own doctests use. The include is gated on `tower` rather than per-fence
+  because rustdoc has no feature attribute for a code block (`feature="x"` in a
+  fence is `rustdoc::invalid_codeblock_attributes`), and `tower` implies `http`
+  and pulls in `bytes` — everything the snippets name — in the configuration CI
+  tests. `cfg(doctest)` is false for `cargo doc`, so the README does not render
+  as a second copy of the crate docs.
+
 - **`CustomScheme::signed_headers`**, the declaration that brings a custom
   scheme's extra signed headers into the §4.4 duplicate-ambiguity scan
   (issue #395).
