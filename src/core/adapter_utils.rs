@@ -189,7 +189,8 @@ where
 ///   `unparseable_scan_name_reads_as_ambiguous` pins;
 /// - names a *caller* supplies to a [`CustomScheme`](crate::CustomScheme),
 ///   which `signature_header_names` returns verbatim: a typo, a space, or a
-///   stray control byte in a `signature_header` / `timestamp_header` therefore
+///   stray control byte in `signature_header`, `timestamp_header`, or
+///   `signed_headers` therefore
 ///   makes the scan report that header ambiguous for **every** request, while
 ///   `verify()` on a pair table still reads the same name (the crate's own
 ///   `HeaderMap` impls compare names as plain case-insensitive strings). That
@@ -232,14 +233,18 @@ pub(crate) fn has_conflicting_duplicates<H: MultiValueHeaders + ?Sized>(
 ///    header a provider's scheme declares for all built-in providers, minus any
 ///    header the provider itself sends duplicated
 ///    ([`provider_sent_duplicate_headers`] — today Mollie's rotation window);
+///    for [`Provider::Custom`] that is `signature_header`,
+///    `timestamp_header`, and every name the caller declared in
+///    `CustomScheme::signed_headers`;
 /// 2. a **dynamic** scan for [`Provider::Contentful`], whose
 ///    `x-contentful-signed-headers` value is self-describing — the headers it
 ///    names are folded into the canonical string, so a conflicting duplicate of
 ///    any of them is just as ambiguous as a duplicate of the signature header
 ///    itself. The list is in the request, so the adapter can enumerate it
-///    instead of giving up on those headers (which is the remaining carve-out,
-///    for [`Provider::Custom`], whose `signed_string` closure reads headers
-///    nothing outside the closure can enumerate).
+///    instead of giving up on those headers (which is the remaining carve-out:
+///    a [`Provider::Custom`] closure may read a header the scheme did not
+///    declare in `signed_headers`, and nothing outside the closure can
+///    enumerate those).
 ///
 /// A rejection of the dynamic half is reported against
 /// `x-contentful-signed-headers` — the request-controlled header that *named*
@@ -346,10 +351,11 @@ pub(crate) fn find_ambiguous_signature_header<H: MultiValueHeaders + ?Sized>(
 ///
 /// The `Custom` carve-out documented on
 /// [`CustomScheme`](crate::CustomScheme) is unchanged: for
-/// [`Provider::Custom`] the scan covers only `signature_header` and
-/// `timestamp_header`, and duplicates in any additional header a
-/// `signed_string` closure reads are not detected. Note the second consequence
-/// of those two names being caller-typed rather than in-crate constants: a name
+/// [`Provider::Custom`] the scan covers `signature_header`,
+/// `timestamp_header`, and the names declared in `signed_headers`, and
+/// duplicates in any *additional* header a `signed_string` closure reads are
+/// not detected. Note the second consequence
+/// of those names being caller-typed rather than in-crate constants: a name
 /// that is not a valid HTTP field name (RFC 9110 §5.1) cannot be looked up, so
 /// it is reported as ambiguous on *every* request — see
 /// [`CustomScheme::signature_header`](crate::CustomScheme::signature_header).
@@ -1513,22 +1519,27 @@ mod tests {
         }
 
         #[test]
-        fn a_custom_scheme_scans_exactly_its_two_declared_headers() {
-            // The documented `spec.md` §4.4 carve-out, pinned so the carve-out
-            // stays a deliberate boundary rather than drifting into "custom
-            // providers get no check at all".
+        fn a_custom_scheme_scans_exactly_its_declared_headers() {
+            // The `spec.md` §4.4 scope for `Custom`, pinned so it stays a
+            // deliberate boundary rather than drifting into "custom providers
+            // get no check at all" — or into a scan that pretends to know what
+            // an undeclared closure read. Declared names (including the
+            // `signed_headers` ones, issue #395) are scanned; anything else is
+            // the documented residual.
             fn body_only(_headers: &dyn crate::HeaderMap, raw_body: &[u8]) -> alloc::vec::Vec<u8> {
                 raw_body.to_vec()
             }
             let scheme =
                 CustomScheme::new(HashAlg::Sha256, "x-webhook-sig", Encoding::Hex, body_only)
-                    .with_timestamp_header("x-webhook-ts");
+                    .with_timestamp_header("x-webhook-ts")
+                    .with_signed_headers(&["x-request-id"]);
             let custom = Provider::Custom(scheme);
 
-            for conflicting in ["x-webhook-sig", "x-webhook-ts"] {
+            for conflicting in ["x-webhook-sig", "x-webhook-ts", "x-request-id"] {
                 let mut headers = ::http::HeaderMap::new();
                 headers.insert("x-webhook-sig", ::http::HeaderValue::from_static("ab"));
                 headers.insert("x-webhook-ts", ::http::HeaderValue::from_static("1"));
+                headers.insert("x-request-id", ::http::HeaderValue::from_static("req"));
                 headers.append(conflicting, ::http::HeaderValue::from_static("2"));
                 assert_eq!(
                     ambiguous_signature_header(custom, &headers),
@@ -1537,10 +1548,10 @@ mod tests {
                 );
             }
 
-            // A third header the closure never reads is irrelevant either way,
-            // and the honest answer is "cannot tell" — the scan cannot know
-            // which headers a `signed_string` closure reads, so it does not
-            // pretend to.
+            // A third header the closure may or may not read, but which the
+            // scheme did not declare, is irrelevant either way, and the honest
+            // answer is "cannot tell" — the scan cannot know which headers a
+            // `signed_string` closure reads, so it does not pretend to.
             let mut headers = ::http::HeaderMap::new();
             headers.insert("x-webhook-sig", ::http::HeaderValue::from_static("ab"));
             headers.append("x-unrelated", ::http::HeaderValue::from_static("1"));
@@ -1811,19 +1822,24 @@ mod tests {
         }
 
         #[test]
-        fn a_custom_scheme_scans_exactly_its_two_declared_headers() {
+        fn a_custom_scheme_scans_exactly_its_declared_headers() {
+            // Same scope as the `http` entry point's test of the same name:
+            // `signed_headers` names are scanned (issue #395), anything the
+            // scheme did not declare is the documented residual.
             fn body_only(_headers: &dyn crate::HeaderMap, raw_body: &[u8]) -> alloc::vec::Vec<u8> {
                 raw_body.to_vec()
             }
             let scheme =
                 CustomScheme::new(HashAlg::Sha256, "x-webhook-sig", Encoding::Hex, body_only)
-                    .with_timestamp_header("x-webhook-ts");
+                    .with_timestamp_header("x-webhook-ts")
+                    .with_signed_headers(&["x-request-id"]);
             let custom = Provider::Custom(scheme);
 
-            for conflicting in ["x-webhook-sig", "x-webhook-ts"] {
+            for conflicting in ["x-webhook-sig", "x-webhook-ts", "x-request-id"] {
                 let headers = vec![
                     ("x-webhook-sig", "ab"),
                     ("x-webhook-ts", "1"),
+                    ("x-request-id", "req"),
                     (conflicting, "2"),
                 ];
                 assert_eq!(
@@ -1833,9 +1849,10 @@ mod tests {
                 );
             }
 
-            // A third header the closure never reads is irrelevant, and the
-            // honest answer is "cannot tell" — the scan cannot know which
-            // headers a `signed_string` closure reads, so it does not pretend to.
+            // A third header the closure may read, but which the scheme did not
+            // declare, is irrelevant, and the honest answer is "cannot tell" —
+            // the scan cannot know which headers a `signed_string` closure
+            // reads, so it does not pretend to.
             let headers = vec![
                 ("x-webhook-sig", "ab"),
                 ("x-unrelated", "1"),

@@ -21,12 +21,14 @@
 //! [`VerifyOptions::request_url`] contents, construct your scheme headers to
 //! carry the URL.
 //!
-//! **Ambiguity-check gap:** The tower/actix adapters scan only
-//! [`signature_header`](CustomScheme::signature_header) and
-//! [`timestamp_header`](CustomScheme::timestamp_header) for conflicting
-//! duplicate values (per `spec.md` §4.4). If `signed_string` reads
-//! *additional* headers, duplicates in those are **not** detected. See the
-//! [`CustomScheme`] struct docs for details.
+//! **Ambiguity-check gap:** The tower/actix adapters scan
+//! [`signature_header`](CustomScheme::signature_header),
+//! [`timestamp_header`](CustomScheme::timestamp_header), and every name in
+//! [`signed_headers`](CustomScheme::signed_headers) for conflicting duplicate
+//! values (per `spec.md` §4.4). A header `signed_string` reads but the scheme
+//! did **not** declare there still gets no duplicate detection — declare every
+//! header the closure folds into the signed bytes. See the [`CustomScheme`]
+//! struct docs for details.
 //!
 //! **Declared header names must be valid HTTP field names:** a
 //! `signature_header` or `timestamp_header` containing a space, a stray
@@ -77,6 +79,7 @@
 //!     timestamp_unit: TimestampUnit::Seconds,
 //!     encoding: Encoding::Hex,
 //!     prefix: None,
+//!     signed_headers: &[],
 //!     signed_string: |_headers, raw_body| raw_body.to_vec(),
 //! };
 //!
@@ -276,33 +279,38 @@ impl fmt::Display for TimestampUnit {
 ///
 /// **Construction compatibility.** This struct is not
 /// `#[non_exhaustive]` and its fields are public, so a struct *literal* has to
-/// name every field: adding a field (as `timestamp_unit` did in 0.2.0) is a
-/// source break for that form. [`CustomScheme::new`] plus the `with_*` builders
+/// name every field: adding a field (as `timestamp_unit` and `signed_headers`
+/// did in 0.2.0) is a source break for that form. [`CustomScheme::new`] plus
+/// the `with_*` builders
 /// keep compiling across field additions because they fill in each new field's
 /// `Default`, so prefer them in code you cannot edit in lockstep with a
 /// release. Migrating a literal is one line — add
-/// `timestamp_unit: TimestampUnit::Seconds` to keep the pre-0.2.0 behavior.
+/// `timestamp_unit: TimestampUnit::Seconds` and `signed_headers: &[]` to keep
+/// the pre-0.2.0 behavior.
 /// Whether such a break may ship is bounded by this crate's version line: a
 /// pre-1.0 release may break in a *minor* bump, and `cargo semver-checks` (CI
 /// job `semver-checks`) enforces exactly that for
 /// `constructible_struct_adds_field`.
 ///
 /// **Ambiguity-check caveat.** Framework adapters (`tower`, `actix`) reject
-/// duplicate headers whose values differ — but they only scan the headers
-/// listed by the crate's adapter ambiguity check, which for `Custom` is
-/// limited to [`signature_header`](Self::signature_header) and
-/// [`timestamp_header`](Self::timestamp_header). If `signed_string` reads
-/// *additional* headers from the map (e.g. a nonce, a URL, or a second
-/// timestamp), duplicate values in those extra headers are **not** detected.
+/// duplicate headers whose values differ — but only for the headers the
+/// crate's adapter ambiguity check scans, which for `Custom` is
+/// [`signature_header`](Self::signature_header),
+/// [`timestamp_header`](Self::timestamp_header), and every name declared in
+/// [`signed_headers`](Self::signed_headers). If `signed_string` reads a header
+/// the scheme did **not** declare there (e.g. a nonce, a URL, or a second
+/// timestamp), duplicate values in it are **not** detected.
 /// An attacker who can inject a conflicting value for such a header can cause
 /// the proxy and verifier to disagree on the signed input — the exact
 /// scenario `spec.md` §4.4 exists to prevent. When designing a custom scheme,
-/// either limit `signed_string` to the two declared headers, or accept that
-/// the adapter cannot guard against proxy disagreement on undeclared headers.
+/// declare every header `signed_string` folds into the signed bytes in
+/// `signed_headers`; a name left undeclared is a name the adapter cannot
+/// guard against proxy disagreement on.
 ///
 /// The second way the scan can reject a delivery the scheme would otherwise
-/// accept is a declared name that is not a valid HTTP field name: unlike every
-/// built-in provider, these two names are caller-typed and nothing validates
+/// accept is a declared name (in any of those three places) that is not a valid
+/// HTTP field name: unlike every
+/// built-in provider, these names are caller-typed and nothing validates
 /// them, so a space or a stray control byte makes the scan report the header as
 /// ambiguous for *every* request while `verify()` on a pair table still reads
 /// it. See [`signature_header`](Self::signature_header).
@@ -374,15 +382,48 @@ pub struct CustomScheme {
     /// as malformed rather than leniently accepted — prevents downgrade
     /// confusion between scheme versions.
     pub prefix: Option<&'static str>,
+    /// Additional headers [`signed_string`](Self::signed_string) reads, listed
+    /// so the `spec.md` §4.4 duplicate-ambiguity scan covers them (issue #395).
+    ///
+    /// The adapters (and the public
+    /// [`ambiguous_signature_header_in`](crate::ambiguous_signature_header_in))
+    /// scan [`signature_header`](Self::signature_header) and
+    /// [`timestamp_header`](Self::timestamp_header) regardless; this field is
+    /// how a scheme says which *other* headers its closure folds into the
+    /// signed bytes — a nonce, a request URL, `content-type`, a second
+    /// timestamp. A conflicting duplicate of a declared name is rejected
+    /// before any signature work, exactly as for a built-in provider's own
+    /// signing headers. De-duplicated against the two declared names
+    /// (ASCII-case-insensitively, the way header names compare) and in list
+    /// order, so naming `signature_header` here again scans it once and
+    /// reports it under its `signature_header` spelling.
+    ///
+    /// **Only what is declared is scanned.** A header the closure reads but
+    /// this list does not name still gets first-match lookup with no duplicate
+    /// detection — see the struct-level ambiguity caveat. The declaration is
+    /// the caller's, because nothing outside the closure can enumerate it:
+    /// `signed_string` is a plain `fn`, so no request field and no crate API
+    /// can say what it reads.
+    ///
+    /// Each entry must be a valid HTTP field name (`field-name = token`, RFC
+    /// 9110 §5.1) for the same reason
+    /// [`signature_header`](Self::signature_header) must: an unparseable name
+    /// cannot be looked up, so the scan fails closed and reports it ambiguous
+    /// on **every** request (a `400` from the adapters). Nothing validates the
+    /// entries before use, so this note plus
+    /// `tests::an_unparseable_declared_signed_header_name_is_always_ambiguous`
+    /// are what stand between a typo and an outage.
+    pub signed_headers: &'static [&'static str],
     /// Builds the exact byte string the sender HMACs, from the request
     /// headers and the **raw** body bytes. Read any additional signed inputs
     /// (timestamps, URL context) out of `headers`; never re-serialize or
     /// normalize `raw_body`.
     ///
-    /// **Note:** If this function reads headers beyond
+    /// **Note:** Every header this function reads beyond
     /// [`signature_header`](Self::signature_header) and
-    /// [`timestamp_header`](Self::timestamp_header), the framework adapters'
-    /// duplicate-header ambiguity check will **not** cover them — see the
+    /// [`timestamp_header`](Self::timestamp_header) must also be listed in
+    /// [`signed_headers`](Self::signed_headers), or the framework adapters'
+    /// duplicate-header ambiguity check will **not** cover it — see the
     /// struct-level safety note.
     pub signed_string: fn(&dyn HeaderMap, &[u8]) -> Vec<u8>,
 }
@@ -395,6 +436,7 @@ impl PartialEq for CustomScheme {
             && self.timestamp_unit == other.timestamp_unit
             && self.encoding == other.encoding
             && self.prefix == other.prefix
+            && self.signed_headers == other.signed_headers
     }
 }
 
@@ -408,18 +450,21 @@ impl core::hash::Hash for CustomScheme {
         self.timestamp_unit.hash(state);
         self.encoding.hash(state);
         self.prefix.hash(state);
+        self.signed_headers.hash(state);
     }
 }
 
 impl CustomScheme {
     /// Creates a scheme from the required fields, leaving the optional
-    /// `timestamp_header` and `prefix` unset (`None`) and
-    /// `timestamp_unit` at its default of [`TimestampUnit::Seconds`].
+    /// `timestamp_header` and `prefix` unset (`None`), `signed_headers`
+    /// empty, and `timestamp_unit` at its default of [`TimestampUnit::Seconds`].
     ///
     /// Configure the optional fields with
     /// [`CustomScheme::with_timestamp_header`],
-    /// [`CustomScheme::with_timestamp_unit`], and
-    /// [`CustomScheme::with_prefix`] when the sender's scheme uses them.
+    /// [`CustomScheme::with_timestamp_unit`],
+    /// [`CustomScheme::with_prefix`], and
+    /// [`CustomScheme::with_signed_headers`] when the sender's scheme uses
+    /// them.
     ///
     /// # Example
     ///
@@ -449,6 +494,7 @@ impl CustomScheme {
             timestamp_unit: TimestampUnit::Seconds,
             encoding,
             prefix: None,
+            signed_headers: &[],
             signed_string,
         }
     }
@@ -530,6 +576,53 @@ impl CustomScheme {
     /// rejected as malformed rather than leniently accepted.
     pub fn with_prefix(mut self, prefix: &'static str) -> Self {
         self.prefix = Some(prefix);
+        self
+    }
+
+    /// Declares the extra headers `signed_string` reads, so the `spec.md`
+    /// §4.4 duplicate-ambiguity scan covers them (issue #395).
+    ///
+    /// The scan already covers [`signature_header`](Self::signature_header)
+    /// and [`timestamp_header`](Self::timestamp_header); this is how a scheme
+    /// says which *other* headers its closure folds into the signed bytes — a
+    /// nonce, `content-type`, a request URL. Without the declaration the
+    /// adapters see only first-match lookup for those names, so an
+    /// intermediary can prepend a second value and have the verifier
+    /// sign-check one value while an upstream validator saw the other.
+    ///
+    /// Declare **every** header the closure reads; a name omitted here is
+    /// exactly the residual carve-out
+    /// [`spec.md`](https://github.com/SlopMaster2/webhook-verify/blob/master/spec.md)
+    /// §4.4 leaves behind. Each entry must be a valid HTTP field name (RFC
+    /// 9110 §5.1) or the scan fails closed and reports it ambiguous on every
+    /// request — see [`signature_header`](Self::signature_header).
+    ///
+    /// # Example
+    ///
+    /// A scheme whose signed bytes fold in `x-request-id` alongside the body:
+    ///
+    /// ```
+    /// use webhook_verify::{CustomScheme, Encoding, HashAlg};
+    ///
+    /// let scheme = CustomScheme::new(
+    ///     HashAlg::Sha256,
+    ///     "X-Webhook-Sig",
+    ///     Encoding::Hex,
+    ///     |headers, raw_body| {
+    ///         let id = headers.get("X-Request-Id").unwrap_or_default();
+    ///         let mut signed = Vec::with_capacity(id.len() + 1 + raw_body.len());
+    ///         signed.extend_from_slice(id.as_bytes());
+    ///         signed.push(b':');
+    ///         signed.extend_from_slice(raw_body);
+    ///         signed
+    ///     },
+    /// )
+    /// .with_signed_headers(&["X-Request-Id"]);
+    ///
+    /// assert_eq!(scheme.signed_headers, ["X-Request-Id"].as_slice());
+    /// ```
+    pub fn with_signed_headers(mut self, signed_headers: &'static [&'static str]) -> Self {
+        self.signed_headers = signed_headers;
         self
     }
 }
@@ -767,6 +860,7 @@ mod tests {
             timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Hex,
             prefix: Some("sha256="),
+            signed_headers: &[],
             signed_string: ts_signed_string,
         }
     }
@@ -801,6 +895,7 @@ mod tests {
             timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Hex,
             prefix: Some("v0="),
+            signed_headers: &[],
             signed_string: |headers, raw_body| {
                 // `v0:{timestamp}:{raw_body}` — timestamp verbatim from its
                 // header, per Slack's docs.
@@ -842,6 +937,7 @@ mod tests {
             timestamp_unit: TimestampUnit::Seconds,
             encoding,
             prefix: None,
+            signed_headers: &[],
             signed_string: |_headers, raw_body| raw_body.to_vec(),
         };
 
@@ -1084,6 +1180,7 @@ mod tests {
             timestamp_unit: TimestampUnit::Seconds,
             encoding: Encoding::Hex,
             prefix: None,
+            signed_headers: &[],
             signed_string: |_headers, raw_body| raw_body.to_vec(),
         };
         let result = verify_custom(
@@ -1127,6 +1224,7 @@ mod tests {
             encoding: Encoding::Hex,
             prefix: None,
             // ...but the signed bytes cover the body only, not the stamp.
+            signed_headers: &[],
             signed_string: |_headers, raw_body| raw_body.to_vec(),
         };
         let raw_sig = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
@@ -1476,6 +1574,7 @@ mod tests {
             timestamp_unit: TimestampUnit::Seconds,
             encoding,
             prefix: None,
+            signed_headers: &[],
             signed_string: |_headers, raw_body| raw_body.to_vec(),
         }
     }
@@ -2026,6 +2125,10 @@ mod tests {
         assert_eq!(scheme.encoding, Encoding::Hex);
         assert_eq!(scheme.timestamp_header, None);
         assert_eq!(scheme.prefix, None);
+        assert!(
+            scheme.signed_headers.is_empty(),
+            "no extra signed headers are declared by default (issue #395)"
+        );
         assert_eq!(
             scheme.signed_string as *const () as usize, ts_signed_string as *const () as usize,
             "the constructor must preserve the caller's signed_string fn"
@@ -2435,7 +2538,8 @@ mod tests {
     /// read as *ambiguous on every request*, not as "nothing to scan"
     /// (issue #286).
     ///
-    /// `signature_header_names` returns `CustomScheme`'s two declared names
+    /// `signature_header_names` returns `CustomScheme`'s declared names —
+    /// `signature_header`, `timestamp_header`, and the `signed_headers` list —
     /// verbatim, and unlike every built-in provider's in-crate constants no
     /// guard can check them before use — `Provider::Custom` is deliberately
     /// absent from `provider_list()`. The scan's answer for a name it cannot
@@ -2568,6 +2672,241 @@ mod tests {
         assert_eq!(
             ambiguous_signature_header_in(Provider::Custom(valid), &single),
             None
+        );
+    }
+
+    // --- signed_headers (issue #395) -----------------------------------------
+
+    /// The declaration closes the §4.4 hole the issue is about, and the
+    /// undeclared header is the carve-out that remains: a duplicate in a
+    /// header the scheme listed in `signed_headers` is reported through the
+    /// pair-table entry point (and through both adapters, pinned in
+    /// `tower.rs`/`actix.rs`), while a duplicate the scheme never declared
+    /// stays invisible to the scan — the honest "cannot tell" the struct docs
+    /// promise.
+    ///
+    /// Both halves are pinned against `verify()` on the *same* table, so the
+    /// scan's verdict cannot be confused with a signature or replay failure:
+    /// the duplicated-but-unscanned tables verify, which is precisely why the
+    /// declaration is the only thing that closes the door.
+    #[test]
+    fn a_declared_extra_signed_header_is_scanned_and_an_undeclared_one_is_not() {
+        use crate::ambiguous_signature_header_in;
+
+        let scheme = CustomScheme {
+            signed_headers: &["X-Example-Nonce"],
+            ..ts_scheme_config()
+        };
+        // The signed bytes are `{ts}.{body}` (see `ts_signed_string`), so a
+        // nonce header neither helps nor breaks the signature: the only thing
+        // that changes between the tables below is what the *scan* sees.
+        let table = |extra: &[(&str, &str)]| {
+            let mut headers: Vec<(String, String)> = vec![
+                (
+                    ts_scheme::HEADER.to_string(),
+                    format!("sha256={}", ts_scheme::PING_SIG),
+                ),
+                (
+                    ts_scheme::TS_HEADER.to_string(),
+                    ts_scheme::TIMESTAMP.to_string(),
+                ),
+            ];
+            headers.extend(
+                extra
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), value.to_string())),
+            );
+            headers
+        };
+        let options = clocked_at(ts_scheme::TIMESTAMP, Some(Duration::from_secs(300)));
+
+        // Declared, duplicated with differing values: the scan reports it —
+        // and the very same table verifies, so the scan is what rejects.
+        let declared_duplicate = table(&[("X-Example-Nonce", "one"), ("x-example-nonce", "two")]);
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(scheme), &declared_duplicate),
+            Some("X-Example-Nonce"),
+        );
+        assert_eq!(
+            verify_custom(
+                &scheme,
+                &declared_duplicate,
+                ts_scheme::PING_BODY,
+                ts_scheme::SECRET,
+                options.clone()
+            ),
+            Ok(()),
+            "`verify()` sees one value; only the ambiguity scan refuses the duplicate"
+        );
+
+        // Declared, single-valued: unambiguous and verified.
+        let declared_once = table(&[("X-Example-Nonce", "one")]);
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(scheme), &declared_once),
+            None,
+        );
+        assert_eq!(
+            verify_custom(
+                &scheme,
+                &declared_once,
+                ts_scheme::PING_BODY,
+                ts_scheme::SECRET,
+                options.clone()
+            ),
+            Ok(())
+        );
+
+        // Undeclared, duplicated: the documented residual. The scan does not
+        // know the closure reads it (here it does not even), so it says
+        // nothing — and the delivery verifies on first-match lookup.
+        let undeclared_duplicate = table(&[("X-Unrelated", "one"), ("x-unrelated", "two")]);
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(scheme), &undeclared_duplicate),
+            None,
+            "an undeclared header is the documented residual carve-out"
+        );
+        assert_eq!(
+            verify_custom(
+                &scheme,
+                &undeclared_duplicate,
+                ts_scheme::PING_BODY,
+                ts_scheme::SECRET,
+                options
+            ),
+            Ok(())
+        );
+    }
+
+    /// A `signed_headers` entry that is not a valid HTTP field name fails
+    /// closed as ambiguous on **every** request, on the same terms as a
+    /// malformed `signature_header`/`timestamp_header` (issue #395): the scan
+    /// cannot look up a name it cannot represent, and "nothing to scan" would
+    /// read as "no duplicate".
+    #[test]
+    fn an_unparseable_declared_signed_header_name_is_always_ambiguous() {
+        use crate::ambiguous_signature_header_in;
+        use crate::core::headers::is_valid_field_name;
+
+        // A space is not a `tchar`, so this is not a `field-name = token`
+        // (RFC 9110 §5.1) and no header map can hold it.
+        const MALFORMED: &str = "X-Bad Nonce";
+        assert!(!is_valid_field_name(MALFORMED));
+
+        let scheme = CustomScheme::new(
+            HashAlg::Sha256,
+            "X-Webhook-Sig",
+            Encoding::Hex,
+            |_headers, raw_body| raw_body.to_vec(),
+        )
+        .with_signed_headers(&["X-Good-Nonce", MALFORMED]);
+
+        // Even with nothing in the table at all: there is no duplicate here,
+        // and the answer is still "ambiguous".
+        let empty: Vec<(&str, &str)> = vec![];
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(scheme), &empty),
+            Some(MALFORMED)
+        );
+
+        // And over a table that *does* carry a single value for it — the name
+        // is reported, not skipped over in favour of a "found it, no duplicate"
+        // reading.
+        let single: Vec<(&str, &str)> = vec![("X-Webhook-Sig", "abcd"), (MALFORMED, "1")];
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(scheme), &single),
+            Some(MALFORMED)
+        );
+
+        // The control: the same scheme shape with a valid declared name over
+        // the identical single-valued table is unambiguous, so the assertions
+        // above are about the name and not about the table or the scheme.
+        let valid = CustomScheme {
+            signed_headers: &["X-Good-Nonce"],
+            ..scheme
+        };
+        assert!(is_valid_field_name("X-Good-Nonce"));
+        assert_eq!(
+            ambiguous_signature_header_in(Provider::Custom(valid), &single),
+            None
+        );
+    }
+
+    /// A name that `signed_headers` repeats — or repeats one of the other two
+    /// declared headers, in any letter case — is scanned **once**, under the
+    /// first spelling in list order. The scan is a linear pass over
+    /// `signature_header_names`, so a duplicate entry would be looked up
+    /// twice, and HTTP field names compare ASCII-case-insensitively, so
+    /// `x-sig` and `X-Sig` are one header rather than two.
+    #[test]
+    fn signed_header_names_are_deduplicated_case_insensitively_in_list_order() {
+        let scheme = CustomScheme::new(
+            HashAlg::Sha256,
+            "X-Example-Signature",
+            Encoding::Hex,
+            |_headers, raw_body| raw_body.to_vec(),
+        )
+        .with_timestamp_header("X-Example-Timestamp")
+        .with_signed_headers(&[
+            // Repeats the signature header in another case...
+            "x-example-signature",
+            // ...names a genuinely new one twice, in two cases...
+            "X-Request-Id",
+            "x-request-id",
+            // ...and repeats the timestamp header.
+            "x-example-timestamp",
+        ]);
+
+        assert_eq!(
+            crate::providers::signature_header_names(&Provider::Custom(scheme)),
+            ["X-Example-Signature", "X-Example-Timestamp", "X-Request-Id",],
+        );
+    }
+
+    /// `signed_headers` changes what the scan does, so it is part of the
+    /// scheme's declarative identity and must participate in `PartialEq` and
+    /// `Hash` alongside the other declarative fields — a caller keying a map
+    /// by scheme must not collapse two schemes that scan different headers.
+    #[test]
+    fn signed_headers_participates_in_equality_and_hash() {
+        use crate::test_helpers::hash_of;
+
+        let bare = CustomScheme::new(
+            HashAlg::Sha256,
+            "X-Webhook-Sig",
+            Encoding::Hex,
+            |_headers, raw_body| raw_body.to_vec(),
+        );
+        let declared = bare.with_signed_headers(&["X-Request-Id"]);
+        let declared_other = bare.with_signed_headers(&["X-Other-Id"]);
+
+        assert_ne!(bare, declared, "signed_headers participates in equality");
+        assert_ne!(
+            declared, declared_other,
+            "signed_headers participates in equality"
+        );
+        assert_ne!(
+            hash_of(&bare),
+            hash_of(&declared),
+            "signed_headers participates in Hash"
+        );
+        assert_ne!(
+            hash_of(&declared),
+            hash_of(&declared_other),
+            "signed_headers participates in Hash"
+        );
+
+        // And the builder sets exactly what it says, leaving the other fields
+        // (including `signed_string`) alone.
+        assert_eq!(declared.signed_headers, ["X-Request-Id"].as_slice());
+        assert_eq!(
+            declared.signature_header,
+            CustomScheme::new(
+                HashAlg::Sha256,
+                "X-Webhook-Sig",
+                Encoding::Hex,
+                |_headers, raw_body| raw_body.to_vec(),
+            )
+            .signature_header
         );
     }
 }

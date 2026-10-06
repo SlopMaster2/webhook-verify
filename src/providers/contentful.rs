@@ -84,8 +84,9 @@
 //! signing material and are not scanned.
 //!
 //! This is what makes the scheme fully covered: the remaining carve-out in
-//! `spec.md` §4.4 is for a [`crate::CustomScheme`]'s `signed_string` closure,
-//! whose headers no request-declared list enumerates.
+//! `spec.md` §4.4 is a [`crate::CustomScheme`]'s `signed_string` closure
+//! reading a header the scheme did not list in `signed_headers` — no
+//! request-declared list enumerates what a closure reads.
 //!
 //! # Replay protection
 //!

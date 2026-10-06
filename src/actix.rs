@@ -1254,6 +1254,7 @@ mod tests {
             timestamp_unit: crate::TimestampUnit::Seconds,
             encoding: crate::Encoding::Hex,
             prefix: Some("sha256="),
+            signed_headers: &[],
             signed_string: |_headers, body| body.to_vec(),
         };
 
@@ -1309,6 +1310,7 @@ mod tests {
             timestamp_unit: crate::TimestampUnit::Seconds,
             encoding: crate::Encoding::Hex,
             prefix: Some("sha256="),
+            signed_headers: &[],
             signed_string: |_headers, body| body.to_vec(),
         };
         let ambiguous_app = aw_test::init_service(
@@ -1355,6 +1357,87 @@ mod tests {
         let res = aw_test::call_service(&good_app, req).await;
         assert_eq!(res.status(), StatusCode::OK);
     }
+
+    #[actix_web::test]
+    async fn a_declared_extra_signed_header_is_dup_checked_too() {
+        // Issue #395: `CustomScheme::signed_headers` brings a header the
+        // closure reads into the `spec.md` §4.4 scan, so a conflicting
+        // duplicate of it is a 400 here exactly as it is through the tower
+        // adapter — the scan is the one shared code path, and this pins that
+        // this adapter's `MultiValueHeaders` impl reaches it too.
+        //
+        // HMAC-SHA256 hex of the body with key "k":
+        // printf 'Hello, World!' | openssl dgst -sha256 -hmac "k"
+        const DIGEST: &str = "11316937114e6970aa59bd5326a6f38dd525f4ade64670e402bff41e2f7c4071";
+        let scheme = crate::CustomScheme {
+            hash: crate::HashAlg::Sha256,
+            signature_header: "X-My-Sig",
+            timestamp_header: None,
+            timestamp_unit: crate::TimestampUnit::Seconds,
+            encoding: crate::Encoding::Hex,
+            prefix: Some("sha256="),
+            signed_headers: &["X-My-Nonce"],
+            signed_string: |_headers, body| body.to_vec(),
+        };
+
+        // Declared extra header, duplicated with differing values: rejected.
+        let ambiguous_app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::new(
+                    Provider::Custom(scheme),
+                    Secret::new("k"),
+                ))
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-My-Sig", format!("sha256={DIGEST}")))
+            .append_header(("x-my-nonce", "one"))
+            .append_header(("X-My-Nonce", "two"))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&ambiguous_app, req).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // The same declared header, one value: verifies end to end.
+        let good_app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::new(
+                    Provider::Custom(scheme),
+                    Secret::new("k"),
+                ))
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-My-Sig", format!("sha256={DIGEST}")))
+            .insert_header(("X-My-Nonce", "one"))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&good_app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // The documented residual (issue #395): an *undeclared* duplicate is
+        // outside the scan, so it verifies. The declaration is the difference.
+        let undeclared_app = aw_test::init_service(
+            App::new()
+                .app_data(WebhookConfig::new(
+                    Provider::Custom(scheme),
+                    Secret::new("k"),
+                ))
+                .route("/", web::post().to(echo_len)),
+        )
+        .await;
+        let req = aw_test::TestRequest::post()
+            .insert_header(("X-My-Sig", format!("sha256={DIGEST}")))
+            .append_header(("x-unrelated", "one"))
+            .append_header(("X-Unrelated", "two"))
+            .set_payload(Bytes::from_static(GITHUB_BODY))
+            .to_request();
+        let res = aw_test::call_service(&undeclared_app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
     #[cfg(not(feature = "paypal"))]
     #[actix_web::test]
     async fn unsupported_provider_maps_to_internal_server_error() {

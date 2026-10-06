@@ -1419,6 +1419,7 @@ mod tests {
             timestamp_unit: crate::TimestampUnit::Seconds,
             encoding: crate::Encoding::Hex,
             prefix: Some("sha256="),
+            signed_headers: &[],
             signed_string: |_headers, body| body.to_vec(),
         };
 
@@ -1468,6 +1469,7 @@ mod tests {
             timestamp_unit: crate::TimestampUnit::Seconds,
             encoding: crate::Encoding::Hex,
             prefix: Some("sha256="),
+            signed_headers: &[],
             signed_string: |_headers, body| body.to_vec(),
         };
         let options = crate::VerifyOptions {
@@ -1504,6 +1506,73 @@ mod tests {
                     .layer(EchoLen);
             let response = svc
                 .oneshot(good)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+        });
+    }
+
+    #[test]
+    fn a_declared_extra_signed_header_is_dup_checked_too() {
+        // Issue #395. `CustomScheme::signed_headers` is how a scheme brings a
+        // header its `signed_string` reads into the `spec.md` §4.4 scan. The
+        // closure below signs the body only, so the declaration is the sole
+        // difference between the three deliveries — which is exactly what the
+        // scan keys on: declared → duplicate rejected, undeclared → the
+        // documented residual, still verified.
+        //
+        // HMAC-SHA256 hex of the body with key "k":
+        // printf 'Hello, World!' | openssl dgst -sha256 -hmac "k"
+        const DIGEST: &str = "11316937114e6970aa59bd5326a6f38dd525f4ade64670e402bff41e2f7c4071";
+        let scheme = crate::CustomScheme {
+            hash: crate::HashAlg::Sha256,
+            signature_header: "X-My-Sig",
+            timestamp_header: None,
+            timestamp_unit: crate::TimestampUnit::Seconds,
+            encoding: crate::Encoding::Hex,
+            prefix: Some("sha256="),
+            signed_headers: &["X-My-Nonce"],
+            signed_string: |_headers, body| body.to_vec(),
+        };
+        let build = |extra: &[(&str, &str)]| {
+            let mut builder = Request::builder().header("X-My-Sig", format!("sha256={DIGEST}"));
+            for (name, value) in extra {
+                builder = builder.header(*name, *value);
+            }
+            builder
+                .body(TestBody::new(Bytes::from_static(GITHUB_BODY)))
+                .unwrap_or_else(|_| unreachable!("static parts build a valid request"))
+        };
+
+        // A conflicting duplicate of the *declared* extra header is a 400 —
+        // the scan reaches it through `signed_headers`, not only through the
+        // signature/timestamp pair.
+        block_on(async {
+            let svc = VerifyLayer::new(Provider::Custom(scheme), Secret::new("k")).layer(EchoLen);
+            let response = svc
+                .oneshot(build(&[("x-my-nonce", "one"), ("X-My-Nonce", "two")]))
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        });
+
+        // One value for the same declared header: unambiguous, verifies.
+        block_on(async {
+            let svc = VerifyLayer::new(Provider::Custom(scheme), Secret::new("k")).layer(EchoLen);
+            let response = svc
+                .oneshot(build(&[("X-My-Nonce", "one")]))
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+            assert_eq!(response.status(), StatusCode::OK);
+        });
+
+        // The documented residual: a duplicate of a header the scheme did *not*
+        // declare is invisible to the scan, so the delivery verifies. The
+        // declaration is what closes this door.
+        block_on(async {
+            let svc = VerifyLayer::new(Provider::Custom(scheme), Secret::new("k")).layer(EchoLen);
+            let response = svc
+                .oneshot(build(&[("x-unrelated", "one"), ("X-Unrelated", "two")]))
                 .await
                 .unwrap_or_else(|error| panic!("{error}"));
             assert_eq!(response.status(), StatusCode::OK);
