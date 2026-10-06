@@ -134,7 +134,8 @@
 //! - `std` *(default)* — provides the wall clock used for replay protection.
 //!   Disable for `no_std + alloc` targets (validated against
 //!   `wasm32-unknown-unknown`); supply your own [`Clock`] for timestamped
-//!   providers. Dropping it does **not** change the error types:
+//!   providers ([`FixedClock`] in tests, which needs no feature). Dropping it
+//!   does **not** change the error types:
 //!   [`VerifyError`] and [`ProviderParseError`] implement
 //!   `core::error::Error` unconditionally (stable in `core` since Rust 1.81,
 //!   below the MSRV), which `std::error::Error` re-exports anyway.
@@ -232,7 +233,9 @@ pub use crate::core::SystemClock;
 #[cfg(feature = "http")]
 pub use crate::core::adapter_utils::ambiguous_signature_header;
 pub use crate::core::adapter_utils::ambiguous_signature_header_in;
-pub use crate::core::{Clock, HeaderMap, Secret, VerifyError, VerifyOptions, VerifyingKeyMaterial};
+pub use crate::core::{
+    Clock, FixedClock, HeaderMap, Secret, VerifyError, VerifyOptions, VerifyingKeyMaterial,
+};
 pub use crate::providers::{
     CustomScheme, Encoding, HashAlg, Provider, ProviderParseError, TimestampUnit, verify,
     verify_any,

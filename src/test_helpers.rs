@@ -19,17 +19,15 @@ pub use alloc::{
     vec::Vec,
 };
 
-use crate::core::options::{Clock, VerifyOptions};
+use crate::core::options::VerifyOptions;
 
-/// A [`Clock`] pinned to a fixed unix-seconds instant.
-#[derive(Debug)]
-pub struct FixedClock(pub u64);
-
-impl Clock for FixedClock {
-    fn now(&self) -> u64 {
-        self.0
-    }
-}
+/// A [`Clock`](crate::Clock) pinned to a fixed unix-seconds instant.
+///
+/// A re-export of the crate's own public `FixedClock` rather than a second
+/// private copy: the crate's provider tests and a downstream user's tests then
+/// exercise the same type, so this file cannot drift from the public one and
+/// the `#[cfg(test)]` copy cannot drift from the tests that depend on it.
+pub use crate::core::options::FixedClock;
 
 /// The unix-seconds value `secs` seconds after the Unix epoch.
 pub fn epoch(secs: u64) -> u64 {

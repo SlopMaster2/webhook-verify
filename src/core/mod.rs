@@ -29,7 +29,7 @@ pub use error::VerifyError;
 pub use headers::HeaderMap;
 #[cfg(feature = "std")]
 pub use options::SystemClock;
-pub use options::{Clock, VerifyOptions, VerifyingKeyMaterial};
+pub use options::{Clock, FixedClock, VerifyOptions, VerifyingKeyMaterial};
 pub use secret::Secret;
 
 #[cfg(test)]

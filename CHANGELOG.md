@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`FixedClock`**, a public [`Clock`] pinned to a fixed instant, for
+  deterministic tests of the replay window.
+
+  `Clock` is public, `VerifyOptions::with_clock` is public, and every provider
+  whose scheme signs a timestamp is untestable against a *moving* clock from
+  outside the crate: the signature covers its own timestamp, so a test cannot
+  age a delivery by editing the header — the HMAC stops matching and
+  `check_replay` is never reached. The only way to assert the window is to
+  move "now", which meant every downstream test had to hand-roll a four-line
+  `Clock` impl first. The crate already had exactly that type for its own
+  provider tests, privately, in `src/test_helpers.rs`; it is now the exported
+  one, so a downstream test and an upstream one exercise the same value.
+
+  Additive only: a new public struct, no field or signature touched, so
+  `semver-checks` sees no change at all. Not feature-gated, unlike
+  `SystemClock` — a `FixedClock` is a bare `u64` wrapper that touches nothing
+  outside `core`, so it is available in every configuration this crate builds,
+  including the `no_std + alloc` ones where it is the *only* clock a test can
+  use (`SystemClock` is absent there and no wall clock exists).
+
+  The "not for production" part is stated in its own docs rather than left to
+  be inferred: a `FixedClock` never advances, so it accepts a timestamp exactly
+  `max_age` old forever. `Clock` and `VerifyOptions::with_clock` gained
+  runnable examples that assert the window end to end — accepted inside it,
+  `TimestampOutOfTolerance` outside it — over Stripe's crate-local vector,
+  which is also the first time either doc had an example at all.
+
 - **`VerifyLayer::on_rejection(..)`** (issue #379). The tower adapter's docs —
   and the `README` — promised that "distinguishing detail belongs in server-side
   logging keyed off the structured `VerifyError`", but the middleware made

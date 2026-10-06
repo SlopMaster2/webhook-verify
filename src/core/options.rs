@@ -20,6 +20,43 @@ use std::time::SystemTime;
 ///
 /// Only providers whose scheme signs a timestamp use a clock; for others
 /// (GitHub, Shopify) no `Clock` is consulted.
+///
+/// # Testing a replay window
+///
+/// A timestamped provider's signature covers its own timestamp, so a test
+/// cannot exercise the window by rewriting the header alone — the HMAC stops
+/// matching. Injecting a clock is what makes both halves of the window
+/// assertable, and [`FixedClock`] is the ready-made clock for it: pin "now"
+/// to the instant the signature was minted over, then move it and watch the
+/// delivery go stale.
+///
+/// ```
+/// use std::sync::Arc;
+/// use webhook_verify::{FixedClock, Provider, Secret, VerifyError, VerifyOptions, verify};
+///
+/// // A Stripe delivery signed at unix 1700000000. The signature is the
+/// // crate's own locally constructed vector (see `src/providers/stripe.rs`):
+/// // HMAC-SHA256("whsec_test_secret", "1700000000.{...}").
+/// let headers: Vec<(&str, &str)> = vec![(
+///     "Stripe-Signature",
+///     "t=1700000000,v1=d95c6b7477fbd7e9f90b1b0ef5f9c7ac25abca5382460e0d988c2b2a5b71b990",
+/// )];
+/// let body = br#"{"id":"evt_test_webhook","object":"event"}"#;
+/// let secret = Secret::new("whsec_test_secret");
+///
+/// // Inside the default 300s window: "now" is 5s after the signed timestamp.
+/// let at = VerifyOptions::default().with_clock(Some(Arc::new(FixedClock(1_700_000_005))));
+/// assert_eq!(verify(Provider::Stripe, &headers, body, &secret, at), Ok(()));
+///
+/// // The very same bytes, replayed ten minutes later, are refused — and as a
+/// // replay rejection rather than a signature mismatch, which is the
+/// // distinction a caller counts and logs differently.
+/// let stale = VerifyOptions::default().with_clock(Some(Arc::new(FixedClock(1_700_000_600))));
+/// assert!(matches!(
+///     verify(Provider::Stripe, &headers, body, &secret, stale),
+///     Err(VerifyError::TimestampOutOfTolerance { .. }),
+/// ));
+/// ```
 pub trait Clock: Send + Sync {
     /// The current time as unix seconds.
     #[must_use]
@@ -39,6 +76,52 @@ impl Clock for SystemClock {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
+    }
+}
+
+/// A [`Clock`] pinned to a fixed instant, for deterministic tests.
+///
+/// Every provider whose scheme signs a timestamp also HMACs that timestamp,
+/// so a test cannot age a delivery by editing the header — the signature stops
+/// matching and the replay window is never reached. Injecting the clock is
+/// what makes the window assertable: sign at `t`, pin "now" to `t + 5` and the
+/// delivery verifies, pin it to `t + 600` and the same bytes come back
+/// [`VerifyError::TimestampOutOfTolerance`](crate::VerifyError::TimestampOutOfTolerance)
+/// instead of verifying.
+///
+/// [`Clock`]'s own docs have the worked example; this type is what makes it
+/// three lines rather than a hand-rolled impl. It is the same type the
+/// crate's own provider tests use, so a downstream test and an upstream one
+/// read the same.
+///
+/// Deliberately not feature-gated (unlike `SystemClock`, which needs `std`):
+/// it is a bare `u64` wrapper that touches nothing outside `core`, so it is
+/// available in every configuration this crate builds — including the
+/// `no_std + alloc` ones, where it is the *only* clock a test can use because
+/// `SystemClock` is absent and a real wall clock does not exist. (Spelled as
+/// plain text for the same reason the crate's other feature-gated mentions are:
+/// a link from an unconditionally-compiled doc context to a `std`-gated item
+/// resolves under `--all-features` and fails as an unresolved link without it.)
+///
+/// Not for production: a [`FixedClock`] never advances, so it accepts a
+/// timestamp exactly `max_age` old forever. Use `SystemClock` (or your own
+/// [`Clock`]) in anything that faces real traffic.
+///
+/// ```
+/// use webhook_verify::{Clock, FixedClock};
+///
+/// let clock = FixedClock(1_700_000_000);
+/// assert_eq!(clock.now(), 1_700_000_000);
+/// // Two reads are two identical answers — that is the point.
+/// assert_eq!(clock.now(), clock.now());
+/// ```
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct FixedClock(pub u64);
+
+impl Clock for FixedClock {
+    fn now(&self) -> u64 {
+        self.0
     }
 }
 
@@ -285,7 +368,17 @@ impl VerifyOptions {
     /// protection. `None` uses real system time under the `std` feature; on a
     /// `no_std` target it leaves [`VerifyOptions::now`] reading 0, which
     /// fail-closes replay-protected providers until a [`Clock`] is injected.
-    /// Injectable for deterministic tests of timestamp-based providers.
+    /// Injectable for deterministic tests of timestamp-based providers —
+    /// [`FixedClock`] is the ready-made clock for that, and [`Clock`]'s docs
+    /// show a replay window asserted end to end.
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use webhook_verify::{FixedClock, VerifyOptions};
+    ///
+    /// let opts = VerifyOptions::default().with_clock(Some(Arc::new(FixedClock(1_700_000_000))));
+    /// assert_eq!(opts.now(), 1_700_000_000);
+    /// ```
     pub fn with_clock(mut self, clock: Option<Arc<dyn Clock>>) -> Self {
         self.clock = clock;
         self
@@ -352,7 +445,33 @@ mod tests {
     use std::time::Duration;
 
     use super::{VerifyOptions, VerifyingKeyMaterial};
+    use crate::core::options::Clock;
     use crate::test_helpers::{FixedClock, epoch};
+
+    // --- FixedClock (public; the crate's own tests use the exported type) -----
+
+    #[test]
+    fn fixed_clock_never_advances() {
+        let clock = FixedClock(epoch(1_700_000_000));
+        // Three reads, one answer: that non-advancement is the whole property,
+        // and it is what makes a replay-window assertion reproducible.
+        assert_eq!(clock.now(), epoch(1_700_000_000));
+        assert_eq!(clock.now(), clock.now());
+        assert_eq!(clock.now(), clock.now());
+    }
+
+    #[test]
+    fn fixed_clock_default_is_the_epoch() {
+        assert_eq!(FixedClock::default().now(), 0);
+    }
+
+    #[test]
+    fn fixed_clock_satisfies_the_clock_bounds_without_an_arc() {
+        // `Clock: Send + Sync`, so `Arc<dyn Clock>` accepts it and a caller can
+        // share one pinned instant across a whole test's verifications.
+        let clock: Arc<dyn Clock> = Arc::new(FixedClock(epoch(1_700_000_000)));
+        assert_eq!(clock.now(), epoch(1_700_000_000));
+    }
 
     #[test]
     fn default_is_five_minutes_without_injected_clock() {
