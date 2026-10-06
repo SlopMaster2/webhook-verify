@@ -26,20 +26,19 @@ let raw_body = b"{\"id\": \"evt_test\"}";
 // first value only, and would happily accept a forged one appended behind a
 // real one. Reject an ambiguous request before trusting `verify()` — see
 // "Duplicate signature headers" below for both entry points.
-if let Some(header) = ambiguous_signature_header_in(Provider::Stripe, &headers) {
-    return Err(VerifyError::MalformedHeader {
+let result = match ambiguous_signature_header_in(Provider::Stripe, &headers) {
+    Some(header) => Err(VerifyError::MalformedHeader {
         header,
         reason: VerifyError::AMBIGUOUS_HEADER_REASON,
-    });
-}
-
-let result = verify(
-    Provider::Stripe,
-    &headers,        // anything implementing HeaderMap
-    raw_body,         // &[u8] — MUST be the untouched request body
-    &Secret::new("whsec_..."),  // your real webhook signing secret
-    Default::default(),
-);
+    }),
+    None => verify(
+        Provider::Stripe,
+        &headers,        // anything implementing HeaderMap
+        raw_body,        // &[u8] — MUST be the untouched request body
+        &Secret::new("whsec_..."),  // your real webhook signing secret
+        Default::default(),
+    ),
+};
 
 match result {
     Ok(()) => { /* trusted: safe to process the event */ }
@@ -306,19 +305,26 @@ headers.insert(
     http::HeaderValue::from_static("sha256=6d3f1e..."),
 );
 
-if let Some(header) = ambiguous_signature_header(Provider::GitHub, &headers) {
-    return Err(VerifyError::MalformedHeader {
+// A duplicate is a malformed request (400) before it is ever a signature
+// question, so it outranks `verify()`; otherwise verify the delivery.
+let result = match ambiguous_signature_header(Provider::GitHub, &headers) {
+    Some(header) => Err(VerifyError::MalformedHeader {
         header,
         reason: VerifyError::AMBIGUOUS_HEADER_REASON,
-    });
+    }),
+    None => verify(
+        Provider::GitHub,
+        &headers,
+        b"the untouched request body",
+        &Secret::new("your GitHub webhook secret"),
+        Default::default(),
+    ),
+};
+
+match result {
+    Ok(()) => { /* trusted: safe to process the event */ }
+    Err(error) => { /* reject with error.rejection_status() (400/401/500) */ }
 }
-verify(
-    Provider::GitHub,
-    &headers,
-    b"the untouched request body",
-    &Secret::new("your GitHub webhook secret"),
-    Default::default(),
-)?;
 ```
 
 Without the `http` feature, pass the pair table you already built instead — the
@@ -336,19 +342,26 @@ let headers: Vec<(&str, &str)> = vec![
     ("x-hub-signature-256", "sha256=6d3f1e..."),
 ];
 
-if let Some(header) = ambiguous_signature_header_in(Provider::GitHub, &headers) {
-    return Err(VerifyError::MalformedHeader {
+// A duplicate is a malformed request (400) before it is ever a signature
+// question, so it outranks `verify()`; otherwise verify the delivery.
+let result = match ambiguous_signature_header_in(Provider::GitHub, &headers) {
+    Some(header) => Err(VerifyError::MalformedHeader {
         header,
         reason: VerifyError::AMBIGUOUS_HEADER_REASON,
-    });
+    }),
+    None => verify(
+        Provider::GitHub,
+        &headers,
+        b"the untouched request body",
+        &Secret::new("your GitHub webhook secret"),
+        Default::default(),
+    ),
+};
+
+match result {
+    Ok(()) => { /* trusted: safe to process the event */ }
+    Err(error) => { /* reject with error.rejection_status() (400/401/500) */ }
 }
-verify(
-    Provider::GitHub,
-    &headers,
-    b"the untouched request body",
-    &Secret::new("your GitHub webhook secret"),
-    Default::default(),
-)?;
 ```
 
 It returns the provider-spelled name of the offending header, or `None` when
@@ -537,12 +550,15 @@ configure an optional maximum body size with
 `VerifyLayer::with_max_body_size(bytes)`:
 
 ```rust
+use bytes::Bytes;
 use webhook_verify::{Provider, Secret};
 use webhook_verify::tower::VerifyLayer;
 
 // 256 KiB limit, matching actix-web's default body-extractor bound.
-let layer = VerifyLayer::new(Provider::Stripe, Secret::new("whsec_..."))
-    .with_max_body_size(256 * 1024);
+// `VerifyLayer<B = Bytes>`'s body-type default only kicks in where `B` is
+// otherwise known; a standalone `let` leaves it unconstrained, so name it.
+let layer: VerifyLayer<Bytes> =
+    VerifyLayer::new(Provider::Stripe, Secret::new("whsec_...")).with_max_body_size(256 * 1024);
 ```
 
 The body is buffered in full (verification requires the exact wire bytes)
@@ -556,10 +572,11 @@ Plain tower stacks receive `Request<Bytes>`; axum users get their own body
 type back automatically via type inference:
 
 ```rust
+use bytes::Bytes;
 use webhook_verify::{Provider, Secret};
 use webhook_verify::tower::VerifyLayer;
 
-let layer = VerifyLayer::new(Provider::Stripe, Secret::new("whsec_..."));
+let layer: VerifyLayer<Bytes> = VerifyLayer::new(Provider::Stripe, Secret::new("whsec_..."));
 
 // Plain tower: inner service takes http::Request<Bytes>.
 // let svc = layer.clone().layer(my_handler_service);

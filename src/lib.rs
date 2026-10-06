@@ -252,6 +252,28 @@ pub mod klaviyo {
     pub use crate::providers::klaviyo::{SIGNATURE_HEADER, TIMESTAMP_HEADER, WEBHOOK_ID_HEADER};
 }
 
+// `README.md` is the first thing a caller reads, and nothing else in this repo
+// compiles it: the crate docs are a separate file, so a fenced `rust` block in
+// the README is prose as far as `cargo test` is concerned — the drift #376 had
+// to catch after the fact. Including it as the documentation of a module that
+// exists only while rustdoc collects doctests turns every active `rust` fence
+// into a doctest (issue #399): compiled *and run* by `cargo test --all-features`,
+// which is what CI runs (`.github/workflows/ci.yml`).
+//
+// Gated on `tower` rather than per-fence because rustdoc has no feature
+// attribute for a code block (`feature="x"` inside a fence is rejected with
+// `rustdoc::invalid_codeblock_attributes`), and the alternative — a hidden
+// `# #[cfg(feature = "..")] {` line around each gated block — would put
+// harness lines into the README a reader is meant to copy. `tower` implies
+// `http` and pulls in `bytes`, which is every dependency the snippets name;
+// a configuration without it skips the README instead of failing it. The
+// `doctest` half of the predicate is false for `cargo doc`, so the README
+// never renders as a second copy of the crate docs.
+#[cfg(all(doctest, feature = "tower"))]
+mod readme {
+    #![doc = include_str!("../README.md")]
+}
+
 #[cfg(test)]
 mod docs {
     use alloc::format;
