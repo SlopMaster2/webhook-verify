@@ -8006,7 +8006,7 @@ pub struct S {
     }
 
     /// Both framework adapters' module docs name every provider whose scheme
-    /// signs caller-supplied request context, and name the adapter's own
+    /// requires caller-supplied request context, and name the adapter's own
     /// `with_options` constructor alongside them.
     ///
     /// [`context_option_field_docs_name_every_provider_that_reads_the_option`]
@@ -8039,10 +8039,20 @@ pub struct S {
     /// runtime says so. This guard keeps both adapters and the README's adapter
     /// section in step with the code, so a provider that starts reading a
     /// context option cannot ship undocumented.
+    ///
+    /// The two key-material options are in scope for the same reason the three
+    /// request-shape ones are: the sections are where an adapter user learns
+    /// what has to be configured *at construction*, and both sections already
+    /// claimed to cover key material while naming only the five
+    /// URL/method readers. PayPal carries a certificate URL in the request, but
+    /// this crate performs no network calls (`spec.md` §7), so that URL cannot
+    /// be the supply route — and PayPal's `webhook_id` travels nowhere near the
+    /// request at all. Absent either, `verify()` fails closed with
+    /// `MissingContext`, which both adapters answer as a `500` (issue #397).
     #[test]
     fn framework_adapter_docs_name_every_provider_that_needs_request_context() {
         /// A provider's `Display` brand, its module stem, and which of the
-        /// three request-context options its implementation reads.
+        /// five `VerifyOptions` context fields its implementation reads.
         fn readers() -> Vec<(String, String, Vec<&'static str>)> {
             provider_list()
                 .into_iter()
@@ -8050,7 +8060,13 @@ pub struct S {
                     let stem = provider_module_stem(provider);
                     let implementation = module_implementation(&stem);
                     let mut reads = Vec::new();
-                    for field in ["request_url", "request_method", "form_params"] {
+                    for field in [
+                        "request_url",
+                        "request_method",
+                        "form_params",
+                        "verifying_material",
+                        "webhook_id",
+                    ] {
                         if reads_context_option_field(&implementation, field) {
                             reads.push(field);
                         }
@@ -8062,15 +8078,16 @@ pub struct S {
         }
 
         let readers = readers();
-        // Vacuity floor: the scan must find the five providers it finds today,
+        // Vacuity floor: the scan must find the seven providers it finds today,
         // or a broken derivation turns every assertion below into a pass. Kept
         // as an exact count so a *new* reader is also a failure here rather
         // than only tripping the per-provider assertions.
         assert_eq!(
             readers.len(),
-            5,
-            "expected exactly the five providers that sign caller-supplied request \
-             context (Contentful, HubSpot, Square, Twilio, Mandrill), found: {readers:?}"
+            7,
+            "expected exactly the seven providers that require caller-supplied \
+             request context (Contentful, HubSpot, Square, Twilio, Mandrill, \
+             PayPal, SendGrid), found: {readers:?}"
         );
 
         // Both adapter module docs, plus the README's adapter section. The
@@ -8095,7 +8112,7 @@ pub struct S {
             ] {
                 assert!(
                     text.contains(brand.as_str()),
-                    "providers/{stem}.rs signs caller-supplied request context ({reads:?}), \
+                    "providers/{stem}.rs requires caller-supplied request context ({reads:?}), \
                      but the {surface} never names {brand}. An adapter user configuring {brand} \
                      has no way to learn the context must be supplied when the layer/config is \
                      built, and every delivery fails closed with \

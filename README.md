@@ -438,9 +438,11 @@ library — with no features (pure core) and with `--features sendgrid`:
 
 Both adapters verify with the single `VerifyOptions` they were built with and
 derive **no** endpoint URL, method, or asymmetric key material from the
-incoming request. That is deliberate: what these schemes sign is the value the
-*provider* signed, which behind a reverse proxy, a path-prefix mount, or an
-https-terminating load balancer is not the URI this process receives. So five
+incoming request. The URL and the method are not derived because what those
+schemes sign is the value the *provider* signed, which behind a reverse proxy,
+a path-prefix mount, or an https-terminating load balancer is not the URI this
+process receives; the key material is simply not in the request to begin with,
+except as PayPal's certificate *URL*, which this crate never fetches. So seven
 providers need that context configured up front, via
 `VerifyLayer::with_options` / `WebhookConfig::with_options`:
 
@@ -449,10 +451,19 @@ providers need that context configured up front, via
 | `Contentful`, `HubSpot` | `request_method` **and** `request_url` |
 | `Square` | `request_url` |
 | `Twilio`, `Mandrill` | `request_url` (`form_params` optional — see below) |
+| `SendGrid` | `verifying_material` (the ECDSA P-256 public key; `sendgrid` feature) |
+| `PayPal` | `verifying_material` (the X.509 certificate) **and** `webhook_id` (`paypal` feature) |
 
 A missing value fails closed with `VerifyError::MissingContext`, which both
 adapters report as `500 Internal Server Error` — a misconfiguration, not a
 `401` forgery.
+
+`PayPal` and `SendGrid` ignore the `Secret` entirely: they verify against that
+key material instead, so a default `VerifyOptions` leaves them nothing to
+check. PayPal's certificate URL does arrive in the request, but this crate
+performs no network calls (`spec.md` §7) — the certificate is yours to fetch,
+allow-list and supply — and PayPal's webhook-subscription ID travels nowhere
+near the request at all.
 
 **`form_params` needs no configuring.** Twilio and Mandrill sign the *parsed*
 form fields rather than the body bytes, and those fields are the body — so

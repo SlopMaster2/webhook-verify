@@ -64,25 +64,39 @@
 //! The layer verifies with the single [`VerifyOptions`] it was built with —
 //! [`VerifyLayer::new`] supplies [`VerifyOptions::default()`],
 //! [`VerifyLayer::with_options`] whatever you pass — and **no endpoint URL,
-//! method, or key material is read out of the incoming request**. It does not
-//! derive them from the request it is verifying, because what these schemes
-//! sign is the value **the provider signed**, not the one this process
-//! received: behind a reverse proxy, a path-prefix mount, or an
+//! method, or key material is read out of the incoming request**. The URL and
+//! the method are not derived from the request being verified, because what
+//! those schemes sign is the value **the provider signed**, not the one this
+//! process received: behind a reverse proxy, a path-prefix mount, or an
 //! https-terminating load balancer the request's own URI is not the webhook
 //! URL the provider signed, so deriving it would verify a different string
-//! than the signer produced.
+//! than the signer produced. Key material has no equivalent derivation to
+//! reject — it is simply not in the request to begin with, except as PayPal's
+//! certificate *URL*, which this crate will not fetch (see below).
 //!
-//! Five built-in providers need that context configured, and omitting a
+//! Seven built-in providers need that context configured, and omitting a
 //! required value fails closed with [`VerifyError::MissingContext`] — the `500`
 //! row above, never a `401` that would read as a forgery:
 //!
 //! - `Contentful` and `HubSpot` need both
 //!   [`VerifyOptions::request_method`] and [`VerifyOptions::request_url`];
 //! - `Square` needs [`VerifyOptions::request_url`];
-//! - `Twilio` and `Mandrill` need [`VerifyOptions::request_url`].
+//! - `Twilio` and `Mandrill` need [`VerifyOptions::request_url`];
+//! - `SendGrid` needs [`VerifyOptions::verifying_material`];
+//! - `PayPal` needs [`VerifyOptions::verifying_material`] **and**
+//!   [`VerifyOptions::webhook_id`].
 //!
-//! Every one of them is a constant of the deployment — one endpoint, one
-//! method — so [`VerifyLayer::with_options`] covers it:
+//! `PayPal` and `SendGrid` ignore the `Secret` entirely and verify against
+//! that key material instead, so a default [`VerifyOptions`] leaves them
+//! nothing to check. PayPal does carry a certificate URL in the request, but
+//! this crate performs no network calls (`spec.md` §7) — the certificate is
+//! yours to fetch, allow-list and supply — and PayPal's webhook-subscription ID
+//! travels nowhere near the request at all. Both sit behind crate features
+//! (`paypal`, `sendgrid`); without one, `verify()` fails closed with
+//! [`VerifyError::UnsupportedProvider`].
+//!
+//! Every one of the seven is a constant of the deployment — one endpoint, one
+//! method, one key — so [`VerifyLayer::with_options`] covers it:
 //!
 //! ```rust
 //! use bytes::Bytes;
@@ -362,7 +376,9 @@ impl<B> VerifyLayer<B> {
     }
 
     /// Like [`VerifyLayer::new`], with explicit [`VerifyOptions`] (timestamp
-    /// tolerance, injected clock, URL-scoped schemes such as Square/Twilio).
+    /// tolerance, injected clock, URL-scoped schemes such as Square/Twilio,
+    /// and the key material PayPal/SendGrid verify against — see the module
+    /// docs' "Providers that need request context" list).
     pub fn with_options(provider: Provider, secret: Secret, options: VerifyOptions) -> Self {
         Self {
             config: Config {
