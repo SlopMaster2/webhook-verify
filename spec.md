@@ -165,6 +165,12 @@ impl Default for VerifyOptions {
     }
 }
 
+// `with_max_age` takes `impl Into<Option<Duration>>`: the bare duration is
+// the ordinary call, and both `Option` spellings that preceded it —
+// `Some(..)` and `None` — still compile, so the change is a widening and
+// no existing call site moves (issue #386).
+fn with_max_age(self, max_age: impl Into<Option<Duration>>) -> Self;
+
 // Turning the replay window off gets its own named builder rather than only
 // the `with_max_age(None)` spelling, which reads like ordinary configuration
 // at the call site while its effect is permanent acceptance — no provider

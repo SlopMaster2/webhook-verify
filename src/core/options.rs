@@ -183,7 +183,7 @@ impl fmt::Debug for VerifyingKeyMaterial {
 /// use std::time::Duration;
 /// use webhook_verify::VerifyOptions;
 ///
-/// let opts = VerifyOptions::default().with_max_age(Some(Duration::from_secs(600)));
+/// let opts = VerifyOptions::default().with_max_age(Duration::from_secs(600));
 /// assert_eq!(opts.max_age, Some(Duration::from_secs(600)));
 /// ```
 #[must_use]
@@ -375,13 +375,23 @@ impl VerifyOptions {
     /// greps, and the intent is readable at the call site rather than only in
     /// a doc comment.
     ///
+    /// The parameter is `impl Into<Option<Duration>>`, so the ordinary call
+    /// passes the bare duration (it lands through `From<T> for Option<T>`),
+    /// and both `Option` spellings that were the only ones before keep
+    /// compiling unchanged — `Some(..)` and `None` both resolve through the
+    /// reflexive `From<T> for T`.
+    ///
     /// ```
     /// use std::time::Duration;
     /// use webhook_verify::VerifyOptions;
     ///
     /// // Widening the window is ordinary configuration and stays a bare value.
-    /// let lenient = VerifyOptions::default().with_max_age(Some(Duration::from_secs(600)));
+    /// let lenient = VerifyOptions::default().with_max_age(Duration::from_secs(600));
     /// assert_eq!(lenient.max_age, Some(Duration::from_secs(600)));
+    ///
+    /// // The `Option` spellings still compile, for existing call sites.
+    /// let same = VerifyOptions::default().with_max_age(Some(Duration::from_secs(600)));
+    /// assert_eq!(same.max_age, lenient.max_age);
     ///
     /// // Turning the window *off* has a name that says so.
     /// let off = VerifyOptions::default().without_replay_protection();
@@ -390,8 +400,8 @@ impl VerifyOptions {
     ///
     /// Providers that do not sign timestamps document explicitly that this
     /// option has no effect on them (see `spec.md` §3).
-    pub fn with_max_age(mut self, max_age: Option<Duration>) -> Self {
-        self.max_age = max_age;
+    pub fn with_max_age(mut self, max_age: impl Into<Option<Duration>>) -> Self {
+        self.max_age = max_age.into();
         self
     }
 
@@ -638,12 +648,20 @@ mod tests {
 
     #[test]
     fn builder_sets_max_age() {
-        let opts = VerifyOptions::default().with_max_age(Some(Duration::from_secs(600)));
+        // The bare value is the ordinary spelling now that the parameter is
+        // `impl Into<Option<Duration>>`.
+        let opts = VerifyOptions::default().with_max_age(Duration::from_secs(600));
         assert_eq!(opts.max_age, Some(Duration::from_secs(600)));
+        // The change is a widening, so a call site that passes `Some(..)`
+        // must keep compiling and land on the same field (issue #386).
+        let wrapped = VerifyOptions::default().with_max_age(Some(Duration::from_secs(600)));
+        assert_eq!(wrapped.max_age, opts.max_age);
     }
 
     #[test]
     fn builder_disables_max_age() {
+        // `None` is the other pre-existing spelling, carried by the reflexive
+        // `From` impl — this test is what keeps it compiling (issue #386).
         let opts = VerifyOptions::default().with_max_age(None);
         assert!(opts.max_age.is_none());
     }
@@ -683,7 +701,7 @@ mod tests {
         // back on must restore a real window, since `max_age` is a plain field.
         let opts = VerifyOptions::default()
             .without_replay_protection()
-            .with_max_age(Some(Duration::from_secs(60)));
+            .with_max_age(Duration::from_secs(60));
         assert_eq!(opts.max_age, Some(Duration::from_secs(60)));
     }
 

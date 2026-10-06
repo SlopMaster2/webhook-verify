@@ -476,7 +476,7 @@ mod tests {
         let options = VerifyOptions::default()
             .with_request_url(CHECK_URL)
             .with_form_params(CHECK_PARAMS.iter().copied())
-            .with_max_age(Some(std::time::Duration::ZERO));
+            .with_max_age(std::time::Duration::ZERO);
         let result = verify(
             crate::Provider::Mandrill,
             &mandrill_headers(CHECK_SIGNATURE),
