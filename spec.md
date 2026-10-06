@@ -116,7 +116,9 @@ pub struct VerifyOptions {  // #[non_exhaustive]: configure via Default + the
                             //   `with_*` builders so new fields stay non-breaking
     /// Maximum allowed age between the signed timestamp and "now",
     /// for providers whose scheme includes a timestamp. `None` disables
-    /// the check (not recommended). Default: Some(Duration::from_secs(300)).
+    /// the check (not recommended) — spell that with
+    /// `without_replay_protection()`, not `with_max_age(None)`, so the
+    /// call site says so. Default: Some(Duration::from_secs(300)).
     pub max_age: Option<Duration>,
     /// Clock used for "now", injectable for deterministic tests.
     pub clock: Option<Arc<dyn Clock>>,
@@ -162,6 +164,14 @@ impl Default for VerifyOptions {
         }
     }
 }
+
+// Turning the replay window off gets its own named builder rather than only
+// the `with_max_age(None)` spelling, which reads like ordinary configuration
+// at the call site while its effect is permanent acceptance — no provider
+// rejects an old delivery, `TimestampOutOfTolerance` can no longer be
+// produced, and so nothing signals it (§4's loud-over-silent bias).
+// `without_replay_protection()` is the same state under a name that greps.
+fn without_replay_protection(self) -> Self;
 
 impl core::str::FromStr for Provider {
     type Err = ProviderParseError;

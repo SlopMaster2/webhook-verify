@@ -192,8 +192,10 @@ impl fmt::Debug for VerifyingKeyMaterial {
 pub struct VerifyOptions {
     /// Maximum allowed age between a signed timestamp and "now", for providers
     /// whose scheme includes a timestamp. `None` disables the check (not
-    /// recommended). Default: 300 seconds, matching Stripe's and Slack's own
-    /// SDK defaults.
+    /// recommended) — reach for
+    /// [`VerifyOptions::without_replay_protection`] rather than
+    /// `with_max_age(None)`, so the call site says so. Default: 300 seconds,
+    /// matching Stripe's and Slack's own SDK defaults.
     ///
     /// Providers that do not sign timestamps document explicitly that this
     /// option has no effect on them (see `spec.md` §3).
@@ -360,13 +362,70 @@ impl VerifyOptions {
     }
 
     /// Sets [`VerifyOptions::max_age`], the maximum allowed clock skew for
-    /// providers whose scheme signs a timestamp. `None` disables the check
-    /// (not recommended); the default is `Some(Duration::from_secs(300))`.
+    /// providers whose scheme signs a timestamp. The default is
+    /// `Some(Duration::from_secs(300))`.
+    ///
+    /// **Passing `None` disables replay protection.** That spelling reads like
+    /// ordinary configuration at the call site while its effect is permanent
+    /// acceptance: every timestamped provider stops enforcing
+    /// `|now - t| <= max_age` for as long as this options object is in place, a
+    /// replayed capture verifies forever, and `TimestampOutOfTolerance` can no
+    /// longer be produced, so nothing signals it. Use
+    /// [`VerifyOptions::without_replay_protection`] to spell that — the name
+    /// greps, and the intent is readable at the call site rather than only in
+    /// a doc comment.
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use webhook_verify::VerifyOptions;
+    ///
+    /// // Widening the window is ordinary configuration and stays a bare value.
+    /// let lenient = VerifyOptions::default().with_max_age(Some(Duration::from_secs(600)));
+    /// assert_eq!(lenient.max_age, Some(Duration::from_secs(600)));
+    ///
+    /// // Turning the window *off* has a name that says so.
+    /// let off = VerifyOptions::default().without_replay_protection();
+    /// assert_eq!(off.max_age, None);
+    /// ```
     ///
     /// Providers that do not sign timestamps document explicitly that this
     /// option has no effect on them (see `spec.md` §3).
     pub fn with_max_age(mut self, max_age: Option<Duration>) -> Self {
         self.max_age = max_age;
+        self
+    }
+
+    /// Turns timestamp-based replay protection **off**, i.e. sets
+    /// [`VerifyOptions::max_age`] to `None`. Same state as
+    /// `with_max_age(None)`, under a name that states the consequence where it
+    /// is written rather than only in a doc comment.
+    ///
+    /// This is the dangerous direction, which is why it gets its own builder.
+    /// Once `max_age` is `None`, every provider whose scheme signs a timestamp
+    /// stops rejecting an old delivery: a captured request replays forever, and
+    /// `VerifyError::TimestampOutOfTolerance` can no longer be produced for
+    /// this options object, so there is no wire-level signal that the window
+    /// is gone — the failure mode is silence, not a rejection. `spec.md` §4
+    /// states the crate's bias as loud over silent.
+    ///
+    /// Before calling this, check that the real problem is replay protection
+    /// rather than clock skew: a legitimate delivery arriving late is the
+    /// symptom a *wider* [`VerifyOptions::with_max_age`] fixes, and widening
+    /// keeps the check in place. Injecting a [`Clock`] (see
+    /// [`VerifyOptions::with_clock`]) is how to reproduce the window in a test
+    /// that needs to assert the difference.
+    ///
+    /// ```
+    /// use webhook_verify::VerifyOptions;
+    ///
+    /// assert!(VerifyOptions::default().max_age.is_some());
+    /// assert_eq!(
+    ///     VerifyOptions::default().without_replay_protection().max_age,
+    ///     None,
+    /// );
+    /// ```
+    pub fn without_replay_protection(mut self) -> Self {
+        self.max_age = None;
         self
     }
 
@@ -587,6 +646,79 @@ mod tests {
     fn builder_disables_max_age() {
         let opts = VerifyOptions::default().with_max_age(None);
         assert!(opts.max_age.is_none());
+    }
+
+    #[test]
+    fn without_replay_protection_clears_max_age() {
+        // The loud spelling and the quiet one must land in the same state, or
+        // `without_replay_protection` would be a different configuration from
+        // `with_max_age(None)` — which its own docs promise it is.
+        let loud = VerifyOptions::default().without_replay_protection();
+        let quiet = VerifyOptions::default().with_max_age(None);
+        assert_eq!(loud.max_age, None);
+        assert_eq!(loud.max_age, quiet.max_age);
+    }
+
+    #[test]
+    fn without_replay_protection_keeps_the_other_options() {
+        // It sets exactly one field: turning the window off must not silently
+        // drop the request context a URL-signed provider needs.
+        let opts = VerifyOptions::default()
+            .with_request_url("https://example.com/hook")
+            .with_request_method("POST")
+            .with_webhook_id("sub_123")
+            .without_replay_protection();
+        assert_eq!(opts.max_age, None);
+        assert_eq!(
+            opts.request_url.as_deref(),
+            Some("https://example.com/hook")
+        );
+        assert_eq!(opts.request_method.as_deref(), Some("POST"));
+        assert_eq!(opts.webhook_id.as_deref(), Some("sub_123"));
+    }
+
+    #[test]
+    fn without_replay_protection_can_be_re_enabled() {
+        // Builder order is the ordinary one: turning the window off and then
+        // back on must restore a real window, since `max_age` is a plain field.
+        let opts = VerifyOptions::default()
+            .without_replay_protection()
+            .with_max_age(Some(Duration::from_secs(60)));
+        assert_eq!(opts.max_age, Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn without_replay_protection_lets_a_stale_timestamp_verify() {
+        // The consequence, pinned so it cannot change silently later: with no
+        // window, an arbitrarily old delivery verifies, and
+        // `TimestampOutOfTolerance` is no longer producible. Same Stripe
+        // vector and same "now" the `Clock` doc example uses, moved well past
+        // the default 300s window.
+        use crate::{Provider, Secret, VerifyError, verify};
+
+        let headers: Vec<(&str, &str)> = vec![(
+            "Stripe-Signature",
+            "t=1700000000,v1=d95c6b7477fbd7e9f90b1b0ef5f9c7ac25abca5382460e0d988c2b2a5b71b990",
+        )];
+        let body = br#"{"id":"evt_test_webhook","object":"event"}"#;
+        let secret = Secret::new("whsec_test_secret");
+        let now = VerifyOptions::default()
+            .with_clock(Some(Arc::new(FixedClock(epoch(1_700_000_600)))))
+            .without_replay_protection();
+
+        assert_eq!(
+            verify(Provider::Stripe, &headers, body, &secret, now),
+            Ok(())
+        );
+
+        // The very same bytes with the window restored are refused as a replay,
+        // which is the difference the loud spelling exists to make visible.
+        let protected =
+            VerifyOptions::default().with_clock(Some(Arc::new(FixedClock(epoch(1_700_000_600)))));
+        assert!(matches!(
+            verify(Provider::Stripe, &headers, body, &secret, protected),
+            Err(VerifyError::TimestampOutOfTolerance { .. }),
+        ));
     }
 
     #[test]

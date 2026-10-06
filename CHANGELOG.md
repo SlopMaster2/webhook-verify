@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`VerifyOptions::without_replay_protection()`** (issue #387). Turning the
+  timestamp replay window off was spelled `with_max_age(None)`, which reads
+  like ordinary configuration at the call site while its effect is permanent
+  acceptance: every timestamped provider stops enforcing `|now - t| <= max_age`
+  for as long as that options object is in place, a captured request replays
+  forever, and `TimestampOutOfTolerance` can no longer be produced — so the
+  failure mode is silence rather than a rejection, and the only warning was a
+  doc comment on a field the caller has to have already looked up.
+
+  The new builder is the same state under a name that says so and that greps.
+  Purely additive: no field, signature, or error variant touched, so
+  `with_max_age(None)` keeps working and `semver-checks` sees no change. It
+  also points at the narrower fix for the problem it is sometimes reached for —
+  a delivery that is merely *late* wants a wider `with_max_age`, which keeps
+  the check in place — and notes that the window is assertable in a test via an
+  injected `Clock` rather than by disabling it.
+
 - **`FixedClock`**, a public [`Clock`] pinned to a fixed instant, for
   deterministic tests of the replay window.
 
