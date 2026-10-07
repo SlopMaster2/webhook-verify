@@ -5148,6 +5148,412 @@ mod tests {
         exclusive && crate_wide
     }
 
+    /// Which `spec.md` §5 clause a provider module's test *names* have to read
+    /// as (issue #410).
+    ///
+    /// §5.1–§5.5 are the one part of the testing bar with no drift guard:
+    /// §5.6's fuzz pool, the header-name rules and the README/crate-docs tables
+    /// are all pinned, and nothing checked that a provider module still shipped
+    /// a vector/negative/tamper/replay/malformed-header test at all. A scan can
+    /// only see names, not the assertion each test makes — but presence is
+    /// exactly the part that decays silently when a module is refactored or a
+    /// new one is written from a template.
+    ///
+    /// The recognisers are deliberately loose rather than renaming every
+    /// existing test to fit one scheme: the shipped spellings are not uniform
+    /// (Box's replay tests say `rejects_old_timestamp_outside_window` with no
+    /// "replay" in them, Discord's happy path is `ping_delivery_verifies`,
+    /// Mandrill's is `official_check_scenario_verifies`). Loose is only safe if
+    /// the looseness is bounded, so
+    /// `test_category_recognisers_match_shipped_names_and_reject_prose` pins
+    /// every recogniser on both the irregular shipped spellings and on names
+    /// that must *not* count: a recogniser that stops matching fails there
+    /// first, instead of passing every module vacuously.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum TestCategory {
+        /// §5.1 — an official (or documented-recipe) vector that verifies.
+        Vector,
+        /// §5.2 — one byte flipped in the signature, reported as a mismatch.
+        Negative,
+        /// §5.3 — `raw_body` (or the signed fields) modified after signing.
+        Tamper,
+        /// §5.4 — a correctly signed delivery outside the replay window.
+        Replay,
+        /// §5.5 — a missing, empty or garbage header rejected distinctly.
+        MalformedHeader,
+    }
+
+    /// Every category, in `spec.md` §5 order.
+    const TEST_CATEGORIES: [TestCategory; 5] = [
+        TestCategory::Vector,
+        TestCategory::Negative,
+        TestCategory::Tamper,
+        TestCategory::Replay,
+        TestCategory::MalformedHeader,
+    ];
+
+    /// Words that make a test assert a *rejection*, in any category — the
+    /// shared half of every recogniser, since §5.2–§5.5 are all "this must
+    /// fail" and only §5.1 is "this must pass".
+    const REJECTION_WORDS: [&str; 5] = ["fail", "reject", "mismatch", "satisf", "error"];
+
+    /// Whether `needle`-style markers occur verbatim in a snake_case test name.
+    fn name_contains_any(name: &str, markers: &[&str]) -> bool {
+        markers.iter().any(|marker| name.contains(marker))
+    }
+
+    impl TestCategory {
+        /// The clause plus an accepted spelling, so a failure says what is
+        /// missing and what the scanner would recognise.
+        fn clause_and_hint(self) -> &'static str {
+            match self {
+                Self::Vector => {
+                    "§5.1, an accepting vector test (`official_*`, \
+                                 `*_vector_*`, `constructed_*`, `documented_*`, \
+                                 `*_delivery_verifies`, …)"
+                }
+                Self::Negative => {
+                    "§5.2, a rejected signature forgery \
+                                   (`negative_flipped_*`, `flipped_*`, \
+                                   `*wrong_*_fails`, `rejects_wrong_key`, …)"
+                }
+                Self::Tamper => {
+                    "§5.3, a rejected modified body or signed field \
+                                 (`tampered_body_fails`, `rejects_tampered_body`, \
+                                 `tampered_field_value_is_rejected`, …)"
+                }
+                Self::Replay => {
+                    "§5.4, a rejected out-of-window timestamp \
+                                 (`replay_*_out_of_tolerance`, \
+                                 `rejects_*_outside_window`, \
+                                 `stale_timestamp_rejected`, …)"
+                }
+                Self::MalformedHeader => {
+                    "§5.5, a rejected missing/empty/garbage \
+                                          header (`missing_*_errors_distinctly`, \
+                                          `*_is_malformed`, `*bad_encoding*`, …)"
+                }
+            }
+        }
+
+        /// Whether `name` reads as a test of this category. Loose by design —
+        /// see [`TestCategory`]'s doc comment, and the synthetic-name test that
+        /// bounds the looseness.
+        fn recognises(self, name: &str) -> bool {
+            match self {
+                // The vector test must *accept*, and must say where its values
+                // came from: a boundary case alone is locally constructed with
+                // no provenance, so `boundary_bodies_verify` does not stand in
+                // for §5.1 even though it asserts the same `Ok(())`.
+                Self::Vector => {
+                    name_contains_any(
+                        name,
+                        &[
+                            "vector",
+                            "official",
+                            "constructed",
+                            "documented",
+                            "docs_example",
+                            "reproduces",
+                            "construction",
+                            "recipe",
+                            "scenario",
+                            "delivery",
+                            "sdk",
+                            "rfc",
+                            "example",
+                        ],
+                    ) && name_contains_any(name, &["verif", "accept"])
+                        && !name_contains_any(
+                            name,
+                            &[
+                                "fail",
+                                "reject",
+                                "mismatch",
+                                "wrong",
+                                "tamper",
+                                "flip",
+                                "missing",
+                                "malformed",
+                                "bad_encoding",
+                                "out_of_tolerance",
+                                "stale",
+                                "garbage",
+                                "not_",
+                                "cannot",
+                                "does_not",
+                                "never",
+                                "bypass",
+                                "invalid",
+                                "broken",
+                                "satisf",
+                                "omitted",
+                                "swapped",
+                                "altered",
+                            ],
+                        )
+                }
+                // §5.2 is the flip, so the marker names the forgery rather than
+                // the body: `tampered_body_fails` is §5.3's and must not be
+                // credited here.
+                Self::Negative => {
+                    name_contains_any(
+                        name,
+                        &[
+                            "flipped",
+                            "flip",
+                            "negative",
+                            "wrong",
+                            "forgery",
+                            "mismatch",
+                            "tampered_signature",
+                            "altered_signature",
+                            "swapped_signature",
+                        ],
+                    ) && name_contains_any(name, &REJECTION_WORDS)
+                }
+                // The body/field half of "modified after signing": a tampered
+                // *timestamp* or *signature* is the timestamp/signature-binding
+                // check, not §5.3's re-serialization check.
+                Self::Tamper => {
+                    name_contains_any(name, &["tamper", "altered", "swapped", "re_serialized"])
+                        && name_contains_any(
+                            name,
+                            &[
+                                "body",
+                                "field",
+                                "url",
+                                "request",
+                                "payload",
+                                "value",
+                                "content",
+                                "re_serialized",
+                            ],
+                        )
+                        && name_contains_any(name, &REJECTION_WORDS)
+                }
+                // §5.4's own error text, Box's `outside_window` spelling, a
+                // `stale` rejection, or a `replay_*` test that rejects rather
+                // than `replay_within_tolerance_verifies` (an acceptance) or
+                // `disabled_max_age_accepts_stale_signatures` (the opt-out).
+                Self::Replay => {
+                    name_contains_any(name, &["out_of_tolerance", "outside_window"])
+                        || (name.contains("stale") && name_contains_any(name, &REJECTION_WORDS))
+                        || (name.contains("replay") && name_contains_any(name, &REJECTION_WORDS))
+                }
+                // `malformed`/`bad_encoding` are themselves parse failures;
+                // `missing`/`empty`/`garbage` need the rejection half so that
+                // e.g. contentful's `empty_bare_path_request_url_canonicalizes…`
+                // is not read as §5.5 coverage.
+                Self::MalformedHeader => {
+                    name.contains("malformed")
+                        || name.contains("bad_encoding")
+                        || (name_contains_any(
+                            name,
+                            &["missing", "empty", "garbage", "unparseable", "absent"],
+                        ) && name_contains_any(name, &REJECTION_WORDS))
+                }
+            }
+        }
+
+        /// Whether a provider module must carry this category: §5.4 applies
+        /// only "for providers with timestamps", so it is scoped by the
+        /// implementation's own `check_replay` call rather than by a table.
+        fn required_for(self, stem: &str) -> bool {
+            self != Self::Replay || module_calls_check_replay(stem)
+        }
+    }
+
+    /// §5.1–§5.5 guarded by a scan over every provider module's test names
+    /// (spec.md §5, issue #410).
+    ///
+    /// The scan reads `src/` from disk rather than the compiled crate, so it
+    /// holds in every feature configuration — including the ones where the
+    /// feature-gated `paypal`/`sendgrid` modules are not compiled at all — and
+    /// in a crates.io checkout, where `src/` ships (the same reason the §4
+    /// no-panic guard can walk the directories). `form.rs` is deliberately not
+    /// walked: it is a parsing helper shared by Twilio and Mandrill, not a
+    /// provider, and `provider_module_stems()` is already exactly the set of
+    /// modules that implement a `Provider`.
+    #[test]
+    fn every_provider_module_covers_the_five_test_categories() {
+        let mut checked = 0_usize;
+        for stem in provider_module_stems() {
+            let names = module_test_names(&stem);
+            assert!(
+                !names.is_empty(),
+                "src/providers/{stem}.rs declares no `#[test]` functions, so none of \
+                 spec.md §5.1–§5.5 can be covered there",
+            );
+
+            let missing: Vec<&'static str> = TEST_CATEGORIES
+                .iter()
+                .copied()
+                .filter(|category| category.required_for(&stem))
+                .filter(|category| !names.iter().any(|name| category.recognises(name)))
+                .map(TestCategory::clause_and_hint)
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "src/providers/{stem}.rs has no test reading as each spec.md §5 \
+                 category it must cover — add the missing test, and if it is already \
+                 there under a name this scanner does not read, teach \
+                 `TestCategory::recognises` the spelling and pin it in \
+                 `test_category_recognisers_match_shipped_names_and_reject_prose`: {}",
+                missing.join("; "),
+            );
+            checked += 1;
+        }
+
+        // A walk that found nothing would make every assertion above pass
+        // vacuously, which is the one way a source-scanning guard can report
+        // coverage it does not have.
+        assert!(
+            checked > 0,
+            "the §5.1–§5.5 coverage scan found no provider modules to check"
+        );
+    }
+
+    /// The recognisers above are heuristics over names nobody enforceably
+    /// spells the same way, so they are pinned here on the irregular shipped
+    /// spellings they exist to catch (Box's `outside_window`, Discord's
+    /// `ping_delivery_verifies`, Mandrill's `official_check_scenario_verifies`,
+    /// Custom's `stale_timestamp_rejected`) *and* on names that must not count:
+    /// adjacent tests, the neighbouring category, and prose. Without the
+    /// negative half a recogniser widened to match everything would still pass
+    /// every provider module and this suite would be claiming a guard it no
+    /// longer had.
+    #[test]
+    fn test_category_recognisers_match_shipped_names_and_reject_prose() {
+        fn assert_cases(category: TestCategory, cases: &[(&str, bool)]) {
+            for (name, expected) in cases {
+                assert_eq!(
+                    category.recognises(name),
+                    *expected,
+                    "{category:?} recogniser must {} the shipped-shaped name {name:?}",
+                    if *expected { "credit" } else { "not credit" },
+                );
+            }
+        }
+
+        assert_cases(
+            TestCategory::Vector,
+            &[
+                ("official_vector_verifies", true),
+                ("ping_delivery_verifies", true),
+                ("official_check_scenario_verifies", true),
+                ("documented_construction_verifies", true),
+                (
+                    "docs_example_event_with_constructed_signature_verifies",
+                    true,
+                ),
+                ("base64_variants_verify_the_rfc_vectors", true),
+                // A boundary case is locally constructed and carries no
+                // provenance, so it is not §5.1's vector even though it asserts
+                // the same acceptance.
+                ("boundary_bodies_verify", false),
+                ("docs_example_header_is_well_formed_but_mismatches", false),
+                ("official_mismatch_vector_fails", false),
+            ],
+        );
+        assert_cases(
+            TestCategory::Negative,
+            &[
+                ("negative_flipped_signature_byte_fails", true),
+                ("rejects_wrong_key", true),
+                ("flipped_bit_in_signature_is_rejected", true),
+                ("wrong_public_key_fails", true),
+                ("tampered_body_fails", false),
+                ("missing_header_errors_distinctly", false),
+                ("boundary_bodies_verify", false),
+            ],
+        );
+        assert_cases(
+            TestCategory::Tamper,
+            &[
+                ("tampered_body_fails", true),
+                ("rejects_tampered_body", true),
+                ("tampered_field_value_is_rejected", true),
+                ("json_body_variant_rejects_an_altered_signed_body", true),
+                // Signature/timestamp binding, not a re-serialization check.
+                ("tampered_signature_fails", false),
+                ("tampered_timestamp_fails_signature_check", false),
+                ("boundary_bodies_verify", false),
+            ],
+        );
+        assert_cases(
+            TestCategory::Replay,
+            &[
+                ("replay_old_timestamp_out_of_tolerance", true),
+                ("rejects_old_timestamp_outside_window", true),
+                ("stale_timestamp_rejected", true),
+                // The window edges and the opt-out are not the rejection.
+                ("replay_within_tolerance_verifies_at_window_edges", false),
+                ("disabled_max_age_accepts_stale_signatures", false),
+                ("max_age_has_no_effect_for_github", false),
+                ("boundary_bodies_verify", false),
+            ],
+        );
+        assert_cases(
+            TestCategory::MalformedHeader,
+            &[
+                ("missing_headers_error_distinctly", true),
+                ("empty_signature_is_malformed", true),
+                ("non_base64_signature_is_bad_encoding", true),
+                (
+                    "a_body_field_that_cannot_be_decoded_is_rejected_as_malformed",
+                    true,
+                ),
+                (
+                    "empty_bare_path_request_url_canonicalizes_to_the_root_path",
+                    false,
+                ),
+                ("tampered_body_fails", false),
+                ("boundary_bodies_verify", false),
+            ],
+        );
+    }
+
+    /// The names of every `#[test]` function in `src/providers/{stem}.rs`, in
+    /// source order. Read from the `#[cfg(test)]` region onward, so a `fn`
+    /// mentioned in the module's docs is never credited as a test.
+    fn module_test_names(stem: &str) -> Vec<String> {
+        let source = module_source(stem);
+        let test_module = match source.find("#[cfg(test)]") {
+            Some(at) => &source[at..],
+            None => "",
+        };
+
+        let mut names = Vec::new();
+        let mut pending = false;
+        for line in test_module.lines() {
+            let rest = if pending {
+                line
+            } else if line.contains("#[test]") {
+                pending = true;
+                line.split_once("#[test]").map_or("", |(_, after)| after)
+            } else {
+                continue;
+            };
+            let rest = rest.trim();
+            // Doc comments are skipped rather than ending the search: a test
+            // function may document itself between `#[test]` and `fn`.
+            if rest.starts_with("//") {
+                continue;
+            }
+            if let Some(rest) = rest.strip_prefix("fn ") {
+                names.push(
+                    rest.split(['(', ' ', '\t'])
+                        .next()
+                        .unwrap_or(rest)
+                        .to_string(),
+                );
+                pending = false;
+            }
+        }
+        names
+    }
+
     #[test]
     fn fuzz_implemented_pool_covers_every_nameable_provider() {
         use std::fs;
@@ -5833,20 +6239,34 @@ mod tests {
     /// before its `#[cfg(test)]` module, so a provider that exercises a helper
     /// in its own tests does not masquerade as one whose `verify()` uses it.
     fn module_implementation(stem: &str) -> String {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/providers")
-            .join(format!("{stem}.rs"));
-        let source = std::fs::read_to_string(&path).unwrap_or_else(|err| {
-            panic!(
-                "reading {} to determine its replay protection failed: {err} — \
-                 every provider in `provider_list()` must have a module",
-                path.display()
-            )
-        });
+        let source = module_source(stem);
         match source.find("#[cfg(test)]") {
             Some(at) => source[..at].to_string(),
             None => source,
         }
+    }
+
+    /// The whole source of `src/providers/{stem}.rs`, read from disk.
+    ///
+    /// Shared by the guards that scan a provider module
+    /// ([`module_implementation`], [`module_test_names`]) so the path and the
+    /// fail-closed read live in one place instead of drifting apart — the same
+    /// anti-duplication reason the guards exist at all. Fail-closed rather than
+    /// skipped: a provider module the suite cannot read is a module no scan can
+    /// vouch for, so a read failure must fail the run instead of quietly
+    /// reducing the covered set.
+    fn module_source(stem: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/providers")
+            .join(format!("{stem}.rs"));
+        std::fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!(
+                "reading {} for a source-scanning guard failed: {err} — every \
+                 provider in `provider_list()` must have a module, and `src/` is \
+                 shipped in the crates.io tarball so the guards can read it",
+                path.display()
+            )
+        })
     }
 
     /// The `src/providers` module stem one provider's implementation lives in.
