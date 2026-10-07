@@ -323,6 +323,7 @@ impl Default for VerifyOptions {
 
 impl VerifyOptions {
     /// Sets [`VerifyOptions::request_url`], for URL-scoped schemes.
+    #[must_use = "builder methods return the modified options"]
     pub fn with_request_url(mut self, url: impl Into<String>) -> Self {
         self.request_url = Some(url.into());
         self
@@ -331,6 +332,7 @@ impl VerifyOptions {
     /// Sets [`VerifyOptions::request_method`], the HTTP request method
     /// (uppercase) for schemes that sign it (currently HubSpot's v3 scheme
     /// and Contentful).
+    #[must_use = "builder methods return the modified options"]
     pub fn with_request_method(mut self, method: impl Into<String>) -> Self {
         self.request_method = Some(method.into());
         self
@@ -346,6 +348,7 @@ impl VerifyOptions {
     /// same string however it arrived. Passing no items is the explicit
     /// *empty* field set — Twilio's JSON-body variant — which is not the same
     /// as leaving the option unset.
+    #[must_use = "builder methods return the modified options"]
     pub fn with_form_params<I, K, V>(mut self, params: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -400,6 +403,7 @@ impl VerifyOptions {
     ///
     /// Providers that do not sign timestamps document explicitly that this
     /// option has no effect on them (see `spec.md` §3).
+    #[must_use = "builder methods return the modified options"]
     pub fn with_max_age(mut self, max_age: impl Into<Option<Duration>>) -> Self {
         self.max_age = max_age.into();
         self
@@ -480,6 +484,7 @@ impl VerifyOptions {
     /// let erased: Arc<dyn Clock> = Arc::new(FixedClock(1_700_000_000));
     /// assert_eq!(VerifyOptions::default().with_clock(erased).now(), 1_700_000_000);
     /// ```
+    #[must_use = "builder methods return the modified options"]
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = Some(clock);
         self
@@ -516,6 +521,7 @@ impl VerifyOptions {
     /// Sets [`VerifyOptions::verifying_material`], the asymmetric public-key
     /// /certificate material required by public-key schemes (currently
     /// SendGrid's ECDSA P-256 key and PayPal's X.509 certificate).
+    #[must_use = "builder methods return the modified options"]
     pub fn with_verifying_material(mut self, material: VerifyingKeyMaterial) -> Self {
         self.verifying_material = Some(material);
         self
@@ -523,6 +529,7 @@ impl VerifyOptions {
 
     /// Sets [`VerifyOptions::webhook_id`], PayPal's webhook-subscription ID,
     /// required by PayPal's signed-string construction (see the field docs).
+    #[must_use = "builder methods return the modified options"]
     pub fn with_webhook_id(mut self, webhook_id: impl Into<String>) -> Self {
         self.webhook_id = Some(webhook_id.into());
         self
@@ -533,7 +540,6 @@ impl VerifyOptions {
     /// injected there is no wall clock to consult, so this returns 0 — replay
     /// protection then fail-closes on any realistic delivery timestamp
     /// (`spec.md` §7); supply a [`Clock`] on such targets.
-    #[must_use]
     pub fn now(&self) -> u64 {
         match &self.clock {
             Some(clock) => clock.now(),
