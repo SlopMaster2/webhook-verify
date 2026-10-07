@@ -1,6 +1,6 @@
 # webhook-verify — Technical Specification
 
-Status: draft v0.1
+Status: draft v0.2.0 (tracks Cargo.toml)
 Audience: contributors and implementers (human or AI agent)
 
 This document defines the contract the crate must satisfy: the public API,
@@ -3474,7 +3474,7 @@ ambiguity).
    reads attacker-controlled input** (`src/core/*` and `src/providers/*`,
    including the `providers` dispatch itself), so the rule is legible in the file
    a reader opens and survives a module being moved or split out.
-   `core::tests::every_verification_module_denys_unwrap_and_expect` walks those
+   `core::tests::every_verification_module_denies_unwrap_and_expect` walks those
    two directories plus `src/lib.rs` on disk rather than enumerating them, so a
    newly added module is covered by adding the file; the `tower`/`actix`
    adapters are outside the walked set because they carry no signing or
