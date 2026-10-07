@@ -85,7 +85,10 @@
 //! certificate and signature are locally generated for this test over exactly
 //! the documented `{transmission_id}|{transmission_time}|{webhook_id}|{crc32}`
 //! construction; the private key is **not** committed. The CRC-32 was
-//! cross-checked independently with Python's `zlib.crc32`.
+//! cross-checked independently with Python's `zlib.crc32`. The boundary-body
+//! vectors (`spec.md` §3: an empty body and a unicode body) follow the same
+//! recipe over the same transmission ID/time/webhook ID, signed with a second
+//! locally generated certificate whose private key is likewise not committed.
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
@@ -326,6 +329,22 @@ mod tests {
     /// Independent CRC-32 of BODY (Python `zlib.crc32`), decimal.
     const CRC32_DECIMAL: u32 = 1_529_064_350;
 
+    /// Boundary-case vectors per `spec.md` §3: the empty body (CRC-32 `0`)
+    /// and a unicode body's raw UTF-8 bytes, signed over the documented
+    /// `{transmission_id}|{transmission_time}|{webhook_id}|{crc32}` string
+    /// with everything else — transmission ID/time, webhook ID, headers —
+    /// matching the frozen vector, so the certificate/RSA path is exercised
+    /// with a body the fixture never covers.
+    const BOUNDARY_CERT_PEM: &[u8] = include_bytes!("../../tests/data/paypal_boundary_cert.pem");
+    /// Signature over the string ending `|0`, i.e. the *empty* body's CRC-32.
+    const EMPTY_BODY_SIG_B64: &str = "so3p5WO7eZkSry7H9/j46QTUItwW2J5wDmUwhNMa56+ed3ezDN4K6eq+IHpi5MWGnHJfssbWl1Wq01DhHFKvc16mtUm0MZ2kIYfP9FlRGLin6MgwIfC1xlh1pJuVIh1bysFYBtb04wN9/9hbR8L6hkUYmSU9VFO0NFsVATwFbZaOSsMGbOYfgO/f+okt2p7E7ANsyC99Zxt0ukoq9Dr6KgFlODeKnTWYLjR19kgyd2cPGbyQ6SEwLW8iSpCDwc8DG6e2tDq0xKkbARoOmhXqRo/4kdXNCCDV4DQ/Nrtvdi9VE7IyoodCG4zs06wmDUq5QJi13V9gUlhyiwaBKQeZ7A==";
+    /// The unicode boundary body, signed as its UTF-8 bytes.
+    const UNICODE_BODY: &str = r#"{"title":"héllo, 🦀 — 日本語"}"#;
+    /// Independent CRC-32 of UNICODE_BODY (Python `zlib.crc32`), decimal.
+    const UNICODE_BODY_CRC32_DECIMAL: u32 = 1_838_473_967;
+    /// Signature over the string carrying [`UNICODE_BODY_CRC32_DECIMAL`].
+    const UNICODE_BODY_SIG_B64: &str = "wK/jYCvC3FDYpsyiun8FCO/R7A1Fjni5y/7C5c8sY2IAU8e5h6c2WyinvrNXyAIs1dIzjHxXpy65uW9lB5+4raUxcecvsJ9/BiPDR+zYd38oRwrIlpmSwLtnXUA52nlruT7TN9OfJFSMA1Er8p4nF2OOnE2ujFHlTZMPEsACbVDs20t2ni9c09GIOoQN1bN4hC6RN2icnPDZYYffYZ28OL47+0Wrz69rPcRzQ+bEj3SW/zGgk0JHqNiTijzY5qWuSygUP3r4hRwTMjMGDayULMTpzIOtsAeVrFy7bKRmt+yzBSt/92kaCk/JbYSbkVxzv2msqXBN7eAxb+PjMbqXOA==";
+
     const HEADERS: [(&str, &str); 5] = [
         (TRANSMISSION_ID_HEADER, TRANSMISSION_ID),
         (TRANSMISSION_TIME_HEADER, TRANSMISSION_TIME),
@@ -342,10 +361,22 @@ mod tests {
             .with_verifying_material(VerifyingKeyMaterial::X509Certificate(CERT_PEM.to_vec()))
     }
 
-    /// Runs `verify()` with the caller-supplied options and a `&[(&str, &str)]`
-    /// header list, lifted into the owned pairs the [`crate::HeaderMap`] impl
-    /// wants so the test literals stay terse.
-    fn verify_vector_with(
+    /// [`vector_options`] with the boundary vectors' certificate, so the
+    /// empty/unicode-body vectors exercise the same RSA path against a key
+    /// the frozen fixture's signatures were never made with.
+    fn boundary_options() -> VerifyOptions {
+        clocked_at(TRANSMISSION_TIME_UNIX, Some(Duration::from_secs(300)))
+            .with_webhook_id(WEBHOOK_ID)
+            .with_verifying_material(VerifyingKeyMaterial::X509Certificate(
+                BOUNDARY_CERT_PEM.to_vec(),
+            ))
+    }
+
+    /// Runs `verify()` over `body` with the caller-supplied options and a
+    /// `&[(&str, &str)]` header list, lifted into the owned pairs the
+    /// [`crate::HeaderMap`] impl wants so the test literals stay terse.
+    fn verify_body_with(
+        body: &[u8],
         options: VerifyOptions,
         headers: &[(&str, &str)],
     ) -> Result<(), VerifyError> {
@@ -356,15 +387,63 @@ mod tests {
         verify(
             crate::Provider::PayPal,
             &owned,
-            BODY,
+            body,
             &Secret::new("unused"),
             options,
         )
     }
 
+    /// [`verify_body_with`] over the frozen fixture body.
+    fn verify_vector_with(
+        options: VerifyOptions,
+        headers: &[(&str, &str)],
+    ) -> Result<(), VerifyError> {
+        verify_body_with(BODY, options, headers)
+    }
+
     #[test]
     fn vector_verifies() {
         assert_eq!(verify_vector_with(vector_options(), &HEADERS), Ok(()));
+    }
+
+    #[test]
+    fn boundary_bodies_verify() {
+        // `spec.md` §3 requires a locally-constructed boundary vector per
+        // row: the empty body (CRC-32 `0`, so the signed string ends `|0`)
+        // and a unicode body signed as its raw UTF-8 bytes. Both must reach
+        // the CRC-32 and the signed string verbatim — a body re-encoded,
+        // dropped, or checksummed after a lossy conversion would mismatch.
+        assert_eq!(
+            crate::core::crypto::crc32_body(UNICODE_BODY.as_bytes()),
+            UNICODE_BODY_CRC32_DECIMAL,
+            "the unicode body's CRC-32 must be the decimal value the signature covers"
+        );
+        let empty_headers = [
+            (TRANSMISSION_ID_HEADER, TRANSMISSION_ID),
+            (TRANSMISSION_TIME_HEADER, TRANSMISSION_TIME),
+            (TRANSMISSION_SIG_HEADER, EMPTY_BODY_SIG_B64),
+            (CERT_URL_HEADER, CERT_URL),
+            (AUTH_ALGO_HEADER, "SHA256withRSA"),
+        ];
+        assert_eq!(
+            verify_body_with(b"", boundary_options(), &empty_headers),
+            Ok(())
+        );
+        let unicode_headers = [
+            (TRANSMISSION_ID_HEADER, TRANSMISSION_ID),
+            (TRANSMISSION_TIME_HEADER, TRANSMISSION_TIME),
+            (TRANSMISSION_SIG_HEADER, UNICODE_BODY_SIG_B64),
+            (CERT_URL_HEADER, CERT_URL),
+            (AUTH_ALGO_HEADER, "SHA256withRSA"),
+        ];
+        assert_eq!(
+            verify_body_with(
+                UNICODE_BODY.as_bytes(),
+                boundary_options(),
+                &unicode_headers
+            ),
+            Ok(())
+        );
     }
 
     #[test]

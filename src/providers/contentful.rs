@@ -510,6 +510,25 @@ mod tests {
     /// compares against.
     const TIMESTAMP_SECS: u64 = 1_753_660_800;
 
+    /// Boundary-case vectors per `spec.md` §3: signatures over the *empty*
+    /// body and over a unicode body's raw UTF-8 bytes, with every other
+    /// signed field (method, path, signed-header segment, timestamp) identical
+    /// to the `official_recipe_vector_verifies` vector. Locally constructed
+    /// with the documented recipe — `HMAC-SHA256(secret, [method, requestPath,
+    /// headers, requestBody].join('\n'))` — by the independent Python
+    /// `hmac`/`hashlib` implementation the module docs' test-vector
+    /// provenance describes, after first checking that the same pipeline
+    /// reproduced that vector's hex byte-for-byte.
+    const EMPTY_BODY_SIGNATURE: &str =
+        "e61e3d3143ca12c03562200a9a4c113683399f84f0d7a49b0f2988f4ae869ee3";
+    /// The unicode boundary body, signed as its UTF-8 bytes.
+    const UNICODE_BODY: &str = r#"{"title":"héllo, 🦀 — 日本語"}"#;
+    /// The HMAC of [`UNICODE_BODY`] under the same canonical string, so the
+    /// multibyte bytes — not a re-encoded or escaped spelling — are what
+    /// verifies.
+    const UNICODE_BODY_SIGNATURE: &str =
+        "5e4a511f5b61bd0d463066103dfa9a15e763ad23c9484a21774cd6d069bbdecf";
+
     /// The topic/type headers Contentful sends on a signed delivery.
     fn delivery_headers(signature: &str) -> Vec<(String, String)> {
         vec![
@@ -569,6 +588,36 @@ mod tests {
             verify_pinned(
                 "1c2d6eb95dae2e5398c42493621e6813a2eb1a2fd33238b8e6a4ed1d4c33e129",
                 TIMESTAMP_SECS,
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn boundary_bodies_verify() {
+        // `spec.md` §3 requires a locally-constructed boundary vector per
+        // row: here the empty body and a unicode body, both signed over the
+        // same canonical string as the frozen vector above. The raw bytes
+        // must reach the canonical string untouched — an empty body leaves
+        // the trailing `\n` as the string's last byte, and the multi-byte
+        // UTF-8 of the unicode body must not be re-encoded or escaped.
+        assert_eq!(
+            verify_with(
+                b"",
+                EMPTY_BODY_SIGNATURE,
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                URL,
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            verify_with(
+                UNICODE_BODY.as_bytes(),
+                UNICODE_BODY_SIGNATURE,
+                clocked_at(TIMESTAMP_SECS, Some(Duration::from_secs(300))),
+                METHOD,
+                URL,
             ),
             Ok(())
         );
