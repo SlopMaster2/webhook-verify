@@ -3,7 +3,7 @@
 name: Scheduled OpenCode
 on:
   schedule:
-    - cron: "43 * * * *"
+    - cron: "43 1 */8 * *"
   workflow_dispatch:
 
 concurrency:
