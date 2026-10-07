@@ -540,6 +540,7 @@ impl VerifyOptions {
     /// injected there is no wall clock to consult, so this returns 0 — replay
     /// protection then fail-closes on any realistic delivery timestamp
     /// (`spec.md` §7); supply a [`Clock`] on such targets.
+    #[must_use]
     pub fn now(&self) -> u64 {
         match &self.clock {
             Some(clock) => clock.now(),
