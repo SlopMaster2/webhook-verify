@@ -440,7 +440,7 @@ impl<B> VerifyLayer<B> {
         self
     }
 
-    /// Sets an optional maximum body size in bytes.
+    /// Sets an optional maximum body size in bytes (`spec.md` §4.9).
     ///
     /// When set, requests whose body exceeds this limit are rejected with
     /// `413 Payload Too Large` *before* any signature verification work, so a
