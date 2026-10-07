@@ -229,6 +229,7 @@ impl WebhookConfig {
     /// (timestamp tolerance, injected clock, URL-scoped schemes such as
     /// Square/Twilio, and the key material PayPal/SendGrid verify against —
     /// see the module docs' "Providers that need request context" list).
+    #[must_use = "builder methods return the modified config"]
     pub fn with_options(provider: Provider, secret: Secret, options: VerifyOptions) -> Self {
         Self {
             provider,
@@ -277,6 +278,7 @@ impl WebhookConfig {
     ///     .with_fallback_secrets([Secret::new("the previous secret")]);
     /// let app = App::new().app_data(config);
     /// ```
+    #[must_use = "builder methods return the modified config"]
     pub fn with_fallback_secrets(mut self, fallbacks: impl IntoIterator<Item = Secret>) -> Self {
         self.keys = self.keys.with_fallbacks(fallbacks);
         self
@@ -319,6 +321,7 @@ impl WebhookConfig {
     ///         HttpResponse::Ok().finish()
     ///     }));
     /// ```
+    #[must_use = "builder methods return the modified config"]
     pub fn with_max_body_size(mut self, max: usize) -> Self {
         self.max_body_size = Some(max);
         self

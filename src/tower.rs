@@ -379,6 +379,7 @@ impl<B> VerifyLayer<B> {
     /// tolerance, injected clock, URL-scoped schemes such as Square/Twilio,
     /// and the key material PayPal/SendGrid verify against — see the module
     /// docs' "Providers that need request context" list).
+    #[must_use = "builder methods return the modified layer"]
     pub fn with_options(provider: Provider, secret: Secret, options: VerifyOptions) -> Self {
         Self {
             config: Config {
@@ -433,6 +434,7 @@ impl<B> VerifyLayer<B> {
     /// )
     /// .with_fallback_secrets([Secret::new("the previous secret")]);
     /// ```
+    #[must_use = "builder methods return the modified layer"]
     pub fn with_fallback_secrets(mut self, fallbacks: impl IntoIterator<Item = Secret>) -> Self {
         self.config.keys = self.config.keys.with_fallbacks(fallbacks);
         self
@@ -465,6 +467,7 @@ impl<B> VerifyLayer<B> {
     /// let layer: VerifyLayer<Bytes> = VerifyLayer::new(Provider::GitHub, Secret::new("secret"))
     ///     .with_max_body_size(256 * 1024);
     /// ```
+    #[must_use = "builder methods return the modified layer"]
     pub fn with_max_body_size(mut self, max: usize) -> Self {
         self.max_body_size = Some(max);
         self
@@ -541,6 +544,7 @@ impl<B> VerifyLayer<B> {
     ///         }
     ///     });
     /// ```
+    #[must_use = "builder methods return the modified layer"]
     pub fn on_rejection(mut self, hook: impl Fn(&Rejection) + Send + Sync + 'static) -> Self {
         self.config.on_rejection = Some(Arc::new(hook));
         self

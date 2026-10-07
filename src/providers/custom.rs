@@ -515,6 +515,7 @@ impl CustomScheme {
     /// the timestamp in `signed_string`'s output (as the built-in
     /// timestamped schemes do by construction, e.g. Slack's
     /// `v0:{timestamp}:{raw_body}`) before relying on this setting.
+    #[must_use = "builder methods return the modified scheme"]
     pub fn with_timestamp_header(mut self, timestamp_header: &'static str) -> Self {
         self.timestamp_header = Some(timestamp_header);
         self
@@ -566,6 +567,7 @@ impl CustomScheme {
     ///
     /// assert_eq!(scheme.timestamp_unit, TimestampUnit::Millis);
     /// ```
+    #[must_use = "builder methods return the modified scheme"]
     pub fn with_timestamp_unit(mut self, timestamp_unit: TimestampUnit) -> Self {
         self.timestamp_unit = timestamp_unit;
         self
@@ -574,6 +576,7 @@ impl CustomScheme {
     /// Sets the literal prefix required before the encoded signature (e.g.
     /// `"v0="` or `"sha256="`). When set, a header not starting with it is
     /// rejected as malformed rather than leniently accepted.
+    #[must_use = "builder methods return the modified scheme"]
     pub fn with_prefix(mut self, prefix: &'static str) -> Self {
         self.prefix = Some(prefix);
         self
@@ -621,6 +624,7 @@ impl CustomScheme {
     ///
     /// assert_eq!(scheme.signed_headers, ["X-Request-Id"].as_slice());
     /// ```
+    #[must_use = "builder methods return the modified scheme"]
     pub fn with_signed_headers(mut self, signed_headers: &'static [&'static str]) -> Self {
         self.signed_headers = signed_headers;
         self

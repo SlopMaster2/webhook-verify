@@ -438,6 +438,7 @@ impl VerifyOptions {
     ///     None,
     /// );
     /// ```
+    #[must_use = "builder methods return the modified options"]
     pub fn without_replay_protection(mut self) -> Self {
         self.max_age = None;
         self
@@ -513,6 +514,7 @@ impl VerifyOptions {
     ///     .without_injected_clock();
     /// assert!(opts.clock.is_none());
     /// ```
+    #[must_use = "builder methods return the modified options"]
     pub fn without_injected_clock(mut self) -> Self {
         self.clock = None;
         self
