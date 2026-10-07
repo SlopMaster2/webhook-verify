@@ -249,6 +249,22 @@ mod tests {
     const FUTURE_SIGNATURE: &str = "ElBf8WEzSxcg0sAC9WNmb37Bi/DVDdW0guu1f1zxDLc=";
     const FUTURE_TIMESTAMP: &str = "2020-01-01T00:16:40-07:00";
 
+    /// Boundary-case vectors per `spec.md` §3: signatures over the *empty*
+    /// body and over a unicode body's raw UTF-8 bytes, each concatenated with
+    /// `TIMESTAMP` and keyed by the matching sample key. Locally constructed
+    /// with OpenSSL over the exact concatenation
+    /// (`printf '<body><ts>' | openssl dgst -sha256 -hmac <key> -binary |
+    /// base64`), mirroring the frozen vector's method — the same pipeline was
+    /// first checked to reproduce `PRIMARY_SIGNATURE`/`SECONDARY_SIGNATURE`
+    /// byte-for-byte from `BODY || TIMESTAMP` before these were generated.
+    const EMPTY_BODY_PRIMARY: &str = "Ig4lCvFoB/kw0wC9300jWRLM9Hv+/WK5kTjrfJAFugk=";
+    const EMPTY_BODY_SECONDARY: &str = "1oRckpnq2PVzPVJNLeyjok/Cu6WyOwCxoM4vOwRk+is=";
+    /// The unicode boundary body, signed as its UTF-8 bytes (`héllo, 🦀
+    /// world!`).
+    const UNICODE_BODY: &str = "héllo, 🦀 world!";
+    const UNICODE_BODY_PRIMARY: &str = "jSjrdvCpscMf+iVio8ys2apFVGVQLy43dQtxprdalO0=";
+    const UNICODE_BODY_SECONDARY: &str = "qqQXqn+YMivBa4qIf2nX9x2Ej8RQeQSUFVXXNloEOx4=";
+
     fn box_headers(primary: &str, secondary: &str, timestamp: &str) -> Vec<(String, String)> {
         vec![
             (PRIMARY_SIGNATURE_HEADER.to_string(), primary.to_string()),
@@ -517,6 +533,38 @@ mod tests {
     }
 
     #[test]
+    fn boundary_bodies_verify() {
+        // `spec.md` §3 requires a locally-constructed boundary vector per
+        // row: here the empty body and a unicode body, each signed over
+        // `body || TIMESTAMP` exactly as Box concatenates them. The empty
+        // delivery exercises the primary key, the unicode one the secondary,
+        // so both candidates of `verify_hmac_sha256_any` see a vector that
+        // must pass.
+        assert_eq!(
+            verify_with(
+                b"",
+                EMPTY_BODY_PRIMARY,
+                EMPTY_BODY_SECONDARY,
+                TIMESTAMP,
+                PRIMARY_SECRET,
+                clocked_at(1_577_862_000, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            verify_with(
+                UNICODE_BODY.as_bytes(),
+                UNICODE_BODY_PRIMARY,
+                UNICODE_BODY_SECONDARY,
+                TIMESTAMP,
+                SECONDARY_SECRET,
+                clocked_at(1_577_862_000, Some(Duration::from_secs(300))),
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn missing_timestamp_header() {
         let headers = vec![
             (
@@ -602,6 +650,69 @@ mod tests {
             Err(VerifyError::MalformedHeader {
                 header: PRIMARY_SIGNATURE_HEADER,
                 reason: "header is empty"
+            })
+        );
+    }
+
+    #[test]
+    fn empty_secondary_signature_is_malformed() {
+        // Both signature headers are required (§5: missing/empty/garbage per
+        // required header), and each must report its *own* name so a caller
+        // can tell which one an attacker stripped down to an empty value.
+        assert_eq!(
+            verify_with(
+                BODY,
+                PRIMARY_SIGNATURE,
+                "",
+                TIMESTAMP,
+                PRIMARY_SECRET,
+                Default::default(),
+            ),
+            Err(VerifyError::MalformedHeader {
+                header: SECONDARY_SIGNATURE_HEADER,
+                reason: "header is empty"
+            })
+        );
+    }
+
+    #[test]
+    fn empty_timestamp_is_malformed() {
+        // An empty timestamp fails the RFC 3339 shape check — it is never
+        // parsed as "epoch 0" or handed to the replay window — and it reports
+        // the same reason Twitch pins for its empty timestamp: the parser
+        // rejects any value shorter than the minimal RFC 3339 shape up front.
+        assert_eq!(
+            verify_with(
+                BODY,
+                PRIMARY_SIGNATURE,
+                SECONDARY_SIGNATURE,
+                "",
+                PRIMARY_SECRET,
+                Default::default(),
+            ),
+            Err(VerifyError::MalformedHeader {
+                header: TIMESTAMP_HEADER,
+                reason: "timestamp is not a valid RFC 3339 timestamp"
+            })
+        );
+    }
+
+    #[test]
+    fn invalid_base64_secondary_signature_is_bad_encoding() {
+        // The secondary header gets the same garbage-value treatment as the
+        // primary: base64 noise must surface as `BadEncoding` from either
+        // candidate, not as a signature mismatch.
+        assert_eq!(
+            verify_with(
+                BODY,
+                PRIMARY_SIGNATURE,
+                "not-base64!!!",
+                TIMESTAMP,
+                PRIMARY_SECRET,
+                Default::default(),
+            ),
+            Err(VerifyError::BadEncoding {
+                reason: "signature is not valid standard base64"
             })
         );
     }
