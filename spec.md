@@ -3768,6 +3768,27 @@ A provider implementation is not mergeable until it has:
    `signature_header_names_cover_every_provider_header` guard pins *which*
    headers are scanned; this one pins that those names are representable.*
 
+Items 1–5 are guarded as well as written down (issue #410):
+`every_provider_module_covers_the_five_test_categories` in
+`src/providers/mod.rs` walks `provider_module_stems()` and requires each
+module to carry at least one `#[test]` reading as each category above —
+presence is what a scan can see, the assertion each test makes is still
+the category's own to check. §5.4 is required only where the module's
+implementation calls `check_replay`, so a provider with no timestamps is
+not asked to fake a replay test, and §5.1 only for a test that both
+*accepts* and names its provenance, so a `boundary_bodies_verify` alone
+does not stand in for a vector. The scan reads `src/` from disk, so
+it holds in every feature configuration (§6's matrix included) and in a
+crates.io checkout. Category names are deliberately read loosely rather
+than normalised — the shipped spellings are not uniform (Box's replay
+tests say `rejects_old_timestamp_outside_window`, Discord's happy path is
+`ping_delivery_verifies`, Mandrill's is
+`official_check_scenario_verifies`) — and the looseness is bounded by
+`test_category_recognisers_match_shipped_names_and_reject_prose`, which
+pins every recogniser on both the irregular shipped spellings and on names
+that must *not* count, so a recogniser that stops matching fails there
+first instead of passing every module vacuously.
+
 ---
 
 ## 6. CI requirements
