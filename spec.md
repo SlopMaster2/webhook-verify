@@ -287,6 +287,14 @@ Implementation status (kept in sync with the code — do not let this drift):
   represents that instant as the following Unix-second day boundary, so
   offset-form leap seconds such as `1990-12-31T15:59:60-08:00` are valid;
   offset-normalized values that do not land at that boundary remain malformed.
+- The shared RFC 3339 parser reports a present-but-empty value as
+  `MalformedHeader` with the reason `"header is empty"` — the same diagnosis
+  the shared unsigned-decimal timestamp parser and every provider's
+  signature parser give — instead of the generic shape error, so the four
+  RFC 3339 providers (PayPal, Twitch, Zendesk, Box) cannot disagree about
+  which case an empty timestamp header is (issue #407). All other
+  out-of-shape values keep the reason
+  `"timestamp is not a valid RFC 3339 timestamp"`.
 
 ### 2.1 `VerifyError`
 

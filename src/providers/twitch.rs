@@ -597,7 +597,7 @@ mod tests {
                 String::new(),
                 VerifyError::MalformedHeader {
                     header: TIMESTAMP_HEADER,
-                    reason: "timestamp is not a valid RFC 3339 timestamp",
+                    reason: "header is empty",
                 },
             ),
             (
