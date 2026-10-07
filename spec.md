@@ -3639,6 +3639,46 @@ ambiguity).
    — and both are *not* all-NUL-secret or whitespace cases that item 7's
    entry-point guard can see, because Discord's key is hex text, so this is a
    separate check with a separate `reason`.
+9. **The adapters' body-size bound is opt-in, and overflowing it is a `413`
+   outside `VerifyError`.** Both framework adapters buffer the request body
+   before verifying it (verification needs the exact wire bytes), so each
+   exposes an *optional* ceiling on that buffering —
+   `VerifyLayer::with_max_body_size` (tower/axum) and
+   `WebhookConfig::with_max_body_size` (actix). Configuring one is a caller
+   decision and the default is deliberately unlimited: with neither set the
+   crate imposes no ceiling of its own, so a deployment that wants the bound
+   has to ask for it. The actix adapter additionally runs under actix-web's
+   own `PayloadConfig`, 256 KiB by default, applied *before* the crate sees
+   the body, so its effective ceiling is
+   `min(with_max_body_size, PayloadConfig::limit)` — a value above 256 KiB
+   raises nothing until the app raises that too
+   (`App::app_data(web::PayloadConfig::new(limit))`), a deployment that sets
+   no `with_max_body_size` is still capped at 256 KiB, and an over-cap body
+   is a `413` in either case. That is the framework's bound rather than this
+   crate's, and it is why the two adapters are not identical in what they
+   accept by default.
+   When a limit *is* set, both adapters refuse a declared `Content-Length`
+   over the limit **before a single body byte is read** — that check costs no
+   I/O — after the §4.4 ambiguity scan (which needs no body bytes) and before
+   any signature computation. For a body with no usable length
+   (`Transfer-Encoding: chunked`, or a value that is not HTTP's canonical
+   `1*DIGIT`) the two adapters deliberately differ, and both behaviors are
+   contractual: the tower adapter reads through a streaming `Limited`, so the
+   limit bounds the *buffering* too and such a body is refused the moment it
+   crosses the limit rather than after being buffered whole (issue #368),
+   while the actix adapter buffers through `web::Bytes::from_request` first
+   and checks the length afterwards, so its limit bounds the verification
+   work and actix-web's own `PayloadConfig` is what bounds the allocation.
+   The distinction is shared-code-pinned by
+   `core::adapter_utils::declared_content_length`'s contract and must not be
+   collapsed into one claim (issue #372). In neither case is a refused body
+   hashed or taken to `verify()`. The refusal is `413 Payload Too Large` with
+   an empty body and is deliberately **not** a `VerifyError` variant:
+   `WebhookVerificationError::verify_error()` is `None` for it (the adapters'
+   status tables' "not a `VerifyError`" row), and the tower layer reports it
+   to `VerifyLayer::on_rejection` as `Rejection::BodyTooLarge`, so a DoS
+   counter sees both `413` paths without having to infer them from a status
+   code.
 
 ---
 

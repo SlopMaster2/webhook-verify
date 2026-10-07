@@ -284,7 +284,8 @@ impl WebhookConfig {
         self
     }
 
-    /// Sets an optional maximum body size in bytes (DoS hardening).
+    /// Sets an optional maximum body size in bytes (DoS hardening,
+    /// `spec.md` §4.9).
     ///
     /// When set, requests whose body exceeds this limit are rejected with
     /// `413 Payload Too Large` *before* any signature verification work, so a
