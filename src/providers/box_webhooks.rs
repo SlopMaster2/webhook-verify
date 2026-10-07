@@ -677,10 +677,11 @@ mod tests {
 
     #[test]
     fn empty_timestamp_is_malformed() {
-        // An empty timestamp fails the RFC 3339 shape check — it is never
-        // parsed as "epoch 0" or handed to the replay window — and it reports
-        // the same reason Twitch pins for its empty timestamp: the parser
-        // rejects any value shorter than the minimal RFC 3339 shape up front.
+        // An empty timestamp is rejected before the RFC 3339 shape check —
+        // it is never parsed as "epoch 0" or handed to the replay window —
+        // and it reports the same reason every other empty header reports
+        // ("header is empty"), matching Twitch, Zendesk, and PayPal (issue
+        // #407).
         assert_eq!(
             verify_with(
                 BODY,
@@ -692,7 +693,7 @@ mod tests {
             ),
             Err(VerifyError::MalformedHeader {
                 header: TIMESTAMP_HEADER,
-                reason: "timestamp is not a valid RFC 3339 timestamp"
+                reason: "header is empty"
             })
         );
     }

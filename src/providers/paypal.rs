@@ -165,9 +165,10 @@ pub(crate) fn verify(
     // empty"), matching every other limited-value header in this module and
     // the shared malformed-header bar (spec.md §5.5): an empty
     // transmission_id would otherwise surface a guaranteed mismatch as
-    // SignatureMismatch, an empty transmission_time would fall through to the
-    // timestamp parser as a generic RFC 3339 error, and an empty cert_url
-    // would sneak past unvalidated.
+    // SignatureMismatch, and an empty cert_url would sneak past unvalidated.
+    // The transmission_time check is kept here as well as in the shared RFC
+    // 3339 parser (which now gives the same reason, issue #407) so the empty
+    // diagnosis is reached before any missing-context/operator-config errors.
     if transmission_id.is_empty() {
         return Err(VerifyError::MalformedHeader {
             header: TRANSMISSION_ID_HEADER,

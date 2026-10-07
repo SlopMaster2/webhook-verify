@@ -110,11 +110,22 @@ fn parse_unsigned_decimal(
 /// y/m/d triplet to the count of days since 1970-01-01.
 ///
 /// Returns a structured [`VerifyError::MalformedHeader`] for values that do
-/// not match that shape or that map to a pre-epoch instant.
+/// not match that shape or that map to a pre-epoch instant. A present-but-
+/// empty value reports `"header is empty"` — the same diagnosis
+/// [`parse_unsigned_decimal`] and every provider's signature parser give —
+/// rather than the shape error, so an operator can tell "the proxy stripped
+/// the header's value" from "the sender put garbage in it".
 pub(crate) fn parse_rfc3339_timestamp(
     header: &'static str,
     value: &str,
 ) -> Result<u64, VerifyError> {
+    if value.is_empty() {
+        return Err(VerifyError::MalformedHeader {
+            header,
+            reason: "header is empty",
+        });
+    }
+
     let malformed = || VerifyError::MalformedHeader {
         header,
         reason: "timestamp is not a valid RFC 3339 timestamp",
@@ -546,7 +557,6 @@ mod tests {
         #[test]
         fn rejects_malformed_values() {
             let bad = [
-                "",
                 "2024-05-16T05:19:23",   // no timezone
                 "2024-05-16 05:19:23Z",  // space instead of T
                 "2024-05-16T5:19:23Z",   // non-padded hour
@@ -571,11 +581,13 @@ mod tests {
 
         #[test]
         fn empty_value_is_rejected() {
+            // The most precise diagnosis, not the shape error: it matches
+            // `parse_unsigned_decimal`'s empty handling (issue #407).
             assert_eq!(
                 parse_header(""),
                 Err(VerifyError::MalformedHeader {
                     header: "X-Timestamp",
-                    reason: "timestamp is not a valid RFC 3339 timestamp",
+                    reason: "header is empty",
                 })
             );
         }
