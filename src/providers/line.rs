@@ -34,11 +34,10 @@
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha256;
+use crate::core::crypto::{SignatureEncoding, decode_signature, verify_hmac_sha256};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::secret::Secret;
-use base64::Engine;
 
 /// The header carrying LINE's signature.
 ///
@@ -81,26 +80,12 @@ pub(crate) fn verify(
 /// distinct error variant so callers can tell malformed-request noise from
 /// signature-mismatch signals (`spec.md` §2.1).
 fn parse_signature(value: &str) -> Result<Vec<u8>, VerifyError> {
-    if value.is_empty() {
-        return Err(VerifyError::MalformedHeader {
-            header: SIGNATURE_HEADER,
-            reason: "header is empty",
-        });
-    }
-
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(value)
-        .map_err(|_| VerifyError::BadEncoding {
-            reason: "signature is not valid standard base64",
-        })?;
-
-    if bytes.len() != SIGNATURE_LEN_BYTES {
-        return Err(VerifyError::BadEncoding {
-            reason: "signature does not decode to 32 bytes",
-        });
-    }
-
-    Ok(bytes)
+    decode_signature(
+        SIGNATURE_HEADER,
+        value,
+        SignatureEncoding::Base64,
+        SIGNATURE_LEN_BYTES,
+    )
 }
 
 #[cfg(test)]

@@ -2,10 +2,13 @@
 //!
 //! All HMAC construction and all constant-time comparison live here so the
 //! security guarantees are implemented once (`spec.md` §4). Providers must not
-//! call `hmac`/`sha2`/`sha1`/`subtle` directly; they call these helpers.
+//! call `hmac`/`sha2`/`sha1`/`subtle` directly; they call these helpers. The
+//! canonical signature-header decoding (and its one error mapping) lives here
+//! too, so every provider that shares that shape reaches one audited copy.
 
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
+use base64::Engine;
 use ed25519_dalek::{Signature, VerifyingKey};
 use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
@@ -19,7 +22,6 @@ use p256::ecdsa::{Signature as EcdsaSignature, VerifyingKey as EcdsaVerifyingKey
 #[cfg(feature = "sendgrid")]
 use p256::pkcs8::DecodePublicKey;
 
-#[cfg(feature = "paypal")]
 use crate::core::error::VerifyError;
 #[cfg(feature = "paypal")]
 use rsa::pkcs1v15::{Signature as RsaSignature, VerifyingKey as RsaVerifyingKey};
@@ -184,6 +186,88 @@ pub(crate) fn verify_hmac_sha512(
     mac.update(signed_string);
     let expected = mac.finalize().into_bytes();
     expected.as_slice().ct_eq(provided_signature).into()
+}
+
+/// The wire encoding a provider's single signature header value uses.
+///
+/// This is deliberately only the two encodings the crate's canonical
+/// single-signature parsers share; a provider with a different wire shape (a
+/// `sha256=`/`v0=`/caller-configured prefix, a comma- or space-separated
+/// rotation list, or a scheme that does not pin a digest length) keeps its own
+/// parser rather than forcing this one to model it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SignatureEncoding {
+    /// Hex bytes, as `hex::decode` accepts (either letter case).
+    Hex,
+    /// Standard-alphabet (`+`/`/`) base64 **with** padding, which is what every
+    /// provider using this encoding documents.
+    Base64,
+}
+
+/// Decodes a provider signature header value of the crate's canonical
+/// single-signature shape, with the one error mapping every such provider
+/// shares: an empty value is [`VerifyError::MalformedHeader`] ("header is
+/// empty"), and a value that does not decode or does not decode to exactly
+/// `expected_len` bytes is [`VerifyError::BadEncoding`] (`spec.md` §2.1).
+///
+/// The error mapping — not the crypto — is the thing being de-duplicated here:
+/// before this helper, ~30 provider modules hand-wrote this exact sequence, so
+/// any future change to the `reason` wording or to which variant an
+/// encoding/length failure maps to had to be applied to every copy. Keeping it
+/// in the audited module alongside the `verify_hmac_*` helpers is the same
+/// single-source rationale those helpers document (`AGENTS.md` §4).
+///
+/// The wrong-length `reason` is chosen from `expected_len` by
+/// [`signature_length_reason`], so a provider cannot accidentally borrow
+/// another digest size's wording. Providers with a header shape this does not
+/// model keep their own parser; this is not "one parser to rule them all".
+pub(crate) fn decode_signature(
+    header: &'static str,
+    value: &str,
+    encoding: SignatureEncoding,
+    expected_len: usize,
+) -> Result<alloc::vec::Vec<u8>, VerifyError> {
+    if value.is_empty() {
+        return Err(VerifyError::MalformedHeader {
+            header,
+            reason: "header is empty",
+        });
+    }
+
+    let bytes = match encoding {
+        SignatureEncoding::Hex => hex::decode(value).map_err(|_| VerifyError::BadEncoding {
+            reason: "signature is not valid hexadecimal",
+        })?,
+        SignatureEncoding::Base64 => base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .map_err(|_| VerifyError::BadEncoding {
+                reason: "signature is not valid standard base64",
+            })?,
+    };
+
+    if bytes.len() != expected_len {
+        return Err(VerifyError::BadEncoding {
+            reason: signature_length_reason(expected_len),
+        });
+    }
+
+    Ok(bytes)
+}
+
+/// The static [`VerifyError::BadEncoding`] `reason` for a signature that did
+/// not decode to `expected_len` bytes.
+///
+/// The three HMAC digest sizes this crate's canonical parsers pin are named
+/// exactly as they were before the mapping moved here; any other expected
+/// length gets a generic wording, so a new provider cannot silently reuse a
+/// message that names the wrong size.
+fn signature_length_reason(expected_len: usize) -> &'static str {
+    match expected_len {
+        20 => "signature does not decode to 20 bytes",
+        32 => "signature does not decode to 32 bytes",
+        64 => "signature does not decode to 64 bytes",
+        _ => "signature does not decode to the expected number of bytes",
+    }
 }
 
 /// Computes the lowercase hex SHA-256 digest of `bytes`.
@@ -610,9 +694,11 @@ pub(crate) fn check_rsa_pkcs1v15_sha256(
 #[cfg(test)]
 mod tests {
     use super::{
-        ED25519_KEY_LEN, ED25519_SIG_LEN, is_all_nul_key, verify_ed25519, verify_hmac_sha1,
-        verify_hmac_sha256, verify_hmac_sha256_any, verify_hmac_sha512,
+        ED25519_KEY_LEN, ED25519_SIG_LEN, SignatureEncoding, decode_signature, is_all_nul_key,
+        signature_length_reason, verify_ed25519, verify_hmac_sha1, verify_hmac_sha256,
+        verify_hmac_sha256_any, verify_hmac_sha512,
     };
+    use crate::core::error::VerifyError;
     #[cfg(not(feature = "std"))]
     use crate::test_helpers::*;
 
@@ -876,6 +962,81 @@ mod tests {
             b"what do ya want for nothing?",
             &sig[..63]
         ));
+    }
+
+    /// The canonical decoder returns the raw bytes for a well-formed hex or
+    /// base64 value of exactly the expected length.
+    #[test]
+    fn decode_signature_accepts_well_formed_values() {
+        // 32 zero bytes, hex and standard base64.
+        let hex = "00".repeat(32);
+        assert_eq!(
+            decode_signature("X-Sig", &hex, SignatureEncoding::Hex, 32),
+            Ok(vec![0_u8; 32])
+        );
+        let b64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        assert_eq!(
+            decode_signature("X-Sig", b64, SignatureEncoding::Base64, 32),
+            Ok(vec![0_u8; 32])
+        );
+    }
+
+    /// The three-way mapping the helper exists to single-source: empty is
+    /// `MalformedHeader`, a decode failure is `BadEncoding`, and a wrong
+    /// decoded length is `BadEncoding` with the size-specific wording.
+    #[test]
+    fn decode_signature_preserves_the_canonical_error_mapping() {
+        assert_eq!(
+            decode_signature("X-Sig", "", SignatureEncoding::Hex, 32),
+            Err(VerifyError::MalformedHeader {
+                header: "X-Sig",
+                reason: "header is empty",
+            })
+        );
+        // Non-hex and non-base64.
+        assert_eq!(
+            decode_signature("X-Sig", "not hex!", SignatureEncoding::Hex, 32),
+            Err(VerifyError::BadEncoding {
+                reason: "signature is not valid hexadecimal",
+            })
+        );
+        assert_eq!(
+            decode_signature("X-Sig", "not base64!", SignatureEncoding::Base64, 32),
+            Err(VerifyError::BadEncoding {
+                reason: "signature is not valid standard base64",
+            })
+        );
+        // Well-formed encoding, wrong decoded length.
+        let short = "00".repeat(20);
+        assert_eq!(
+            decode_signature("X-Sig", &short, SignatureEncoding::Hex, 32),
+            Err(VerifyError::BadEncoding {
+                reason: "signature does not decode to 32 bytes",
+            })
+        );
+    }
+
+    /// Every length this crate's canonical parsers pin gets its own wording,
+    /// and an unmodelled length falls back to a generic message rather than
+    /// borrowing a real size's.
+    #[test]
+    fn signature_length_reason_names_each_pinned_size() {
+        assert_eq!(
+            signature_length_reason(20),
+            "signature does not decode to 20 bytes"
+        );
+        assert_eq!(
+            signature_length_reason(32),
+            "signature does not decode to 32 bytes"
+        );
+        assert_eq!(
+            signature_length_reason(64),
+            "signature does not decode to 64 bytes"
+        );
+        assert_eq!(
+            signature_length_reason(48),
+            "signature does not decode to the expected number of bytes"
+        );
     }
 
     /// Deterministically derives an Ed25519 keypair from `seed` and signs
