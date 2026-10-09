@@ -56,12 +56,11 @@
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha256_any;
+use crate::core::crypto::{SignatureEncoding, decode_signature, verify_hmac_sha256_any};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::replay::{check_replay, parse_rfc3339_timestamp};
 use crate::core::secret::Secret;
-use base64::Engine;
 
 /// The header carrying the signed RFC 3339 delivery timestamp.
 pub(crate) const TIMESTAMP_HEADER: &str = "BOX-DELIVERY-TIMESTAMP";
@@ -168,26 +167,12 @@ fn validate_optional_metadata(headers: &dyn HeaderMap) -> Result<(), VerifyError
 /// mode maps to a distinct error variant so callers can tell malformed-request
 /// noise from signature-mismatch signals (`spec.md` §2.1).
 fn parse_signature(header: &'static str, value: &str) -> Result<Vec<u8>, VerifyError> {
-    if value.is_empty() {
-        return Err(VerifyError::MalformedHeader {
-            header,
-            reason: "header is empty",
-        });
-    }
-
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(value)
-        .map_err(|_| VerifyError::BadEncoding {
-            reason: "signature is not valid standard base64",
-        })?;
-
-    if bytes.len() != SIGNATURE_LEN_BYTES {
-        return Err(VerifyError::BadEncoding {
-            reason: "signature does not decode to 32 bytes",
-        });
-    }
-
-    Ok(bytes)
+    decode_signature(
+        header,
+        value,
+        SignatureEncoding::Base64,
+        SIGNATURE_LEN_BYTES,
+    )
 }
 
 #[cfg(test)]

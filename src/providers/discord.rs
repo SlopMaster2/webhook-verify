@@ -53,7 +53,7 @@
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_ed25519;
+use crate::core::crypto::{SignatureEncoding, decode_signature, verify_ed25519};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::replay::{check_replay, parse_timestamp};
@@ -159,23 +159,12 @@ fn decode_public_key(secret: &[u8]) -> Result<Vec<u8>, VerifyError> {
 
 /// Parses the hex-encoded 64-byte Ed25519 signature header into its bytes.
 fn parse_signature(value: &str) -> Result<Vec<u8>, VerifyError> {
-    if value.is_empty() {
-        return Err(VerifyError::MalformedHeader {
-            header: SIGNATURE_HEADER,
-            reason: "header is empty",
-        });
-    }
-
-    let bytes = hex::decode(value).map_err(|_| VerifyError::BadEncoding {
-        reason: "signature is not valid hexadecimal",
-    })?;
-    if bytes.len() != SIGNATURE_LEN_BYTES {
-        return Err(VerifyError::BadEncoding {
-            reason: "signature does not decode to 64 bytes",
-        });
-    }
-
-    Ok(bytes)
+    decode_signature(
+        SIGNATURE_HEADER,
+        value,
+        SignatureEncoding::Hex,
+        SIGNATURE_LEN_BYTES,
+    )
 }
 
 #[cfg(test)]
