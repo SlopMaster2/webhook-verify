@@ -192,9 +192,10 @@ pub(crate) fn verify_hmac_sha512(
 ///
 /// This is deliberately only the two encodings the crate's canonical
 /// single-signature parsers share; a provider with a different wire shape (a
-/// `sha256=`/`v0=`/caller-configured prefix, a comma- or space-separated
-/// rotation list, or a scheme that does not pin a digest length) keeps its own
-/// parser rather than forcing this one to model it.
+/// caller-configured prefix, a comma- or space-separated rotation list, or a
+/// scheme that does not pin a digest length) keeps its own parser rather than
+/// forcing this one to model it. A *fixed* `sha256=`/`sha1=`/`v0=` prefix **is**
+/// modelled, by [`decode_prefixed_signature`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SignatureEncoding {
     /// Hex bytes, as `hex::decode` accepts (either letter case).
@@ -219,8 +220,10 @@ pub(crate) enum SignatureEncoding {
 ///
 /// The wrong-length `reason` is chosen from `expected_len` by
 /// [`signature_length_reason`], so a provider cannot accidentally borrow
-/// another digest size's wording. Providers with a header shape this does not
-/// model keep their own parser; this is not "one parser to rule them all".
+/// another digest size's wording. A fixed `sha256=`/`sha1=`/`v0=` prefix is
+/// modelled by [`decode_prefixed_signature`]; a provider whose header is a
+/// rotation list or otherwise not one bare or prefixed digest keeps its own
+/// parser — this is not "one parser to rule them all".
 pub(crate) fn decode_signature(
     header: &'static str,
     value: &str,
@@ -268,6 +271,74 @@ fn signature_length_reason(expected_len: usize) -> &'static str {
         64 => "signature does not decode to 64 bytes",
         _ => "signature does not decode to the expected number of bytes",
     }
+}
+
+/// The wire shape of a **prefixed** single-signature header value: a mandatory
+/// scheme prefix (`sha256=`, `sha1=`, `v0=`, …) followed by exactly one encoded
+/// digest.
+///
+/// The two prefix-specific `reason` strings are carried verbatim rather than
+/// derived from `prefix`, because the crate's prefixed providers do not agree
+/// on one wording: the GitHub/Meta family reports
+/// `missing `sha256=` prefix`, while the Slack/Twitch/Zoom family reports
+/// `signature must start with the documented `v0=` scheme prefix`. Keeping
+/// each provider's wording at its call site makes this de-duplication
+/// behavior-preserving (`spec.md` §2.1).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PrefixedSignature {
+    /// The mandatory literal prefix, including its separator (e.g. `sha256=`).
+    pub(crate) prefix: &'static str,
+    /// `reason` for a value that does not begin with [`Self::prefix`].
+    pub(crate) missing_prefix_reason: &'static str,
+    /// `reason` for a value that is [`Self::prefix`] with nothing after it.
+    pub(crate) empty_after_prefix_reason: &'static str,
+    /// Encoding of the digest bytes that follow the prefix.
+    pub(crate) encoding: SignatureEncoding,
+    /// Exact decoded length the digest must have.
+    pub(crate) expected_len: usize,
+}
+
+/// Decodes a prefixed single-signature header value (`sha256=<hex>`,
+/// `v0=<base64>`, …) with the same error mapping as [`decode_signature`], plus
+/// the two prefix-specific diagnoses named in `shape`.
+///
+/// The value must not be empty (`"header is empty"`), must begin with
+/// `shape.prefix`, and must carry at least one byte after it; the remainder is
+/// then handed to [`decode_signature`], so the encoding/length mapping lives in
+/// exactly one place. A provider whose header is a rotation list or otherwise
+/// not `prefix + single digest` keeps its own parser.
+pub(crate) fn decode_prefixed_signature(
+    header: &'static str,
+    value: &str,
+    shape: PrefixedSignature,
+) -> Result<alloc::vec::Vec<u8>, VerifyError> {
+    if value.is_empty() {
+        return Err(VerifyError::MalformedHeader {
+            header,
+            reason: "header is empty",
+        });
+    }
+
+    // `get(..len)` instead of slicing: a multibyte character straddling the
+    // prefix boundary must yield an error, never a panic (attacker-controlled).
+    let encoded = match value.get(..shape.prefix.len()) {
+        Some(prefix) if prefix == shape.prefix => &value[shape.prefix.len()..],
+        _ => {
+            return Err(VerifyError::MalformedHeader {
+                header,
+                reason: shape.missing_prefix_reason,
+            });
+        }
+    };
+
+    if encoded.is_empty() {
+        return Err(VerifyError::MalformedHeader {
+            header,
+            reason: shape.empty_after_prefix_reason,
+        });
+    }
+
+    decode_signature(header, encoded, shape.encoding, shape.expected_len)
 }
 
 /// Computes the lowercase hex SHA-256 digest of `bytes`.
@@ -694,9 +765,10 @@ pub(crate) fn check_rsa_pkcs1v15_sha256(
 #[cfg(test)]
 mod tests {
     use super::{
-        ED25519_KEY_LEN, ED25519_SIG_LEN, SignatureEncoding, decode_signature, is_all_nul_key,
-        signature_length_reason, verify_ed25519, verify_hmac_sha1, verify_hmac_sha256,
-        verify_hmac_sha256_any, verify_hmac_sha512,
+        ED25519_KEY_LEN, ED25519_SIG_LEN, PrefixedSignature, SignatureEncoding,
+        decode_prefixed_signature, decode_signature, is_all_nul_key, signature_length_reason,
+        verify_ed25519, verify_hmac_sha1, verify_hmac_sha256, verify_hmac_sha256_any,
+        verify_hmac_sha512,
     };
     use crate::core::error::VerifyError;
     #[cfg(not(feature = "std"))]
@@ -1010,6 +1082,75 @@ mod tests {
         let short = "00".repeat(20);
         assert_eq!(
             decode_signature("X-Sig", &short, SignatureEncoding::Hex, 32),
+            Err(VerifyError::BadEncoding {
+                reason: "signature does not decode to 32 bytes",
+            })
+        );
+    }
+
+    /// The prefixed decoder strips a well-formed prefix and then defers to the
+    /// canonical decoder for a hex or base64 digest of the expected length.
+    #[test]
+    fn decode_prefixed_signature_accepts_well_formed_values() {
+        let hex = "00".repeat(32);
+        assert_eq!(
+            decode_prefixed_signature(
+                "X-Sig",
+                &format!("sha256={hex}"),
+                PrefixedSignature {
+                    prefix: "sha256=",
+                    missing_prefix_reason: "missing `sha256=` prefix",
+                    empty_after_prefix_reason: "empty signature after `sha256=` prefix",
+                    encoding: SignatureEncoding::Hex,
+                    expected_len: 32,
+                },
+            ),
+            Ok(vec![0_u8; 32])
+        );
+    }
+
+    /// The prefixed decoder adds exactly two diagnoses on top of the canonical
+    /// mapping — an empty value, a missing prefix, and an empty digest — and
+    /// preserves the size-specific wrong-length wording.
+    #[test]
+    fn decode_prefixed_signature_preserves_the_error_mapping() {
+        let shape = PrefixedSignature {
+            prefix: "v0=",
+            missing_prefix_reason: "signature must start with the documented `v0=` scheme prefix",
+            empty_after_prefix_reason: "empty signature after `v0=` prefix",
+            encoding: SignatureEncoding::Hex,
+            expected_len: 32,
+        };
+        assert_eq!(
+            decode_prefixed_signature("X-Sig", "", shape),
+            Err(VerifyError::MalformedHeader {
+                header: "X-Sig",
+                reason: "header is empty",
+            })
+        );
+        assert_eq!(
+            decode_prefixed_signature("X-Sig", "sha256=00", shape),
+            Err(VerifyError::MalformedHeader {
+                header: "X-Sig",
+                reason: "signature must start with the documented `v0=` scheme prefix",
+            })
+        );
+        assert_eq!(
+            decode_prefixed_signature("X-Sig", "v0=", shape),
+            Err(VerifyError::MalformedHeader {
+                header: "X-Sig",
+                reason: "empty signature after `v0=` prefix",
+            })
+        );
+        assert_eq!(
+            decode_prefixed_signature("X-Sig", "v0=not hex!", shape),
+            Err(VerifyError::BadEncoding {
+                reason: "signature is not valid hexadecimal",
+            })
+        );
+        let short = format!("v0={}", "00".repeat(20));
+        assert_eq!(
+            decode_prefixed_signature("X-Sig", &short, shape),
             Err(VerifyError::BadEncoding {
                 reason: "signature does not decode to 32 bytes",
             })

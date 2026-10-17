@@ -26,7 +26,9 @@
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha256;
+use crate::core::crypto::{
+    PrefixedSignature, SignatureEncoding, decode_prefixed_signature, verify_hmac_sha256,
+};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::replay::{check_replay, parse_timestamp};
@@ -40,6 +42,9 @@ pub(crate) const TIMESTAMP_HEADER: &str = "x-zm-request-timestamp";
 
 /// The only signature scheme Zoom documents.
 const SCHEME: &str = "v0";
+
+/// The signed header's `v0=` prefix.
+const SIGNATURE_PREFIX: &str = "v0=";
 
 /// HMAC-SHA256 output length in bytes.
 const SIGNATURE_LEN_BYTES: usize = 32;
@@ -87,38 +92,17 @@ pub(crate) fn verify(
 /// Zoom documents exactly one scheme (`v0`); anything else is malformed
 /// rather than silently accepted, to prevent downgrade attacks.
 fn parse_signature(value: &str) -> Result<Vec<u8>, VerifyError> {
-    if value.is_empty() {
-        return Err(VerifyError::MalformedHeader {
-            header: SIGNATURE_HEADER,
-            reason: "header is empty",
-        });
-    }
-
-    let encoded = value
-        .strip_prefix(SCHEME)
-        .and_then(|rest| rest.strip_prefix('='))
-        .ok_or(VerifyError::MalformedHeader {
-            header: SIGNATURE_HEADER,
-            reason: "signature must start with the documented `v0=` scheme prefix",
-        })?;
-
-    if encoded.is_empty() {
-        return Err(VerifyError::MalformedHeader {
-            header: SIGNATURE_HEADER,
-            reason: "empty signature after `v0=` prefix",
-        });
-    }
-
-    let bytes = hex::decode(encoded).map_err(|_| VerifyError::BadEncoding {
-        reason: "signature is not valid hexadecimal",
-    })?;
-    if bytes.len() != SIGNATURE_LEN_BYTES {
-        return Err(VerifyError::BadEncoding {
-            reason: "signature does not decode to 32 bytes",
-        });
-    }
-
-    Ok(bytes)
+    decode_prefixed_signature(
+        SIGNATURE_HEADER,
+        value,
+        PrefixedSignature {
+            prefix: SIGNATURE_PREFIX,
+            missing_prefix_reason: "signature must start with the documented `v0=` scheme prefix",
+            empty_after_prefix_reason: "empty signature after `v0=` prefix",
+            encoding: SignatureEncoding::Hex,
+            expected_len: SIGNATURE_LEN_BYTES,
+        },
+    )
 }
 
 #[cfg(test)]
