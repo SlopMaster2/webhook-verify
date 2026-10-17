@@ -32,7 +32,9 @@
 use alloc::vec::Vec;
 
 use crate::core::VerifyOptions;
-use crate::core::crypto::verify_hmac_sha256;
+use crate::core::crypto::{
+    PrefixedSignature, SignatureEncoding, decode_prefixed_signature, verify_hmac_sha256,
+};
 use crate::core::error::VerifyError;
 use crate::core::headers::HeaderMap;
 use crate::core::replay::{check_replay, parse_rfc3339_timestamp};
@@ -48,7 +50,7 @@ pub(crate) const TIMESTAMP_HEADER: &str = "Twitch-Eventsub-Message-Timestamp";
 pub(crate) const SIGNATURE_HEADER: &str = "Twitch-Eventsub-Message-Signature";
 
 /// The only signature scheme Twitch documents.
-const SCHEME: &str = "sha256";
+const SIGNATURE_PREFIX: &str = "sha256=";
 
 /// HMAC-SHA256 output length in bytes.
 const SIGNATURE_LEN_BYTES: usize = 32;
@@ -112,38 +114,17 @@ pub(crate) fn verify(
 /// Twitch documents exactly one scheme (`sha256`); anything else is malformed
 /// rather than silently accepted, to prevent downgrade attacks.
 fn parse_signature(value: &str) -> Result<Vec<u8>, VerifyError> {
-    if value.is_empty() {
-        return Err(VerifyError::MalformedHeader {
-            header: SIGNATURE_HEADER,
-            reason: "header is empty",
-        });
-    }
-
-    let encoded = value
-        .strip_prefix(SCHEME)
-        .and_then(|rest| rest.strip_prefix('='))
-        .ok_or(VerifyError::MalformedHeader {
-            header: SIGNATURE_HEADER,
-            reason: "signature must start with the documented `sha256=` scheme prefix",
-        })?;
-
-    if encoded.is_empty() {
-        return Err(VerifyError::MalformedHeader {
-            header: SIGNATURE_HEADER,
-            reason: "empty signature after `sha256=` prefix",
-        });
-    }
-
-    let bytes = hex::decode(encoded).map_err(|_| VerifyError::BadEncoding {
-        reason: "signature is not valid hexadecimal",
-    })?;
-    if bytes.len() != SIGNATURE_LEN_BYTES {
-        return Err(VerifyError::BadEncoding {
-            reason: "signature does not decode to 32 bytes",
-        });
-    }
-
-    Ok(bytes)
+    decode_prefixed_signature(
+        SIGNATURE_HEADER,
+        value,
+        PrefixedSignature {
+            prefix: SIGNATURE_PREFIX,
+            missing_prefix_reason: "signature must start with the documented `sha256=` scheme prefix",
+            empty_after_prefix_reason: "empty signature after `sha256=` prefix",
+            encoding: SignatureEncoding::Hex,
+            expected_len: SIGNATURE_LEN_BYTES,
+        },
+    )
 }
 
 #[cfg(test)]
